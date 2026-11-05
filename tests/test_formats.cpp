@@ -204,6 +204,49 @@ void no_silent_quadratic_loss()
 }
 }
 
+
+void mixed_geometry_orders()
+{
+    idmesh::MeshBuilder builder(2,2);
+    for(auto p:std::array<std::array<double,3>,4>{{
+        {0,0,0},{1,0,0},{1,1,0},{0,1,0}
+    }}) builder.add_vertex(p);
+    const std::array<Index,3> lower{0,1,2}, upper{0,2,3};
+    builder.add_cell(idmesh::CellType::triangle,lower,5);
+    std::vector<Index> extra;
+    for (unsigned i=0;i<3;++i)
+        extra.push_back(builder.add_geometry_node({double(i),0.5,0}));
+    builder.add_quadratic_cell(idmesh::CellType::triangle,upper,extra,6);
+    auto mesh=std::move(builder).finalize();
+    mesh.validate();
+    check(mesh.cell_order(0)==1 && mesh.cell_order(1)==2,"mixed geometry orders");
+    check(mesh.cell_geometry_nodes(0).size()==3 &&
+          mesh.cell_geometry_nodes(1).size()==6,"mixed local geometry nodes");
+}
+void many_labels()
+{
+    idmesh::MeshBuilder builder(1,1);
+    constexpr Index n=5000;
+    for(Index i=0;i<=n;++i) builder.add_vertex({double(i),0,0});
+    for(Index i=0;i<n;++i) {
+        const std::array<Index,2> v{i,i+1};
+        auto c=builder.add_cell(idmesh::CellType::segment,v,100+int(i%5));
+        if (i%11==0) {
+            builder.add_cell_physical_tag(c,120);
+            builder.add_cell_physical_tag(c,120);
+        }
+    }
+    const auto mesh=std::move(builder).finalize(idmesh::TopologyOptions::cells_and_vertices());
+    check(mesh.physical_labels().size()==n+(n+10)/11,
+          "physical group deduplication or entity count");
+    for(Index c=0;c<n;++c) {
+        auto tags=mesh.physical_tags(1,c);
+        check(tags.size()==(c%11==0?2u:1u),"physical membership count");
+        check(tags.front()==100+int(c%5),"incorrect physical group at cell");
+        if(c%11==0) check(tags.back()==120,"second membership lost");
+    }
+}
+
 int main()
 {
     try {
@@ -213,6 +256,8 @@ int main()
         legacy_vtk_round_trip();
         medit_round_trip();
         no_silent_quadratic_loss();
+        mixed_geometry_orders();
+        many_labels();
         std::cout << "IDMesh high-order/IO tests passed\n";
         return 0;
     } catch (const std::exception& e) {

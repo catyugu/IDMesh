@@ -56,7 +56,9 @@ retains Gmsh ordering and is exposed by `cell_geometry_nodes`, `cell_order`
 and `geometry_node_position`. The supported node counts are line 3, triangle 6,
 quadrilateral 8/9, tetrahedron 10, hexahedron 20/27, prism 15/18 and pyramid
 13/14. Shared high-order Gmsh node tags map to the same geometry-node ID;
-high-order nodes do not increase the number of topological vertices. Geometry
+high-order nodes do not increase the number of topological vertices. Purely
+linear meshes reuse their existing cell-to-vertex arrays and allocate no
+separate geometry-connectivity CSR. Geometry
 interpolation and finite-element shape functions are responsibilities of the
 discretization layer.
 

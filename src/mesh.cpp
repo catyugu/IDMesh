@@ -5,6 +5,7 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace idmesh {
@@ -327,12 +328,17 @@ std::vector<int> Mesh::physical_tags(Index dim, Index entity) const
     if (!data_) throw std::logic_error("empty mesh");
     if (dim > data_->dimension || entity >= data_->counts[dim])
         throw std::out_of_range("physical entity index");
+    const auto key = std::pair{dim, entity};
+    const auto& labels = data_->physical_labels;
+    const auto first = std::lower_bound(labels.begin(), labels.end(), key,
+        [](const PhysicalLabel& label, const auto& value) {
+            return std::pair{label.dimension, label.entity} < value;
+        });
     std::vector<int> result;
-    for (const auto& label : data_->physical_labels) {
-        if (label.dimension == dim && label.entity == entity &&
-            std::find(result.begin(), result.end(), label.tag) == result.end())
-            result.push_back(label.tag);
-    }
+    for (auto it = first; it != labels.end() &&
+         std::pair{it->dimension, it->entity} == key; ++it)
+        if (result.empty() || result.back() != it->tag)
+            result.push_back(it->tag);
     return result;
 }
 
@@ -354,6 +360,9 @@ std::span<const Index> Mesh::cell_geometry_nodes(Index cell) const
 {
     if (!data_ || cell >= data_->cell_orders.size())
         throw std::out_of_range("cell geometry nodes");
+    // First-order geometry reuses the existing Cell-to-Vertex connectivity.
+    if (data_->cell_orders[cell] == 1)
+        return entity_vertices(data_->dimension, cell);
     const auto begin = data_->geometry_offsets[cell];
     const auto end = data_->geometry_offsets[cell + 1];
     return {data_->geometry_indices.data() + begin, end - begin};
@@ -494,18 +503,28 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
     data->extra_geometry_nodes = std::move(extra_geometry_nodes_);
     data->physical_names = std::move(physical_names_);
     data->vertices[dimension_] = std::move(cells_);
-    data->geometry_offsets.reserve(data->vertices[dimension_].size() + 1);
-    data->geometry_offsets.push_back(0);
-    for (Index c = 0; c < data->vertices[dimension_].size(); ++c) {
-        const auto& corners = data->vertices[dimension_][c];
-        data->geometry_indices.insert(data->geometry_indices.end(), corners.begin(), corners.end());
-        for (Index extra : cell_extra_nodes_[c]) {
-            const auto node = static_cast<std::size_t>(extra) + data->coordinates.size();
-            require(node < invalid_index, "geometry node index overflow");
-            data->geometry_indices.push_back(static_cast<Index>(node));
+    // No additional geometry-connectivity storage for purely linear meshes.
+    // In mixed meshes, only order-two cells own full geometry-node sequences.
+    if (std::any_of(data->cell_orders.begin(), data->cell_orders.end(),
+                    [](std::uint8_t order) { return order == 2; })) {
+        data->geometry_offsets.reserve(data->vertices[dimension_].size() + 1);
+        data->geometry_offsets.push_back(0);
+        for (Index c = 0; c < data->vertices[dimension_].size(); ++c) {
+            if (data->cell_orders[c] == 2) {
+                const auto& corners = data->vertices[dimension_][c];
+                data->geometry_indices.insert(
+                    data->geometry_indices.end(), corners.begin(), corners.end());
+                for (Index extra : cell_extra_nodes_[c]) {
+                    const auto node = static_cast<std::size_t>(extra) + data->coordinates.size();
+                    require(node < invalid_index, "geometry node index overflow");
+                    data->geometry_indices.push_back(static_cast<Index>(node));
+                }
+                require(data->geometry_indices.size() < invalid_index,
+                        "geometry connectivity overflow");
+            }
+            data->geometry_offsets.push_back(
+                static_cast<Index>(data->geometry_indices.size()));
         }
-        require(data->geometry_indices.size() < invalid_index, "geometry connectivity overflow");
-        data->geometry_offsets.push_back(static_cast<Index>(data->geometry_indices.size()));
     }
     data->vertices[0].reserve(data->coordinates.size());
     for (Index v = 0; v < data->coordinates.size(); ++v)
@@ -579,15 +598,8 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
     // with an invalid entity index.
     auto append_label = [&](Index dim, Index entity, std::span<const Index> vertices, int tag) {
         if (tag == 0) return;
-        auto& labels = data->physical_labels;
-        const auto found = std::find_if(labels.begin(), labels.end(), [&](const PhysicalLabel& v) {
-            return v.dimension == dim && v.entity == entity &&
-                   v.tag == tag && std::equal(v.vertices.begin(), v.vertices.end(),
-                                               vertices.begin(), vertices.end());
-        });
-        if (found == labels.end())
-            labels.push_back({dim, entity,
-                std::vector<Index>(vertices.begin(), vertices.end()), tag});
+        data->physical_labels.push_back({dim, entity,
+            std::vector<Index>(vertices.begin(), vertices.end()), tag});
     };
     for (Index cell = 0; cell < data->types.size(); ++cell)
         append_label(dimension_, cell, data->vertices[dimension_][cell], data->tags[cell]);
@@ -612,6 +624,18 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
         }
     }
 
+    // Build-time sort/unique is O(L log L) rather than repeated O(L) label
+    // lookups, where L can scale with the number of mesh cells.
+    auto& labels = data->physical_labels;
+    std::sort(labels.begin(), labels.end(), [](const PhysicalLabel& a, const PhysicalLabel& b) {
+        return std::tie(a.dimension, a.entity, a.tag, a.vertices) <
+               std::tie(b.dimension, b.entity, b.tag, b.vertices);
+    });
+    labels.erase(std::unique(labels.begin(), labels.end(),
+        [](const PhysicalLabel& a, const PhysicalLabel& b) {
+            return a.dimension == b.dimension && a.entity == b.entity &&
+                   a.tag == b.tag && a.vertices == b.vertices;
+        }), labels.end());
     for (Index from = 1; from <= dimension_; ++from) {
         for (Index to = 0; to < from; ++to) {
             auto& rows = incidence[from][to];
@@ -646,18 +670,27 @@ void Mesh::validate() const
     if (!data_->facet_tags.empty() &&
         data_->facet_tags.size() != data_->counts[data_->dimension - 1])
         throw std::logic_error("facet physical-tag size mismatch");
-    if (data_->cell_orders.size() != data_->counts[data_->dimension] ||
-        data_->geometry_offsets.size() != data_->cell_orders.size() + 1 ||
-        data_->geometry_offsets.front() != 0 ||
-        data_->geometry_offsets.back() != data_->geometry_indices.size() ||
-        !std::is_sorted(data_->geometry_offsets.begin(), data_->geometry_offsets.end()))
-        throw std::logic_error("invalid geometry connectivity");
-    for (Index c = 0; c < data_->cell_orders.size(); ++c) {
-        const auto n = data_->geometry_offsets[c + 1] - data_->geometry_offsets[c];
-        if (n < cell_vertex_count(data_->types[c]) ||
-            (data_->cell_orders[c] == 1 && n != cell_vertex_count(data_->types[c])) ||
-            (data_->cell_orders[c] != 1 && data_->cell_orders[c] != 2))
-            throw std::logic_error("invalid cell geometry order");
+    if (data_->cell_orders.size() != data_->counts[data_->dimension])
+        throw std::logic_error("invalid cell geometry count");
+    if (data_->geometry_offsets.empty()) {
+        if (!data_->geometry_indices.empty() ||
+            std::any_of(data_->cell_orders.begin(), data_->cell_orders.end(),
+                        [](std::uint8_t order) { return order != 1; }))
+            throw std::logic_error("missing high-order geometry connectivity");
+    } else {
+        if (data_->geometry_offsets.size() != data_->cell_orders.size() + 1 ||
+            data_->geometry_offsets.front() != 0 ||
+            data_->geometry_offsets.back() != data_->geometry_indices.size() ||
+            !std::is_sorted(data_->geometry_offsets.begin(), data_->geometry_offsets.end()))
+            throw std::logic_error("invalid geometry CSR offsets");
+        for (Index c = 0; c < data_->cell_orders.size(); ++c) {
+            const auto n = data_->geometry_offsets[c + 1] - data_->geometry_offsets[c];
+            if ((data_->cell_orders[c] == 1 && n != 0) ||
+                (data_->cell_orders[c] == 2 &&
+                    n <= cell_vertex_count(data_->types[c])) ||
+                (data_->cell_orders[c] != 1 && data_->cell_orders[c] != 2))
+                throw std::logic_error("invalid cell geometry order");
+        }
     }
     for (Index node : data_->geometry_indices)
         if (node >= geometry_node_count()) throw std::logic_error("invalid geometry node ID");
