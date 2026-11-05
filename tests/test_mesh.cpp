@@ -102,6 +102,24 @@ void test_gmsh()
     std::filesystem::remove(path);
 }
 
+
+void test_gmsh_v41()
+{
+    auto path = std::filesystem::temp_directory_path() / "idmesh-test-4.1.msh";
+    {
+        std::ofstream out(path);
+        out << "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n"
+            << "$Entities\n0 0 1 0\n1 0 0 0 1 1 0 1 23 0\n$EndEntities\n"
+            << "$Nodes\n1 3 1 3\n2 1 0 3\n1 2 3\n"
+            << "0 0 0\n1 0 0\n0 1 0\n$EndNodes\n"
+            << "$Elements\n1 1 1 1\n2 1 2 1\n1 1 2 3\n$EndElements\n";
+    }
+    auto mesh = idmesh::read_gmsh(path.string());
+    check(mesh.dimension() == 2 && mesh.entity_count(2) == 1, "Gmsh v4 load failed");
+    check(mesh.cell_tags()[0] == 23, "Gmsh v4 physical tag lost");
+    std::filesystem::remove(path);
+}
+
 void test_invalid()
 {
     idmesh::MeshBuilder builder(2, 2);
@@ -122,6 +140,7 @@ int main()
         test_shared_orientations();
         test_finite_volume();
         test_gmsh();
+        test_gmsh_v41();
         test_invalid();
         std::cout << "IDMesh topology tests passed\n";
         return 0;
