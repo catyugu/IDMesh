@@ -152,3 +152,6 @@ Real-device validation is provided by the manually dispatched
 GPU runner label and matching architecture in the Actions UI; no standard
 GitHub-hosted runner is assumed to contain a GPU. CUDA/HIP verification
 remains unverified until a run on actual hardware succeeds.
+
+See [verification and known limits](docs/validation.md) for the current
+CPU/MPI test matrix and the unverified CUDA/HIP hardware acceptance gate.
