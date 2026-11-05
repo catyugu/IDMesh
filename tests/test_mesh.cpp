@@ -1,4 +1,5 @@
 #include "idmesh/mesh.hpp"
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -149,7 +150,8 @@ void test_facet_physical_tags()
     check(mesh.facet_tags().size() == 3, "facet physical tags not materialized");
     bool found = false;
     for (idmesh::Index f=0; f<mesh.entity_count(1); ++f) {
-        if (mesh.entity_vertices(1,f) == std::span<const idmesh::Index>(edge)) {
+        if (std::equal(mesh.entity_vertices(1,f).begin(), mesh.entity_vertices(1,f).end(),
+                       edge.begin(), edge.end())) {
             check(mesh.facet_tag(f) == 23, "boundary facet tag lost");
             found = true;
         }

@@ -135,6 +135,12 @@ struct Mesh::Data {
     std::vector<CellType> types;
     std::vector<int> tags;
     std::vector<int> facet_tags;
+    std::vector<PhysicalLabel> physical_labels;
+    std::map<std::pair<Index, int>, std::string> physical_names;
+    std::vector<std::array<double, 3>> extra_geometry_nodes;
+    std::vector<Index> geometry_offsets;
+    std::vector<Index> geometry_indices;
+    std::vector<std::uint8_t> cell_orders;
 };
 
 namespace {
@@ -310,6 +316,65 @@ int Mesh::facet_tag(Index facet) const
     return data_->facet_tags.empty() ? 0 : data_->facet_tags[facet];
 }
 
+std::span<const PhysicalLabel> Mesh::physical_labels() const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    return data_->physical_labels;
+}
+
+std::vector<int> Mesh::physical_tags(Index dim, Index entity) const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    if (dim > data_->dimension || entity >= data_->counts[dim])
+        throw std::out_of_range("physical entity index");
+    std::vector<int> result;
+    for (const auto& label : data_->physical_labels) {
+        if (label.dimension == dim && label.entity == entity &&
+            std::find(result.begin(), result.end(), label.tag) == result.end())
+            result.push_back(label.tag);
+    }
+    return result;
+}
+
+std::string Mesh::physical_name(Index dim, int tag) const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    const auto found = data_->physical_names.find({dim, tag});
+    return found == data_->physical_names.end() ? std::string{} : found->second;
+}
+
+std::uint8_t Mesh::cell_order(Index cell) const
+{
+    if (!data_ || cell >= data_->cell_orders.size())
+        throw std::out_of_range("cell order");
+    return data_->cell_orders[cell];
+}
+
+std::span<const Index> Mesh::cell_geometry_nodes(Index cell) const
+{
+    if (!data_ || cell >= data_->cell_orders.size())
+        throw std::out_of_range("cell geometry nodes");
+    const auto begin = data_->geometry_offsets[cell];
+    const auto end = data_->geometry_offsets[cell + 1];
+    return {data_->geometry_indices.data() + begin, end - begin};
+}
+
+std::array<double, 3> Mesh::geometry_node_position(Index node) const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    if (node < data_->coordinates.size()) return data_->coordinates[node];
+    const auto extra = static_cast<std::size_t>(node) - data_->coordinates.size();
+    if (extra >= data_->extra_geometry_nodes.size())
+        throw std::out_of_range("geometry node index");
+    return data_->extra_geometry_nodes[extra];
+}
+
+Index Mesh::geometry_node_count() const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    return static_cast<Index>(data_->coordinates.size() + data_->extra_geometry_nodes.size());
+}
+
 MeshBuilder::MeshBuilder(Index dimension, Index geometric_dimension)
     : dimension_(dimension), geometric_dimension_(geometric_dimension)
 {
@@ -338,21 +403,79 @@ Index MeshBuilder::add_cell(CellType type, std::span<const Index> vertices, int 
     cells_.push_back(std::move(ordered));
     types_.push_back(type);
     tags_.push_back(tag);
+    cell_orders_.push_back(1);
+    cell_extra_nodes_.emplace_back();
     return static_cast<Index>(cells_.size() - 1);
+}
+
+Index MeshBuilder::add_geometry_node(std::array<double, 3> position)
+{
+    for (double coordinate : position)
+        require(std::isfinite(coordinate), "nonfinite geometry node coordinate");
+    require(extra_geometry_nodes_.size() < invalid_index, "too many geometry nodes");
+    extra_geometry_nodes_.push_back(position);
+    return static_cast<Index>(extra_geometry_nodes_.size() - 1);
+}
+
+Index MeshBuilder::add_quadratic_cell(
+    CellType type, std::span<const Index> vertices,
+    std::span<const Index> extra_nodes, int tag)
+{
+    const auto count = vertices.size() + extra_nodes.size();
+    bool valid = false;
+    switch (type) {
+    case CellType::segment: valid = count == 3; break;
+    case CellType::triangle: valid = count == 6; break;
+    case CellType::quadrilateral: valid = count == 8 || count == 9; break;
+    case CellType::tetrahedron: valid = count == 10; break;
+    case CellType::hexahedron: valid = count == 20 || count == 27; break;
+    case CellType::prism: valid = count == 15 || count == 18; break;
+    case CellType::pyramid: valid = count == 13 || count == 14; break;
+    }
+    require(valid && vertices.size() == cell_vertex_count(type),
+            "unsupported quadratic geometry node count");
+    for (Index index : extra_nodes)
+        require(index < extra_geometry_nodes_.size(), "invalid extra geometry node");
+    const Index cell = add_cell(type, vertices, tag);
+    cell_orders_[cell] = 2;
+    cell_extra_nodes_[cell].assign(extra_nodes.begin(), extra_nodes.end());
+    return cell;
+}
+
+void MeshBuilder::add_cell_physical_tag(Index cell, int tag)
+{
+    require(cell < cells_.size(), "invalid cell for physical label");
+    if (tag != 0) cell_physical_tags_.emplace_back(cell, tag);
+}
+
+void MeshBuilder::add_physical_tag(
+    Index dimension, std::span<const Index> vertices, int tag)
+{
+    require(dimension < dimension_, "use add_cell_physical_tag for cell labels");
+    const bool arity = dimension == 0 ? vertices.size() == 1
+        : dimension == 1 ? vertices.size() == 2
+        : vertices.size() == 3 || vertices.size() == 4;
+    require(arity, "invalid physical entity arity");
+    for (Index vertex : vertices)
+        require(vertex < coordinates_.size(), "invalid physical entity vertex");
+    std::vector<Index> sorted(vertices.begin(), vertices.end());
+    std::sort(sorted.begin(), sorted.end());
+    require(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(),
+            "duplicate physical entity vertex");
+    if (tag != 0)
+        physical_assignments_.push_back({dimension,
+            std::vector<Index>(vertices.begin(), vertices.end()), tag});
 }
 
 void MeshBuilder::add_facet_tag(std::span<const Index> vertices, int tag)
 {
-    const auto arity = dimension_ == 3 ? vertices.size() == 3 || vertices.size() == 4
-                      : vertices.size() == 1 + (dimension_ == 2);
-    require(arity, "invalid facet arity");
-    std::vector<Index> ids(vertices.begin(), vertices.end());
-    for (auto index : ids) require(index < coordinates_.size(), "invalid facet vertex");
-    auto sorted = ids;
-    std::sort(sorted.begin(), sorted.end());
-    require(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(),
-            "repeated facet vertex");
-    if (tag != 0) facet_assignments_.emplace_back(std::move(ids), tag);
+    add_physical_tag(dimension_ - 1, vertices, tag);
+}
+
+void MeshBuilder::set_physical_name(Index dimension, int tag, std::string name)
+{
+    require(dimension <= dimension_, "physical name dimension out of range");
+    physical_names_[{dimension, tag}] = std::move(name);
 }
 
 Mesh MeshBuilder::finalize(TopologyOptions options) &&
@@ -367,7 +490,23 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
     data->coordinates = std::move(coordinates_);
     data->types = std::move(types_);
     data->tags = std::move(tags_);
+    data->cell_orders = std::move(cell_orders_);
+    data->extra_geometry_nodes = std::move(extra_geometry_nodes_);
+    data->physical_names = std::move(physical_names_);
     data->vertices[dimension_] = std::move(cells_);
+    data->geometry_offsets.reserve(data->vertices[dimension_].size() + 1);
+    data->geometry_offsets.push_back(0);
+    for (Index c = 0; c < data->vertices[dimension_].size(); ++c) {
+        const auto& corners = data->vertices[dimension_][c];
+        data->geometry_indices.insert(data->geometry_indices.end(), corners.begin(), corners.end());
+        for (Index extra : cell_extra_nodes_[c]) {
+            const auto node = static_cast<std::size_t>(extra) + data->coordinates.size();
+            require(node < invalid_index, "geometry node index overflow");
+            data->geometry_indices.push_back(static_cast<Index>(node));
+        }
+        require(data->geometry_indices.size() < invalid_index, "geometry connectivity overflow");
+        data->geometry_offsets.push_back(static_cast<Index>(data->geometry_indices.size()));
+    }
     data->vertices[0].reserve(data->coordinates.size());
     for (Index v = 0; v < data->coordinates.size(); ++v)
         data->vertices[0].push_back({v});
@@ -435,25 +574,44 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
         }
     }
 
-    if (!facet_assignments_.empty()) {
-        require(want(dimension_ - 1), "facet tags require materialized facets");
-        data->facet_tags.resize(data->vertices[dimension_ - 1].size(), 0);
-        for (const auto& [vertices, tag] : facet_assignments_) {
-            Index facet = invalid_index;
-            if (dimension_ == 1) {
-                facet = vertices.front();
-            } else {
-                const auto key = canonicalize(vertices);
-                const auto found = lookup[dimension_ - 1].find(key.vertices);
-                require(found != lookup[dimension_ - 1].end(),
-                        "facet tag refers to an absent facet");
-                facet = found->second;
-            }
-            auto& previous = data->facet_tags[facet];
-            require(previous == 0 || previous == tag, "conflicting facet physical tags");
-            previous = tag;
+    // Sparse physical group membership is independent of optional topology
+    // materialization. Labels for an omitted dimension retain their vertex key
+    // with an invalid entity index.
+    auto append_label = [&](Index dim, Index entity, std::span<const Index> vertices, int tag) {
+        if (tag == 0) return;
+        auto& labels = data->physical_labels;
+        const auto found = std::find_if(labels.begin(), labels.end(), [&](const PhysicalLabel& v) {
+            return v.dimension == dim && v.entity == entity &&
+                   v.tag == tag && std::equal(v.vertices.begin(), v.vertices.end(),
+                                               vertices.begin(), vertices.end());
+        });
+        if (found == labels.end())
+            labels.push_back({dim, entity,
+                std::vector<Index>(vertices.begin(), vertices.end()), tag});
+    };
+    for (Index cell = 0; cell < data->types.size(); ++cell)
+        append_label(dimension_, cell, data->vertices[dimension_][cell], data->tags[cell]);
+    for (const auto& [cell, tag] : cell_physical_tags_)
+        append_label(dimension_, cell, data->vertices[dimension_][cell], tag);
+    for (const auto& assignment : physical_assignments_) {
+        const Index dim = assignment.dimension;
+        const auto key = canonicalize(assignment.vertices);
+        Index entity = invalid_index;
+        if (dim == 0) {
+            entity = assignment.vertices.front();
+        } else if (want(dim)) {
+            const auto found = lookup[dim].find(key.vertices);
+            if (found != lookup[dim].end()) entity = found->second;
+        }
+        append_label(dim, entity, key.vertices, assignment.tag);
+        if (dim == dimension_ - 1 && entity != invalid_index) {
+            if (data->facet_tags.empty())
+                data->facet_tags.resize(data->vertices[dim].size());
+            if (data->facet_tags[entity] == 0)
+                data->facet_tags[entity] = assignment.tag;
         }
     }
+
     for (Index from = 1; from <= dimension_; ++from) {
         for (Index to = 0; to < from; ++to) {
             auto& rows = incidence[from][to];
@@ -488,6 +646,25 @@ void Mesh::validate() const
     if (!data_->facet_tags.empty() &&
         data_->facet_tags.size() != data_->counts[data_->dimension - 1])
         throw std::logic_error("facet physical-tag size mismatch");
+    if (data_->cell_orders.size() != data_->counts[data_->dimension] ||
+        data_->geometry_offsets.size() != data_->cell_orders.size() + 1 ||
+        data_->geometry_offsets.front() != 0 ||
+        data_->geometry_offsets.back() != data_->geometry_indices.size() ||
+        !std::is_sorted(data_->geometry_offsets.begin(), data_->geometry_offsets.end()))
+        throw std::logic_error("invalid geometry connectivity");
+    for (Index c = 0; c < data_->cell_orders.size(); ++c) {
+        const auto n = data_->geometry_offsets[c + 1] - data_->geometry_offsets[c];
+        if (n < cell_vertex_count(data_->types[c]) ||
+            (data_->cell_orders[c] == 1 && n != cell_vertex_count(data_->types[c])) ||
+            (data_->cell_orders[c] != 1 && data_->cell_orders[c] != 2))
+            throw std::logic_error("invalid cell geometry order");
+    }
+    for (Index node : data_->geometry_indices)
+        if (node >= geometry_node_count()) throw std::logic_error("invalid geometry node ID");
+    for (const auto& label : data_->physical_labels)
+        if (label.dimension > data_->dimension ||
+            (label.entity != invalid_index && label.entity >= data_->counts[label.dimension]))
+            throw std::logic_error("invalid physical label entity");
     for (Index from = 1; from <= data_->dimension; ++from) {
         for (Index to = 0; to < from; ++to) {
             if (!has_relation(from, to)) continue;

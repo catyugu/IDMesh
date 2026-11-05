@@ -15,7 +15,7 @@ option(IDMESH_BUILD_BENCHMARKS "Build development-only performance benchmarks" $
 option(IDMESH_ENABLE_KOKKOS "Build optional CPU Kokkos backend" OFF)
 option(IDMESH_INSTALL "Install IDMesh SDK" ${PROJECT_IS_TOP_LEVEL})
 
-add_library(idmesh src/mesh.cpp src/gmsh.cpp)
+add_library(idmesh src/mesh.cpp src/gmsh.cpp src/vtk.cpp src/medit.cpp)
 add_library(IDMesh::IDMesh ALIAS idmesh)
 target_compile_features(idmesh PUBLIC cxx_std_20)
 target_include_directories(idmesh PUBLIC
@@ -58,6 +58,9 @@ if(IDMESH_BUILD_TESTS)
     add_executable(idmesh_contracts_test tests/test_contracts.cpp)
     target_link_libraries(idmesh_contracts_test PRIVATE idmesh)
     add_test(NAME idmesh.contracts COMMAND idmesh_contracts_test)
+    add_executable(idmesh_formats_test tests/test_formats.cpp)
+    target_link_libraries(idmesh_formats_test PRIVATE idmesh)
+    add_test(NAME idmesh.formats COMMAND idmesh_formats_test)
     if(IDMESH_ENABLE_KOKKOS)
         add_executable(idmesh_kokkos_test tests/test_kokkos.cpp)
         target_link_libraries(idmesh_kokkos_test PRIVATE idmesh_kokkos Kokkos::kokkos)

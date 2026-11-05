@@ -39,3 +39,27 @@ cmake --build build --config Release
 ```
 
 CSV columns report construction time, cell-to-vertex traversal time, materialized relation bytes, and a traversal checksum for minimal, finite-volume and full configurations. This is a baseline rather than a statistically rigorous performance harness: run repeated trials in an isolated release build before drawing performance conclusions.
+
+## Geometry order and additional formats
+
+The topology is always defined by corner vertices. Quadratic interpolation
+nodes (line3, tri6, quad8/9, tet10, hex20/27, prism15/18, pyramid13/14)
+are stored separately and can be inspected with
+`cell_order`, `cell_geometry_nodes` and `geometry_node_position`.
+Gmsh MSH2/MSH4 ASCII import retains them, including shared geometry nodes.
+
+Physical groups from **all** dimensions are accessible via
+`physical_labels()`; labels on omitted topology layers keep their canonical
+vertex keys and `entity == invalid_index`. Gmsh 4.1 permits multiple physical
+groups per entity and preserves group names via `physical_name`. Legacy
+`cell_tags()` and `facet_tag()` expose one primary label for compatibility.
+
+Additional formats:
+- `read_vtk_legacy` / `write_vtk_legacy`: VTK ASCII legacy UNSTRUCTURED_GRID,
+  first-order cells and `physical_tag` cell attributes.
+- `read_medit` / `write_medit`: Medit ASCII `.mesh` first-order cells and
+  integer region references.
+
+VTK/Medit writers reject quadratic cells and multiple physical groups on one
+top-dimensional cell, as those writer variants cannot preserve this information.
+Use Gmsh for round-tripping quadratic geometry and multi-group metadata.

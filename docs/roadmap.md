@@ -21,3 +21,10 @@
 
 ## Non-goals
 AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solvers and partition-aware finite-element assembly.
+
+## Extended IO and geometry (in progress)
+- [x] Retain physical group memberships and names from all Gmsh dimensions.
+- [x] Represent quadratic Gmsh geometry nodes separately from topological vertices.
+- [x] Add VTK legacy ASCII and Medit ASCII first-order readers and writers.
+- [ ] Verify high-order and cross-format round-trips on all supported platforms.
+- [ ] Provide native high-order VTK and native high-order Medit I/O adapters.

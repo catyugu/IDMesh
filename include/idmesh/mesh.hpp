@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <span>
 #include <string>
 #include <utility>
@@ -55,6 +56,15 @@ struct Incidence {
     Orientation orientation {};
 };
 
+// Physical group membership survives even when its entity dimension is omitted.
+// An invalid entity ID identifies a vertex-keyed, unmaterialized physical element.
+struct PhysicalLabel {
+    Index dimension = 0;
+    Index entity = invalid_index;
+    std::vector<Index> vertices;
+    int tag = 0;
+};
+
 struct RelationView {
     std::span<const Index> offsets;
     std::span<const Index> indices;
@@ -84,6 +94,16 @@ public:
     // Sparse optional physical tags, indexed by facet ID; empty if untagged.
     std::span<const int> facet_tags() const;
     int facet_tag(Index facet) const;
+    std::span<const PhysicalLabel> physical_labels() const;
+    std::vector<int> physical_tags(Index dimension, Index entity) const;
+    std::string physical_name(Index dimension, int tag) const;
+
+    // Geometry node IDs are separate from topological vertex IDs:
+    // 0..num_vertices-1 are corners, following IDs are higher-order nodes.
+    std::uint8_t cell_order(Index cell) const;
+    std::span<const Index> cell_geometry_nodes(Index cell) const;
+    std::array<double, 3> geometry_node_position(Index node) const;
+    Index geometry_node_count() const;
     void validate() const;
 
 private:
@@ -98,7 +118,14 @@ public:
     MeshBuilder(Index dimension, Index geometric_dimension);
     Index add_vertex(std::array<double, 3> position);
     Index add_cell(CellType type, std::span<const Index> vertices, int tag = 0);
+    // Returns an index in the *extra* geometry-node pool, not a vertex ID.
+    Index add_geometry_node(std::array<double, 3> position);
+    Index add_quadratic_cell(CellType type, std::span<const Index> vertices,
+                             std::span<const Index> extra_nodes, int tag = 0);
+    void add_cell_physical_tag(Index cell, int tag);
+    void add_physical_tag(Index dimension, std::span<const Index> vertices, int tag);
     void add_facet_tag(std::span<const Index> vertices, int tag);
+    void set_physical_name(Index dimension, int tag, std::string name);
     Mesh finalize(TopologyOptions options = TopologyOptions::full()) &&;
 
 private:
@@ -108,11 +135,29 @@ private:
     std::vector<CellType> types_;
     std::vector<std::vector<Index>> cells_;
     std::vector<int> tags_;
-    std::vector<std::pair<std::vector<Index>, int>> facet_assignments_;
+    std::vector<std::array<double, 3>> extra_geometry_nodes_;
+    std::vector<std::vector<Index>> cell_extra_nodes_;
+    std::vector<std::uint8_t> cell_orders_;
+    struct PhysicalAssignment {
+        Index dimension;
+        std::vector<Index> vertices;
+        int tag;
+    };
+    std::vector<PhysicalAssignment> physical_assignments_;
+    std::vector<std::pair<Index, int>> cell_physical_tags_;
+    std::map<std::pair<Index, int>, std::string> physical_names_;
 };
 
 // Gmsh first-order ASCII MSH 2.2 / 4.1; higher-order elements are rejected.
 IDMESH_API Mesh read_gmsh(const std::string& filename, TopologyOptions options = TopologyOptions::full());
+// ASCII legacy VTK UNSTRUCTURED_GRID, linear cells and physical_tag attribute.
+IDMESH_API Mesh read_vtk_legacy(const std::string& filename,
+    TopologyOptions options = TopologyOptions::full());
+IDMESH_API void write_vtk_legacy(const Mesh& mesh, const std::string& filename);
+// ASCII Medit .mesh, first-order element sections and integer references.
+IDMESH_API Mesh read_medit(const std::string& filename,
+    TopologyOptions options = TopologyOptions::full());
+IDMESH_API void write_medit(const Mesh& mesh, const std::string& filename);
 IDMESH_API Index cell_dimension(CellType type);
 IDMESH_API Index cell_vertex_count(CellType type);
 // Local vertex indices of the oriented reference-cell facet.

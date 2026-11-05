@@ -33,3 +33,45 @@ This milestone excludes runtime topology modification, arbitrary polyhedra, high
 ## Verification
 
 Tests must cover all seven reference cells, rotated/reversed local facet orders, mixed adjacent cells, entity omission and explicit relation selection, boundary-of-boundary identities, imported Gmsh v2/v4 ASCII meshes, malformed inputs, installed-package consumption and CPU Kokkos execution.
+
+## Physical groups on every entity dimension
+
+Physical labels are independent of the optional entity materialization mask.
+Each `PhysicalLabel` carries a dimension, membership tag, canonical corner
+vertex key and a linked local entity ID when available. If the entity dimension
+was omitted (or the labeled element does not occur in the top-dimensional
+complex), the link is `invalid_index` but the label survives. One entity can
+belong to multiple groups. `Mesh::physical_tags(d, id)` returns all memberships
+for an existing entity; `Mesh::physical_labels()` enumerates the complete
+record set. Gmsh 4.1 entity multi-membership and `$PhysicalNames` are preserved.
+`cell_tags()` and `facet_tag()` remain compatibility accessors for the first
+physical tag only.
+
+## Second-order geometry
+
+The seven first-order reference topologies remain the topological entities.
+`MeshBuilder::add_quadratic_cell` accepts interpolation nodes beyond corner
+vertices via a separate geometry-node pool. Cell-local geometry connectivity
+retains Gmsh ordering and is exposed by `cell_geometry_nodes`, `cell_order`
+and `geometry_node_position`. The supported node counts are line 3, triangle 6,
+quadrilateral 8/9, tetrahedron 10, hexahedron 20/27, prism 15/18 and pyramid
+13/14. Shared high-order Gmsh node tags map to the same geometry-node ID;
+high-order nodes do not increase the number of topological vertices. Geometry
+interpolation and finite-element shape functions are responsibilities of the
+discretization layer.
+
+## IO capabilities and limitations
+
+- Gmsh MSH 2.2/4.1 ASCII: first- and second-order standard cells, physical
+  memberships for dimensions 0 through d, physical names, and geometry nodes.
+- VTK legacy ASCII `UNSTRUCTURED_GRID`: import/export for seven linear cell
+  types, optional lower-dimensional labeled elements, integer `physical_tag`
+  scalar arrays. Other VTK variants and quadratic cells require separate
+  ordering adapters.
+- Medit ASCII `.mesh`: import/export for seven linear cell types, vertex
+  references and lower-dimensional labeled elements. Binary `.meshb` and
+  high-order Medit sections are outside the present implementation.
+- Formats with one integer reference per element cannot express multiple
+  physical memberships on a top-dimensional element. Writers reject such
+  cases instead of silently dropping labels. Neither VTK nor Medit writer
+  silently discards high-order geometry; both reject order-two input.
