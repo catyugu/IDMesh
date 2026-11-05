@@ -5,6 +5,7 @@
 #include <climits>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -28,7 +29,7 @@ namespace idmesh::mpi::kokkos {
         Kokkos::View<T*, Memory> copy_to_device(
             const char* label, const std::vector<T>& values)
         {
-            Kokkos::View<T*, Memory> device(label, values.size());
+            Kokkos::View<T*, Memory> device(std::string(label), values.size());
             auto host = Kokkos::create_mirror_view(device);
             for (std::size_t i = 0; i < values.size(); ++i)
                 host(i) = values[i];

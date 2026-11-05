@@ -253,7 +253,7 @@ namespace idmesh::kokkos {
 
         const auto create_index_view = [](const char* name,
                                            std::span<const Index> values) {
-            Kokkos::View<Index*, MemorySpace> device(name, values.size());
+            Kokkos::View<Index*, MemorySpace> device(std::string(name), values.size());
             auto host = Kokkos::create_mirror_view(device);
             for (std::size_t i = 0; i < values.size(); ++i)
                 host(i) = values[i];
