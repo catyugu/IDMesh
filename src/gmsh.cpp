@@ -43,13 +43,22 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
     std::map<std::uint64_t, std::array<double, 3>> nodes;
     std::vector<Element> elements;
     std::map<std::pair<unsigned, std::uint64_t>, int> physical_tags;
+    bool seen_format = false, seen_nodes = false, seen_elements = false;
+    const auto expect_end = [&](const char* expected) {
+        std::string marker;
+        require(static_cast<bool>(in >> marker) && marker == expected,
+            "missing or invalid Gmsh section terminator");
+    };
     while (in >> section) {
         if (section == "$MeshFormat") {
+            require(!seen_format, "duplicate Gmsh MeshFormat");
+            seen_format = true;
             unsigned file_type = 0, data_size = 0;
             in >> version >> file_type >> data_size;
             require(in.good() && file_type == 0
                     && ((version >= 2.2 && version < 2.3) || (version >= 4.1 && version < 4.2)),
                 "only ASCII Gmsh 2.2 and 4.1 are supported");
+            expect_end("$EndMeshFormat");
         } else if (section == "$Entities") {
             require(version >= 4.1, "unexpected Entities section");
             std::uint64_t counts[4] {};
@@ -75,8 +84,10 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
                     }
                 }
             }
+            expect_end("$EndEntities");
         } else if (section == "$Nodes") {
-            require(version != 0, "missing MeshFormat");
+            require(version != 0 && !seen_nodes, "missing format or duplicate Nodes");
+            seen_nodes = true;
             if (version < 4) {
                 std::uint64_t count;
                 in >> count;
@@ -106,8 +117,10 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
                 }
                 require(nodes.size() == total, "Gmsh node count mismatch");
             }
+            expect_end("$EndNodes");
         } else if (section == "$Elements") {
-            require(version != 0, "missing MeshFormat");
+            require(version != 0 && !seen_elements, "missing format or duplicate Elements");
+            seen_elements = true;
             if (version < 4) {
                 std::uint64_t count;
                 in >> count;
@@ -159,7 +172,37 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
                     }
                 }
             }
-        } else if (!section.empty() && section[0] == '$' && section.rfind("$End", 0) != 0) {
+            expect_end("$EndElements");
+        } else if (!section.empty() && section[0] == '
+            const std::string end = "$End" + section.substr(1);
+            std::string line;
+            std::getline(in, line);
+            while (std::getline(in, line) && line != end) {}
+            require(line == end, "unterminated Gmsh section");
+        }
+        require(!in.bad(), "Gmsh read failure");
+    }
+    require(seen_format && seen_nodes && seen_elements, "missing required Gmsh section");
+    require(!nodes.empty() && !elements.empty(), "empty Gmsh mesh");
+    Index dimension = 0;
+    for (const auto& element : elements) dimension = std::max(dimension, cell_dimension(element.type));
+    MeshBuilder builder(dimension, 3);
+    std::map<std::uint64_t, Index> local;
+    for (const auto& [tag, xyz] : nodes) local.emplace(tag, builder.add_vertex(xyz));
+    for (const auto& element : elements) {
+        if (cell_dimension(element.type) != dimension) continue;
+        std::vector<Index> vertices;
+        for (auto tag : element.nodes) {
+            const auto it = local.find(tag);
+            require(it != local.end(), "element refers to unknown vertex");
+            vertices.push_back(it->second);
+        }
+        builder.add_cell(element.type, vertices, element.physical);
+    }
+    return std::move(builder).finalize(options);
+}
+} // namespace idmesh
+ && section.rfind("$End", 0) != 0) {
             const std::string end = "$End" + section.substr(1);
             std::string line;
             std::getline(in, line);

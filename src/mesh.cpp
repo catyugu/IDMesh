@@ -28,7 +28,8 @@ Canonical canonicalize(std::span<const Index> local)
     Canonical result;
     if (local.size() == 2) {
         result.vertices = {std::min(local[0], local[1]), std::max(local[0], local[1])};
-        result.orientation = {0, local[0] > local[1]};
+        const bool reversed = local[0] > local[1];
+        result.orientation = {static_cast<std::uint16_t>(reversed ? 1 : 0), reversed};
         return result;
     }
     for (std::size_t r = 0; r < local.size(); ++r) {
@@ -140,6 +141,7 @@ struct Mesh::Data {
     // Mutable construction scratch, released before publication.
     std::array<std::vector<Loop>, 4> vertices;
     std::array<Index, 4> counts {};
+    std::array<bool, 4> enabled {};
     std::array<std::vector<Index>, 4> vertex_offsets;
     std::array<std::vector<Index>, 4> vertex_indices;
     std::array<std::array<RelationData, 4>, 4> relations;
@@ -202,21 +204,21 @@ std::span<const Orientation> RelationView::row_orientations(Index index) const
 
 Mesh::Mesh() = default;
 Mesh::Mesh(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
-Index Mesh::dimension() const { return data_->dimension; }
-Index Mesh::geometric_dimension() const { return data_->geometric_dimension; }
+Index Mesh::dimension() const { if (!data_) throw std::logic_error("empty mesh"); return data_->dimension; }
+Index Mesh::geometric_dimension() const { if (!data_) throw std::logic_error("empty mesh"); return data_->geometric_dimension; }
 Index Mesh::entity_count(Index dimension) const
 {
+    if (!data_) throw std::logic_error("empty mesh");
     if (dimension > data_->dimension) throw std::out_of_range("entity dimension");
     return data_->counts[dimension];
 }
 bool Mesh::has_entities(Index dimension) const
 {
-    return dimension <= data_->dimension && (dimension == 0 || dimension == data_->dimension
-        || data_->counts[dimension] != 0);
+    return data_ && dimension <= data_->dimension && data_->enabled[dimension];
 }
 bool Mesh::has_relation(Index from, Index to) const
 {
-    return from < 4 && to < 4 && data_->relations[from][to].present;
+    return data_ && from < 4 && to < 4 && data_->relations[from][to].present;
 }
 RelationView Mesh::relation(Index from, Index to) const
 {
@@ -225,6 +227,7 @@ RelationView Mesh::relation(Index from, Index to) const
 }
 std::span<const Index> Mesh::entity_vertices(Index dimension, Index id) const
 {
+    if (!data_) throw std::logic_error("empty mesh");
     if (dimension > data_->dimension || id >= data_->counts[dimension])
         throw std::out_of_range("entity index");
     const auto& offsets = data_->vertex_offsets[dimension];
@@ -285,6 +288,7 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
         return dim == 0 || dim == dimension_ || (dim == dimension_ - 1 && options.facets)
             || (dim == 1 && options.edges) || (dim == 2 && options.faces);
     };
+    for (Index dim = 0; dim <= dimension_; ++dim) data->enabled[dim] = want(dim);
     auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
         auto canon = canonicalize(local);
         auto [it, inserted] = lookup[dim].try_emplace(canon.vertices,
@@ -311,9 +315,19 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
             for (const auto& face : faces)
                 attach(dimension_, dimension_ - 1, c, register_entity(dimension_ - 1, face));
         } else if (dimension_ == 3 && options.edges) {
-            for (const auto& face : faces)
-                for (const auto& edge : polygon_edges(face))
-                    register_entity(1, edge);
+            // Transitive Cell-to-Edge incidence has no boundary coefficient.
+            std::map<Index, Incidence> unique;
+            for (const auto& face : faces) {
+                for (const auto& edge : polygon_edges(face)) {
+                    auto entry = register_entity(1, edge);
+                    entry.sign = 0;
+                    unique.try_emplace(entry.entity, entry);
+                }
+            }
+            for (const auto& [id, entry] : unique) {
+                (void)id;
+                attach(3, 1, c, entry);
+            }
         }
     }
 
@@ -381,6 +395,18 @@ void Mesh::validate() const
             if (!has_relation(from, to)) continue;
             auto relation = this->relation(from, to);
             if (relation.rows != entity_count(from)) throw std::logic_error("relation row count");
+            if (relation.signs.size() != relation.indices.size()
+                || relation.orientations.size() != relation.indices.size())
+                throw std::logic_error("relation metadata size mismatch");
+            if (relation.offsets.empty()) {
+                if (static_cast<std::size_t>(relation.rows) * relation.stride != relation.indices.size())
+                    throw std::logic_error("invalid fixed-stride relation");
+            } else {
+                if (relation.offsets.size() != static_cast<std::size_t>(relation.rows) + 1
+                    || relation.offsets.front() != 0 || relation.offsets.back() != relation.indices.size()
+                    || !std::is_sorted(relation.offsets.begin(), relation.offsets.end()))
+                    throw std::logic_error("invalid CSR offsets");
+            }
             for (Index i = 0; i < relation.rows; ++i)
                 for (auto id : relation.row(i))
                     if (id >= entity_count(to)) throw std::logic_error("dangling incidence");
