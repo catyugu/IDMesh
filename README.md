@@ -72,3 +72,18 @@ is rejected. Medit ASCII reads/writes native `EdgesP2`, `TrianglesP2`, and
 `TetrahedraP2`; unsupported P2 shapes and custom ordering keywords are
 rejected. Both formats retain one physical tag per element; multi-membership
 on top cells is rejected rather than silently lost.
+
+## Distributed and numerical examples
+
+Build with `-DIDMESH_ENABLE_MPI=ON` and an MPI implementation to use
+`IDMesh::MPI` and the MPI-free `idmesh/mpi.hpp` header. This first backend
+supports replicated-input cell partitioning, global shared-entity identity,
+configurable ghost layers, and blocking host cell-field halo exchanges.
+MPI communication and partition construction are verified using 2 and
+3 ranks. Scalable root-only/distributed-file ingestion is not yet supported.
+
+`idmesh_fvm` validates conservative facet fluxes and physical normals on
+a three-dimensional Edge-free finite-volume mesh. `idmesh_feec` constructs
+the oriented G/C/D matrices on mixed Hex/Prism cells and verifies both
+boundary-operator compositions vanish. The optional Kokkos adapter provides
+a persistent `DeviceRelation` mirror for batched parallel reductions.

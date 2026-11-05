@@ -41,3 +41,16 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  mpi:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenMPI
+        run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
+      - name: Configure MPI
+        run: cmake -S . -B build-mpi -DCMAKE_BUILD_TYPE=Release -DIDMESH_ENABLE_MPI=ON -DIDMESH_BUILD_TESTS=ON
+      - name: Build MPI and examples
+        run: cmake --build build-mpi --parallel 2
+      - name: Test MPI with two and three ranks
+        run: ctest --test-dir build-mpi --output-on-failure

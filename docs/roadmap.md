@@ -30,3 +30,12 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Implement analytic order-1/2 geometry interpolation and Jacobians for all standard cell families.
 - [x] Add supported native VTK quadratic types and Medit P2 (line/triangle/tetrahedron).
 - [ ] Add custom Medit Ordering descriptors and extended pyramid14 VTK Lagrange encoding.
+
+## Milestone 2 incremental implementation
+- [x] Replicated-input MPI partition and deterministic global entity identity.
+- [x] Owner/ghost ranges, facet-based ghost expansion and cell-value ExchangePlan.
+- [x] Persistent Kokkos topology mirror and parallel reductions (Serial CI).
+- [x] Standalone FVM conservation/normal and FEEC incidence examples.
+- [ ] Scalable distributed mesh input and graph-based partitioning.
+- [ ] GPU-backed field buffers, asynchronous device-aware halo exchange and CUDA/HIP CI.
+- [ ] Execute external Basix C++ DOF-transformation integration tests.

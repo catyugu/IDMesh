@@ -99,3 +99,34 @@ supported. Pyramid14 has no matching classical VTK type and is explicitly
 rejected. Medit ASCII uses `EdgesP2`, `TrianglesP2`, `TetrahedraP2`
 with direct node order. Medit custom P2 ordering sections and other P2
 shape families are rejected, pending a standard-preserving adapter.
+
+
+## MPI (optional) and executable validation
+
+`-DIDMESH_ENABLE_MPI=ON` builds the `IDMesh::MPI` adapter without exposing
+`mpi.h` from public SDK headers. The application initializes/finalizes MPI.
+`idmesh::mpi::partition_replicated(source, ghost_layers)` constructs owned-cell
+then ghost-cell local meshes, carrying stable dimension-local global entity IDs,
+deterministic shared orientation and owner ranks. Facet adjacency defines the
+ghost expansion; the source mesh must materialize Cell/Facet and Facet/Cell
+relations. `ExchangePlan::exchange_cells` exchanges one or more interleaved
+Host double components for cell-based fields.
+
+**Scaling limitation:** The current partition path requires every Rank to hold
+the identical source mesh, with matching original entity indices; it uses
+contiguous global cell blocks rather than graph partitioning. This verifies
+ownership/halo semantics, but large-scale distributed input and a true
+scalable partitioning pipeline remain outstanding. The MPI backend currently
+uses the world communicator and blocking host transfers.
+
+`idmesh_fvm` assembles a 3D two-tetra diffusion operator using
+`TopologyOptions::finite_volume()` (no Edge layer), checking conservative
+internal flux and outward physical normals. `idmesh_feec` assembles G, C, D
+on a mixed Hex/Prism mesh and verifies `CG=0`, `DC=0`.
+
+The Kokkos adapter additionally offers a `DeviceRelation` owning a
+persistent mirror of CSR/fixed-stride offsets, indices and incidence signs
+in the default Kokkos memory space. Device-side parallel reductions can
+operate on its resident data without repeated uploads. CPU Kokkos Serial
+is exercised in CI; CUDA/HIP device execution requires separate backend
+builds and device CI to be certified.
