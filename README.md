@@ -11,6 +11,12 @@ ctest --test-dir build --output-on-failure
 cmake --install build --prefix install
 ```
 
+For physical groups, `cell_tags()` returns highest-dimensional Gmsh material
+labels and `facet_tag(f)` returns the codimension-one physical label (or zero).
+Gmsh 2.2 and 4.1 ASCII line/face boundary elements are matched to mesh facets;
+Gmsh 1D point elements are matched to endpoints. When a reduced topology
+configuration excludes facets, lower-dimensional physical labels are ignored.
+
 Enable the optional Kokkos CPU adapter using `-DIDMESH_ENABLE_KOKKOS=ON`. Core public headers require no third-party dependencies.
 
 ## Install consumer

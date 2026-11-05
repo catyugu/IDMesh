@@ -133,6 +133,87 @@ void test_invalid()
 }
 }
 
+
+void test_facet_physical_tags()
+{
+    idmesh::MeshBuilder builder(2, 2);
+    for (const auto& p : std::array<std::array<double, 3>, 3>{{
+        {0,0,0}, {1,0,0}, {0,1,0}
+    }}) builder.add_vertex(p);
+    const std::array<idmesh::Index,3> triangle {0,1,2};
+    const std::array<idmesh::Index,2> edge {0,1};
+    builder.add_cell(idmesh::CellType::triangle, triangle, 41);
+    builder.add_facet_tag(edge, 23);
+    auto mesh = std::move(builder).finalize();
+    check(mesh.cell_tags()[0] == 41, "cell material tag lost");
+    check(mesh.facet_tags().size() == 3, "facet physical tags not materialized");
+    bool found = false;
+    for (idmesh::Index f=0; f<mesh.entity_count(1); ++f) {
+        if (mesh.entity_vertices(1,f) == std::span<const idmesh::Index>(edge)) {
+            check(mesh.facet_tag(f) == 23, "boundary facet tag lost");
+            found = true;
+        }
+    }
+    check(found, "tagged boundary not found");
+}
+void test_gmsh_boundary_v22()
+{
+    const auto path = std::filesystem::temp_directory_path()/"idmesh-facet-v22.msh";
+    {
+        std::ofstream out(path);
+        out << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n"
+            << "$Nodes\n3\n10 0 0 0\n20 1 0 0\n30 0 1 0\n$EndNodes\n"
+            << "$Elements\n2\n"
+            << "1 1 2 29 1 10 20\n"
+            << "2 2 2 17 1 10 20 30\n$EndElements\n";
+    }
+    auto mesh = idmesh::read_gmsh(path.string());
+    std::filesystem::remove(path);
+    check(mesh.cell_tags()[0] == 17, "Gmsh 2.2 cell tag lost");
+    bool found = false;
+    for (idmesh::Index f=0; f<mesh.entity_count(1); ++f)
+        if (mesh.facet_tag(f) == 29) found = true;
+    check(found, "Gmsh 2.2 facet physical group lost");
+}
+void test_gmsh_boundary_v41()
+{
+    const auto path = std::filesystem::temp_directory_path()/"idmesh-facet-v41.msh";
+    {
+        std::ofstream out(path);
+        out << "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n"
+            << "$Entities\n0 1 1 0\n"
+            << "8 0 0 0 1 0 0 1 33 0\n"
+            << "9 0 0 0 1 1 0 1 21 0\n$EndEntities\n"
+            << "$Nodes\n1 3 1 3\n2 9 0 3\n1 2 3\n"
+            << "0 0 0\n1 0 0\n0 1 0\n$EndNodes\n"
+            << "$Elements\n2 2 1 2\n"
+            << "1 8 1 1\n1 1 2\n"
+            << "2 9 2 1\n2 1 2 3\n$EndElements\n";
+    }
+    auto mesh = idmesh::read_gmsh(path.string());
+    std::filesystem::remove(path);
+    check(mesh.cell_tags()[0] == 21, "Gmsh 4.1 cell physical group lost");
+    bool found = false;
+    for (idmesh::Index f=0; f<mesh.entity_count(1); ++f)
+        if (mesh.facet_tag(f) == 33) found = true;
+    check(found, "Gmsh 4.1 facet physical group lost");
+}
+void test_gmsh_endpoint_v22()
+{
+    const auto path = std::filesystem::temp_directory_path()/"idmesh-endpoint-v22.msh";
+    {
+        std::ofstream out(path);
+        out << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n"
+            << "$Nodes\n2\n3 0 0 0\n4 1 0 0\n$EndNodes\n"
+            << "$Elements\n2\n1 15 2 37 1 3\n"
+            << "2 1 2 11 1 3 4\n$EndElements\n";
+    }
+    auto mesh = idmesh::read_gmsh(path.string());
+    std::filesystem::remove(path);
+    check(mesh.dimension() == 1 && mesh.cell_tags()[0] == 11, "1D Gmsh cell data");
+    check(mesh.facet_tag(0) == 37, "Gmsh 1D endpoint physical group lost");
+}
+
 int main()
 {
     try {
@@ -142,6 +223,10 @@ int main()
         test_gmsh();
         test_gmsh_v41();
         test_invalid();
+        test_facet_physical_tags();
+        test_gmsh_boundary_v22();
+        test_gmsh_boundary_v41();
+        test_gmsh_endpoint_v22();
         std::cout << "IDMesh topology tests passed\n";
         return 0;
     } catch (const std::exception& ex) {

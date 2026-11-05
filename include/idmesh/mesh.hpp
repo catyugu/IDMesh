@@ -6,6 +6,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32) && defined(IDMESH_SHARED)
@@ -80,6 +81,9 @@ public:
     std::span<const std::array<double, 3>> coordinates() const;
     std::span<const CellType> cell_types() const;
     std::span<const int> cell_tags() const;
+    // Sparse optional physical tags, indexed by facet ID; empty if untagged.
+    std::span<const int> facet_tags() const;
+    int facet_tag(Index facet) const;
     void validate() const;
 
 private:
@@ -94,6 +98,7 @@ public:
     MeshBuilder(Index dimension, Index geometric_dimension);
     Index add_vertex(std::array<double, 3> position);
     Index add_cell(CellType type, std::span<const Index> vertices, int tag = 0);
+    void add_facet_tag(std::span<const Index> vertices, int tag);
     Mesh finalize(TopologyOptions options = TopologyOptions::full()) &&;
 
 private:
@@ -103,6 +108,7 @@ private:
     std::vector<CellType> types_;
     std::vector<std::vector<Index>> cells_;
     std::vector<int> tags_;
+    std::vector<std::pair<std::vector<Index>, int>> facet_assignments_;
 };
 
 // Gmsh first-order ASCII MSH 2.2 / 4.1; higher-order elements are rejected.

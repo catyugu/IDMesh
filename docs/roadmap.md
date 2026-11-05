@@ -6,7 +6,7 @@
 - [x] Construct canonical shared entities, incidence orientations and boundary coefficients.
 - [x] Implement optional entity dimensions and explicit CSR/fixed-stride materialization.
 - [x] Expose read-only topology and geometry views.
-- [x] Import first-order ASCII Gmsh 2.2/4.1 meshes with physical cell labels.
+- [x] Import first-order ASCII Gmsh 2.2/4.1 meshes with physical cell and facet labels.
 - [ ] Run and verify the optional CPU Kokkos adapter with Kokkos kept out of core public headers.
 - [ ] Test boundary-of-boundary and installation on Linux, Windows and macOS.
 

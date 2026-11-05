@@ -1,5 +1,6 @@
 #include "idmesh/mesh.hpp"
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -42,6 +43,7 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
     double version = 0.0;
     std::map<std::uint64_t, std::array<double, 3>> nodes;
     std::vector<Element> elements;
+    std::vector<std::pair<std::uint64_t, int>> point_elements;
     std::map<std::pair<unsigned, std::uint64_t>, int> physical_tags;
     while (in >> section) {
         if (section == "$MeshFormat") {
@@ -124,6 +126,7 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
                     if (kind == 15) {
                         std::uint64_t vertex;
                         in >> vertex;
+                        if (physical != 0) point_elements.emplace_back(vertex, physical);
                         continue;
                     }
                     auto type = element_type(kind);
@@ -140,9 +143,12 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
                     std::uint64_t entity, count;
                     in >> dim >> entity >> kind >> count;
                     if (kind == 15) {
+                        const auto physical = physical_tags.find({dim, entity});
+                        const int value = physical == physical_tags.end() ? 0 : physical->second;
                         for (std::uint64_t i = 0; i < count; ++i) {
                             std::uint64_t id, node;
                             in >> id >> node;
+                            if (value != 0) point_elements.emplace_back(node, value);
                         }
                         continue;
                     }
@@ -174,15 +180,32 @@ Mesh read_gmsh(const std::string& filename, TopologyOptions options)
     MeshBuilder builder(dimension, 3);
     std::map<std::uint64_t, Index> local;
     for (const auto& [tag, xyz] : nodes) local.emplace(tag, builder.add_vertex(xyz));
+    const bool need_facets = dimension == 1 || options.facets
+        || (dimension == 2 && options.edges)
+        || (dimension == 3 && options.faces);
     for (const auto& element : elements) {
-        if (cell_dimension(element.type) != dimension) continue;
+        const Index element_dimension = cell_dimension(element.type);
+        if (element_dimension != dimension &&
+            !(need_facets && element_dimension + 1 == dimension && element.physical != 0))
+            continue;
         std::vector<Index> vertices;
         for (auto tag : element.nodes) {
             const auto it = local.find(tag);
             require(it != local.end(), "element refers to unknown vertex");
             vertices.push_back(it->second);
         }
-        builder.add_cell(element.type, vertices, element.physical);
+        if (element_dimension == dimension)
+            builder.add_cell(element.type, vertices, element.physical);
+        else
+            builder.add_facet_tag(vertices, element.physical);
+    }
+    if (dimension == 1) {
+        for (const auto& [node, physical] : point_elements) {
+            const auto it = local.find(node);
+            require(it != local.end(), "point element refers to unknown vertex");
+            const std::array<Index, 1> vertex {it->second};
+            builder.add_facet_tag(vertex, physical);
+        }
     }
     return std::move(builder).finalize(options);
 }

@@ -134,6 +134,7 @@ struct Mesh::Data {
     std::vector<std::array<double, 3>> coordinates;
     std::vector<CellType> types;
     std::vector<int> tags;
+    std::vector<int> facet_tags;
 };
 
 namespace {
@@ -295,6 +296,20 @@ std::span<const int> Mesh::cell_tags() const
     return data_->tags;
 }
 
+std::span<const int> Mesh::facet_tags() const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    return data_->facet_tags;
+}
+
+int Mesh::facet_tag(Index facet) const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    if (facet >= data_->counts[data_->dimension - 1])
+        throw std::out_of_range("facet index");
+    return data_->facet_tags.empty() ? 0 : data_->facet_tags[facet];
+}
+
 MeshBuilder::MeshBuilder(Index dimension, Index geometric_dimension)
     : dimension_(dimension), geometric_dimension_(geometric_dimension)
 {
@@ -324,6 +339,20 @@ Index MeshBuilder::add_cell(CellType type, std::span<const Index> vertices, int 
     types_.push_back(type);
     tags_.push_back(tag);
     return static_cast<Index>(cells_.size() - 1);
+}
+
+void MeshBuilder::add_facet_tag(std::span<const Index> vertices, int tag)
+{
+    const auto arity = dimension_ == 3 ? vertices.size() == 3 || vertices.size() == 4
+                      : vertices.size() == 1 + (dimension_ == 2);
+    require(arity, "invalid facet arity");
+    std::vector<Index> ids(vertices.begin(), vertices.end());
+    for (auto index : ids) require(index < coordinates_.size(), "invalid facet vertex");
+    auto sorted = ids;
+    std::sort(sorted.begin(), sorted.end());
+    require(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(),
+            "repeated facet vertex");
+    if (tag != 0) facet_assignments_.emplace_back(std::move(ids), tag);
 }
 
 Mesh MeshBuilder::finalize(TopologyOptions options) &&
@@ -406,6 +435,25 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
         }
     }
 
+    if (!facet_assignments_.empty()) {
+        require(want(dimension_ - 1), "facet tags require materialized facets");
+        data->facet_tags.resize(data->vertices[dimension_ - 1].size(), 0);
+        for (const auto& [vertices, tag] : facet_assignments_) {
+            Index facet = invalid_index;
+            if (dimension_ == 1) {
+                facet = vertices.front();
+            } else {
+                const auto key = canonicalize(vertices);
+                const auto found = lookup[dimension_ - 1].find(key.vertices);
+                require(found != lookup[dimension_ - 1].end(),
+                        "facet tag refers to an absent facet");
+                facet = found->second;
+            }
+            auto& previous = data->facet_tags[facet];
+            require(previous == 0 || previous == tag, "conflicting facet physical tags");
+            previous = tag;
+        }
+    }
     for (Index from = 1; from <= dimension_; ++from) {
         for (Index to = 0; to < from; ++to) {
             auto& rows = incidence[from][to];
@@ -437,6 +485,9 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
 void Mesh::validate() const
 {
     if (!data_) throw std::logic_error("empty mesh");
+    if (!data_->facet_tags.empty() &&
+        data_->facet_tags.size() != data_->counts[data_->dimension - 1])
+        throw std::logic_error("facet physical-tag size mismatch");
     for (Index from = 1; from <= data_->dimension; ++from) {
         for (Index to = 0; to < from; ++to) {
             if (!has_relation(from, to)) continue;
