@@ -109,5 +109,8 @@ private:
 IDMESH_API Mesh read_gmsh(const std::string& filename, TopologyOptions options = TopologyOptions::full());
 IDMESH_API Index cell_dimension(CellType type);
 IDMESH_API Index cell_vertex_count(CellType type);
+// Local vertex indices of the oriented reference-cell facet.
+IDMESH_API Index cell_facet_count(CellType type);
+IDMESH_API std::span<const std::uint8_t> reference_facet_vertices(CellType type, Index facet);
 
 } // namespace idmesh

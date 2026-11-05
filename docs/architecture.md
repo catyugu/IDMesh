@@ -19,7 +19,7 @@ IDMesh is a C++20, immutable mesh topology kernel for 1D–3D mixed-cell, unstru
 
 ## Standard reference cells
 
-Segment, triangle, quadrilateral, tetrahedron, hexahedron, prism and pyramid, with the Gmsh first-order vertex order. Cell boundary facet vertex loops follow a consistent reference orientation. A cell may be geometrically inverted; the combinatorial incidence complex still satisfies its orientation identities, while geometric Jacobian checks belong to geometry validation.
+Segment, triangle, quadrilateral, tetrahedron, hexahedron, prism and pyramid use Gmsh first-order vertex order. Their oriented boundary facets are defined in one compiled reference table and exposed through `cell_facet_count` and `reference_facet_vertices`; the builder uses the same table. A geometrically inverted cell still has a valid combinatorial complex, while geometric Jacobian checks belong to geometry validation.
 
 ## Core storage
 

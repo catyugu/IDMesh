@@ -54,28 +54,14 @@ using Loop = std::vector<Index>;
 
 std::vector<Loop> boundary_loops(CellType type, std::span<const Index> v)
 {
-    auto loop = [&](std::initializer_list<unsigned> ids) {
-        Loop result;
-        for (auto i : ids) result.push_back(v[i]);
-        return result;
-    };
-    switch (type) {
-    case CellType::segment: return {loop({1}), loop({0})};
-    case CellType::triangle: return {loop({0, 1}), loop({1, 2}), loop({2, 0})};
-    case CellType::quadrilateral: return {loop({0, 1}), loop({1, 2}), loop({2, 3}), loop({3, 0})};
-    case CellType::tetrahedron:
-        return {loop({1, 2, 3}), loop({0, 3, 2}), loop({0, 1, 3}), loop({0, 2, 1})};
-    case CellType::hexahedron:
-        return {loop({0, 3, 2, 1}), loop({4, 5, 6, 7}), loop({0, 1, 5, 4}),
-            loop({1, 2, 6, 5}), loop({2, 3, 7, 6}), loop({3, 0, 4, 7})};
-    case CellType::prism:
-        return {loop({0, 2, 1}), loop({3, 4, 5}), loop({0, 1, 4, 3}),
-            loop({1, 2, 5, 4}), loop({2, 0, 3, 5})};
-    case CellType::pyramid:
-        return {loop({0, 3, 2, 1}), loop({0, 1, 4}), loop({1, 2, 4}),
-            loop({2, 3, 4}), loop({3, 0, 4})};
+    std::vector<Loop> result;
+    result.reserve(cell_facet_count(type));
+    for (Index f = 0; f < cell_facet_count(type); ++f) {
+        Loop loop;
+        for (auto local : reference_facet_vertices(type, f)) loop.push_back(v[local]);
+        result.push_back(std::move(loop));
     }
-    throw std::invalid_argument("unknown cell type");
+    return result;
 }
 
 std::vector<Loop> polygon_edges(std::span<const Index> vertices)
@@ -149,6 +135,65 @@ struct Mesh::Data {
     std::vector<CellType> types;
     std::vector<int> tags;
 };
+
+namespace {
+struct ReferenceFacet {
+    std::array<std::uint8_t, 4> vertices;
+    std::uint8_t size;
+};
+constexpr std::array<ReferenceFacet, 2> segment_facets {{
+    {{{1,0,0,0}},1}, {{{0,0,0,0}},1}
+}};
+constexpr std::array<ReferenceFacet, 3> triangle_facets {{
+    {{{0,1,0,0}},2}, {{{1,2,0,0}},2}, {{{2,0,0,0}},2}
+}};
+constexpr std::array<ReferenceFacet, 4> quad_facets {{
+    {{{0,1,0,0}},2}, {{{1,2,0,0}},2},
+    {{{2,3,0,0}},2}, {{{3,0,0,0}},2}
+}};
+constexpr std::array<ReferenceFacet, 4> tetra_facets {{
+    {{{1,2,3,0}},3}, {{{0,3,2,0}},3},
+    {{{0,1,3,0}},3}, {{{0,2,1,0}},3}
+}};
+constexpr std::array<ReferenceFacet, 6> hex_facets {{
+    {{{0,3,2,1}},4}, {{{4,5,6,7}},4},
+    {{{0,1,5,4}},4}, {{{1,2,6,5}},4},
+    {{{2,3,7,6}},4}, {{{3,0,4,7}},4}
+}};
+constexpr std::array<ReferenceFacet, 5> prism_facets {{
+    {{{0,2,1,0}},3}, {{{3,4,5,0}},3},
+    {{{0,1,4,3}},4}, {{{1,2,5,4}},4}, {{{2,0,3,5}},4}
+}};
+constexpr std::array<ReferenceFacet, 5> pyramid_facets {{
+    {{{0,3,2,1}},4}, {{{0,1,4,0}},3},
+    {{{1,2,4,0}},3}, {{{2,3,4,0}},3}, {{{3,0,4,0}},3}
+}};
+std::span<const ReferenceFacet> reference_facets(CellType type)
+{
+    switch (type) {
+    case CellType::segment: return segment_facets;
+    case CellType::triangle: return triangle_facets;
+    case CellType::quadrilateral: return quad_facets;
+    case CellType::tetrahedron: return tetra_facets;
+    case CellType::hexahedron: return hex_facets;
+    case CellType::prism: return prism_facets;
+    case CellType::pyramid: return pyramid_facets;
+    }
+    throw std::invalid_argument("unknown reference cell type");
+}
+} // namespace
+
+Index cell_facet_count(CellType type)
+{
+    return static_cast<Index>(reference_facets(type).size());
+}
+
+std::span<const std::uint8_t> reference_facet_vertices(CellType type, Index facet)
+{
+    const auto facets = reference_facets(type);
+    if (facet >= facets.size()) throw std::out_of_range("reference facet index");
+    return {facets[facet].vertices.data(), facets[facet].size};
+}
 
 Index cell_dimension(CellType type)
 {
@@ -234,9 +279,21 @@ std::span<const Index> Mesh::entity_vertices(Index dimension, Index id) const
     const auto& indices = data_->vertex_indices[dimension];
     return {indices.data() + offsets[id], offsets[id + 1] - offsets[id]};
 }
-std::span<const std::array<double, 3>> Mesh::coordinates() const { return data_->coordinates; }
-std::span<const CellType> Mesh::cell_types() const { return data_->types; }
-std::span<const int> Mesh::cell_tags() const { return data_->tags; }
+std::span<const std::array<double, 3>> Mesh::coordinates() const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    return data_->coordinates;
+}
+std::span<const CellType> Mesh::cell_types() const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    return data_->types;
+}
+std::span<const int> Mesh::cell_tags() const
+{
+    if (!data_) throw std::logic_error("empty mesh");
+    return data_->tags;
+}
 
 MeshBuilder::MeshBuilder(Index dimension, Index geometric_dimension)
     : dimension_(dimension), geometric_dimension_(geometric_dimension)

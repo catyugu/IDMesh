@@ -1,76 +1,149 @@
 #include <idmesh/mesh.hpp>
 #include <array>
 #include <cstddef>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
+#include <vector>
+
+namespace {
 using idmesh::Index;
-void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
-void verify(std::span<const Index> local,std::span<const Index> canonical,idmesh::Orientation o){
-    check(local.size()==canonical.size(),"arity mismatch");
-    auto n=static_cast<std::ptrdiff_t>(local.size());
-    for(std::ptrdiff_t i=0;i<n;++i){
-        auto j=(static_cast<std::ptrdiff_t>(o.rotation)+(o.reversed?-i:i)+2*n)%n;
-        check(local[static_cast<std::size_t>(j)]==canonical[static_cast<std::size_t>(i)],"orientation mismatch");
+void check(bool condition, const char* what)
+{
+    if (!condition) throw std::runtime_error(what);
+}
+void verify_orientation(std::span<const Index> local, std::span<const Index> canonical,
+                        idmesh::Orientation orientation)
+{
+    check(local.size() == canonical.size(), "different local and canonical arities");
+    const auto n = static_cast<std::ptrdiff_t>(local.size());
+    check(orientation.rotation < n, "orientation rotation out of range");
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
+        auto pos = (static_cast<std::ptrdiff_t>(orientation.rotation)
+                    + (orientation.reversed ? -i : i) + n) % n;
+        check(local[static_cast<std::size_t>(pos)] == canonical[static_cast<std::size_t>(i)],
+              "orientation permutation mismatch");
     }
 }
-void orientation_test(){
-    idmesh::MeshBuilder b(2,2);
-    for(int i=0;i<3;++i)b.add_vertex({double(i),0,0});
-    const std::array<Index,3> v{0,1,2};
-    b.add_cell(idmesh::CellType::triangle,v);
-    auto mesh=std::move(b).finalize();
-    auto edges=mesh.relation(2,1);
-    const std::array<std::array<Index,2>,3> loops{{{0,1},{1,2},{2,0}}};
-    for(std::size_t i=0;i<loops.size();++i)
-        verify(loops[i],mesh.entity_vertices(1,edges.row(0)[i]),edges.row_orientations(0)[i]);
-    check(edges.row_signs(0)[2]==-1,"missing reversed incidence");
-}
-void tetra_test(){
-    idmesh::MeshBuilder b(3,3);
-    for(int i=0;i<4;++i)b.add_vertex({double(i),0,0});
-    const std::array<Index,4> v{0,1,2,3};
-    b.add_cell(idmesh::CellType::tetrahedron,v);
-    auto mesh=std::move(b).finalize();
-    auto faces=mesh.relation(3,2);
-    const std::array<std::array<Index,3>,4> loops{{{1,2,3},{0,3,2},{0,1,3},{0,2,1}}};
-    for(std::size_t i=0;i<loops.size();++i){
-        auto o=faces.row_orientations(0)[i];
-        verify(loops[i],mesh.entity_vertices(2,faces.row(0)[i]),o);
-        check(faces.row_signs(0)[i]==o.sign(),"incorrect boundary coefficient");
+void all_reference_cells()
+{
+    constexpr std::array types {
+        idmesh::CellType::segment, idmesh::CellType::triangle,
+        idmesh::CellType::quadrilateral, idmesh::CellType::tetrahedron,
+        idmesh::CellType::hexahedron, idmesh::CellType::prism,
+        idmesh::CellType::pyramid
+    };
+    constexpr std::array counts {2u,3u,4u,4u,6u,5u,5u};
+    for (std::size_t k = 0; k < types.size(); ++k) {
+        auto type = types[k];
+        const Index dim = idmesh::cell_dimension(type);
+        check(idmesh::cell_facet_count(type) == counts[k], "reference facet count");
+        idmesh::MeshBuilder builder(dim, 3);
+        std::vector<Index> nodes;
+        for (Index i = 0; i < idmesh::cell_vertex_count(type); ++i)
+            nodes.push_back(builder.add_vertex({double(i),double(i%3),double(i%2)}));
+        builder.add_cell(type, nodes);
+        auto mesh = std::move(builder).finalize();
+        mesh.validate();
+        if (dim == 1) {
+            auto cv = mesh.relation(1,0);
+            check(cv.row_signs(0)[0] == -1 && cv.row_signs(0)[1] == 1,
+                  "segment endpoints orientation");
+            continue;
+        }
+        auto relation = mesh.relation(dim, dim-1);
+        auto facets = relation.row(0);
+        for (std::size_t f = 0; f < facets.size(); ++f) {
+            std::vector<Index> local;
+            for (auto v : idmesh::reference_facet_vertices(type, static_cast<Index>(f)))
+                local.push_back(nodes[v]);
+            auto o = relation.row_orientations(0)[f];
+            verify_orientation(local, mesh.entity_vertices(dim-1,facets[f]), o);
+            check(relation.row_signs(0)[f] == o.sign(), "facet boundary sign");
+        }
+        bool invalid = false;
+        try { (void)idmesh::reference_facet_vertices(type,idmesh::cell_facet_count(type)); }
+        catch (const std::out_of_range&) { invalid = true; }
+        check(invalid,"invalid reference facet query accepted");
     }
 }
-void partial_test(){
+void mixed_hex_prism()
+{
     idmesh::MeshBuilder b(3,3);
-    for(int i=0;i<4;++i)b.add_vertex({double(i),0,0});
-    const std::array<Index,4> v{0,1,2,3};
-    b.add_cell(idmesh::CellType::tetrahedron,v);
-    auto opt=idmesh::TopologyOptions::cells_and_vertices();
-    opt.edges=true;
+    constexpr std::array<std::array<double,3>,10> coords {{
+        {0,0,0},{1,0,0},{1,1,0},{0,1,0},
+        {0,0,1},{1,0,1},{1,1,1},{0,1,1},
+        {2,0.5,0},{2,0.5,1}
+    }};
+    for (auto p : coords) b.add_vertex(p);
+    const std::array<Index,8> hex {0,1,2,3,4,5,6,7};
+    const std::array<Index,6> prism {2,1,8,6,5,9};
+    b.add_cell(idmesh::CellType::hexahedron,hex);
+    b.add_cell(idmesh::CellType::prism,prism);
+    const auto mesh = std::move(b).finalize();
+    auto support=mesh.relation(2,3);
+    auto downward=mesh.relation(3,2);
+    Index common=idmesh::invalid_index;
+    for (Index f=0;f<mesh.entity_count(2);++f)
+        if (support.row(f).size()==2) {
+            check(common==idmesh::invalid_index,"more than one common face");
+            common=f;
+        }
+    check(common!=idmesh::invalid_index,"mixed common quad missing");
+    int signs[2] {};
+    for (Index c=0;c<2;++c)
+        for (std::size_t f=0;f<downward.row(c).size();++f)
+            if(downward.row(c)[f]==common)signs[c]=downward.row_signs(c)[f];
+    check(signs[0]!=0 && signs[0]==-signs[1],"mixed interface orientation");
+}
+void layer_masks()
+{
+    for (auto type : {idmesh::CellType::tetrahedron,idmesh::CellType::hexahedron,
+                      idmesh::CellType::prism,idmesh::CellType::pyramid}) {
+        auto build=[type](idmesh::TopologyOptions options) {
+            idmesh::MeshBuilder b(3,3);
+            std::vector<Index> nodes;
+            for (Index i=0;i<idmesh::cell_vertex_count(type);++i)
+                nodes.push_back(b.add_vertex({double(i),0,0}));
+            b.add_cell(type,nodes);
+            return std::move(b).finalize(options);
+        };
+        auto invalid=idmesh::TopologyOptions::cells_and_vertices();
+        invalid.edges=true;
+        bool rejected=false;
+        try { (void)build(invalid); }
+        catch (const std::invalid_argument&) { rejected=true; }
+        check(rejected,"skipped face layer accepted");
+        auto full=build(idmesh::TopologyOptions::full());
+        check(full.has_relation(3,2)&&full.has_relation(2,1)&&full.has_relation(1,0),
+              "missing complete chain");
+        check(!full.has_relation(3,1),"unexpected skipped relation");
+        auto fv=build(idmesh::TopologyOptions::finite_volume());
+        check(fv.has_entities(2)&&!fv.has_entities(1),"finite volume entity mask");
+        check(fv.has_relation(3,2)&&fv.has_relation(2,0),"finite volume connections");
+        fv.validate();
+    }
+}
+void default_mesh()
+{
+    idmesh::Mesh mesh;
+    check(!mesh.has_entities(0),"invalid default mesh");
     bool rejected=false;
-    try {(void)std::move(b).finalize(opt);}
-    catch(const std::invalid_argument&){rejected=true;}
-    check(rejected,"skip-layer topology accepted");
+    try { (void)mesh.coordinates(); }
+    catch (const std::logic_error&) { rejected=true; }
+    check(rejected,"default mesh must reject coordinate access");
 }
-void valid_edge_face_test(){
-    idmesh::MeshBuilder b(3,3);
-    for(int i=0;i<4;++i)b.add_vertex({double(i),0,0});
-    const std::array<Index,4> v{0,1,2,3};
-    b.add_cell(idmesh::CellType::tetrahedron,v);
-    auto opt=idmesh::TopologyOptions::cells_and_vertices();
-    opt.edges=true;
-    opt.faces=true;
-    auto mesh=std::move(b).finalize(opt);
-    check(mesh.has_entities(1)&&mesh.has_entities(2),"missing intermediate face layer");
-    check(mesh.has_relation(3,2)&&mesh.has_relation(2,1),"missing adjacent incidence");
-    check(!mesh.has_relation(3,1),"unexpected skip-layer relation");
-    check(mesh.entity_count(1)==6,"wrong edge count");
-    mesh.validate();
 }
-int main(){
-    try{orientation_test();tetra_test();partial_test();valid_edge_face_test();std::cout<<"contracts passed\n";}
-    catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}
-    return 0;
+int main()
+{
+    try {
+        all_reference_cells();
+        mixed_hex_prism();
+        layer_masks();
+        default_mesh();
+        std::cout << "IDMesh contract tests passed\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Contract test failure: " << e.what() << '\n';
+        return 1;
+    }
 }
