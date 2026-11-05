@@ -24,6 +24,6 @@ jobs:
       - name: Install
         run: cmake --install build --config Release --prefix install
       - name: Installed package consumer
-        run: cmake -S tests/consumer -B consumer-build -DCMAKE_PREFIX_PATH=install
+        run: cmake -S tests/consumer -B consumer-build -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install
       - name: Build consumer
         run: cmake --build consumer-build --config Release
