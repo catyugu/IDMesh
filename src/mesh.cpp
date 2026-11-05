@@ -336,6 +336,15 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
         }
     }
 
+    // Direct facet-to-vertex traversal is needed by finite-volume kernels
+    // even when intermediate edges have not been materialized.
+    if (dimension_ == 3 && want(2)) {
+        for (Index f = 0; f < data->vertices[2].size(); ++f) {
+            for (auto v : data->vertices[2][f])
+                attach(2, 0, f, {v, 0, {}});
+        }
+    }
+
     for (Index from = 1; from <= dimension_; ++from) {
         for (Index to = 0; to < from; ++to) {
             auto& rows = incidence[from][to];
