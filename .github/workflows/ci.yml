@@ -7,6 +7,15 @@ on:
 permissions:
   contents: read
 jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned clang-format
+        run: python3 -m pip install clang-format==19.1.7
+      - name: Verify tracked C++ sources
+        run: bash scripts/check-format.sh
+
   native:
     strategy:
       fail-fast: false
