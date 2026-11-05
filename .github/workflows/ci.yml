@@ -21,6 +21,9 @@ jobs:
         run: cmake --build build --config Release --parallel 2
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Benchmark smoke
+        if: runner.os == 'Linux'
+        run: ./build/idmesh_benchmark 8 2
       - name: Install
         run: cmake --install build --config Release --prefix install
       - name: Installed package consumer

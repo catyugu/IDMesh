@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(IDMESH_BUILD_TESTS "Build IDMesh tests" ${PROJECT_IS_TOP_LEVEL})
 option(IDMESH_BUILD_EXAMPLES "Build IDMesh examples" ${PROJECT_IS_TOP_LEVEL})
+option(IDMESH_BUILD_BENCHMARKS "Build development-only performance benchmarks" ${PROJECT_IS_TOP_LEVEL})
 option(IDMESH_ENABLE_KOKKOS "Build optional CPU Kokkos backend" OFF)
 option(IDMESH_INSTALL "Install IDMesh SDK" ${PROJECT_IS_TOP_LEVEL})
 
@@ -64,6 +65,11 @@ endif()
 if(IDMESH_BUILD_EXAMPLES)
     add_executable(idmesh_example examples/main.cpp)
     target_link_libraries(idmesh_example PRIVATE idmesh)
+endif()
+
+if(IDMESH_BUILD_BENCHMARKS)
+    add_executable(idmesh_benchmark benchmarks/topology.cpp)
+    target_link_libraries(idmesh_benchmark PRIVATE idmesh)
 endif()
 
 if(IDMESH_INSTALL)
