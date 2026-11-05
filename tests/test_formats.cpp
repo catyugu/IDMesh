@@ -185,7 +185,7 @@ void medit_round_trip()
     has_group(mesh,2,31,true);
 }
 
-
+} // namespace
 
 void mixed_geometry_orders()
 {
