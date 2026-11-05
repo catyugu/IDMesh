@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Validate the STAGED version of each changed C++ file.
+# This avoids surprising changes to partially staged working-tree files.
+set -euo pipefail
+
+formatter="${CLANG_FORMAT:-clang-format}"
+if ! command -v "$formatter" >/dev/null 2>&1; then
+    echo "clang-format is required before committing C++ changes." >&2
+    echo "Install clang-format 19.1.7 or set CLANG_FORMAT." >&2
+    exit 1
+fi
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+status=0
+
+while IFS= read -r -d '' file; do
+    if ! git show ":$file" > "$tmp_dir/original"; then
+        echo "Could not read staged file: $file" >&2
+        status=1
+        continue
+    fi
+    if ! "$formatter" --style=file --assume-filename="$file" < "$tmp_dir/original" > "$tmp_dir/formatted"; then
+        echo "clang-format failed: $file" >&2
+        status=1
+        continue
+    fi
+    if ! cmp -s "$tmp_dir/original" "$tmp_dir/formatted"; then
+        echo "Unformatted staged file: $file" >&2
+        echo "  Run: clang-format -i '$file'; git add '$file'" >&2
+        status=1
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx')
+
+exit "$status"

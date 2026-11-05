@@ -26,7 +26,7 @@ find_package(IDMesh CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE IDMesh::IDMesh)
 ```
 
-See [architecture](docs/architecture.md) and [roadmap](docs/roadmap.md). License: MIT.
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md) and [development conventions](docs/development.md). License: MIT.
 
 ## Benchmarks
 

@@ -18,3 +18,7 @@
 *.pdf binary
 *.zip binary
 *.tar.gz binary
+
+# Versioned Git hooks and development scripts always use LF.
+.githooks/* text eol=lf
+scripts/*.sh text eol=lf

@@ -1,0 +1,35 @@
+# One-time source normalization. Trigger with a main commit whose message
+# contains [format-bootstrap]. Subsequent ordinary pushes never auto-edit files.
+name: Normalize existing C++ formatting
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[format-bootstrap]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Install pinned clang-format
+        run: python3 -m pip install clang-format==19.1.7
+      - name: Normalize tracked C++ files
+        run: bash scripts/format-cpp.sh
+      - name: Commit normalized formatting
+        shell: bash
+        run: |
+          if git diff --quiet -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx'; then
+            echo "All C++ sources already conform to clang-format."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx'
+          git commit -m "style: normalize existing C++ sources with clang-format 19"
+          git push origin HEAD:main
