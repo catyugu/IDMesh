@@ -130,3 +130,13 @@ in the default Kokkos memory space. Device-side parallel reductions can
 operate on its resident data without repeated uploads. CPU Kokkos Serial
 is exercised in CI; CUDA/HIP device execution requires separate backend
 builds and device CI to be certified.
+
+## External high-order finite-element orientation validation
+
+A separate Basix integration CI job builds the orientation exporter and
+uses Basix's C++-backed N1E degree-two element transformations. It tests
+edge reversal involutions, face rotation/reflection group relations and
+the consistency of canonical DOF coefficients through both local views of
+a shared tetrahedral facet. This checks the mesh's geometric permutation
+contract against an independent finite-element DOF representation.
+No finite-element-specific transformation matrices are stored in the mesh.

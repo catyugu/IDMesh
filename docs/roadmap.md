@@ -38,4 +38,4 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Standalone FVM conservation/normal and FEEC incidence examples.
 - [ ] Scalable distributed mesh input and graph-based partitioning.
 - [ ] GPU-backed field buffers, asynchronous device-aware halo exchange and CUDA/HIP CI.
-- [ ] Execute external Basix C++ DOF-transformation integration tests.
+- [x] Add executable Basix C++-backed Nedelec DOF-transformation integration tests and CI.

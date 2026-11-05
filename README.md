@@ -87,3 +87,11 @@ a three-dimensional Edge-free finite-volume mesh. `idmesh_feec` constructs
 the oriented G/C/D matrices on mixed Hex/Prism cells and verifies both
 boundary-operator compositions vanish. The optional Kokkos adapter provides
 a persistent `DeviceRelation` mirror for batched parallel reductions.
+
+## External FEEC transformation validation
+
+`examples/basix_orientations.cpp` exports actual oriented tetrahedral
+face and edge incidences. `tests/test_basix.py` consumes this output using
+the `fenics-basix` Python bindings backed by Basix C++, checking higher-order
+Nedelec edge reversal and triangular-face dihedral-group transformations.
+Basix remains a test-only dependency; no Basix types enter the SDK API.
