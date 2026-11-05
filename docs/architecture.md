@@ -150,3 +150,13 @@ of the source mesh. Batched centroid and geometry-connectivity reductions
 exercise the device buffers without repeated upload. Future geometry kernels
 may reuse these buffers to evaluate quadrature-point maps in batches.
 Kokkos compilation remains strictly private to the optional adapter.
+
+### Cross-rank canonical orientation invariant
+
+Partition construction assigns local corner-vertex IDs in ascending source
+global-vertex order, independently of owned/ghost cell discovery order.
+Because entity canonicalization compares vertex IDs, this order-preserving
+renumbering makes the canonical edge direction and facet vertex cycle
+identical after mapping to global IDs on every Rank. The MPI regression test
+compares all shared local entity vertex sequences and Cell-to-Facet
+permutation/sign codes against the common source mesh on 2 and 3 ranks.

@@ -80,6 +80,45 @@ void run(const idmesh::Mesh& source,Index depth)
     require(sum==static_cast<int>(source.entity_count(d)),
             "some cells lost or multiply owned");
 
+
+    // Cross-rank orientation identity is stronger than matching facet IDs:
+    // each local entity's canonical global vertex cycle must match the
+    // source entity, even when ranks discovered cells in different orders.
+    for(Index dimension=1;dimension<d;++dimension)
+        for(Index entity=0;entity<part.mesh.entity_count(dimension);++entity) {
+            const auto source_id=part.global_ids[dimension][entity];
+            const auto local_vertices=part.mesh.entity_vertices(dimension,entity);
+            const auto global_vertices=source.entity_vertices(dimension,source_id);
+            require(local_vertices.size()==global_vertices.size(),
+                    "shared entity vertex arity mismatch");
+            for(std::size_t j=0;j<local_vertices.size();++j)
+                require(part.global_ids[0][local_vertices[j]]==global_vertices[j],
+                        "cross-rank canonical orientation mismatch");
+        }
+    const auto local_cf=part.mesh.relation(d,d-1);
+    const auto global_cf=source.relation(d,d-1);
+    for(Index local_cell=0;local_cell<n;++local_cell) {
+        const Index global_cell=static_cast<Index>(part.global_ids[d][local_cell]);
+        auto local_faces=local_cf.row(local_cell);
+        auto local_orientations=local_cf.row_orientations(local_cell);
+        auto local_signs=local_cf.row_signs(local_cell);
+        auto source_faces=global_cf.row(global_cell);
+        for(std::size_t j=0;j<local_faces.size();++j) {
+            const auto global_face=part.global_ids[d-1][local_faces[j]];
+            bool matched=false;
+            for(std::size_t k=0;k<source_faces.size();++k) {
+                if(source_faces[k]!=global_face)continue;
+                matched=true;
+                const auto a=local_orientations[j];
+                const auto b=global_cf.row_orientations(global_cell)[k];
+                require(a.rotation==b.rotation && a.reversed==b.reversed
+                        && local_signs[j]==global_cf.row_signs(global_cell)[k],
+                        "local-to-canonical facet orientation changed across ranks");
+            }
+            require(matched,"partition facet is absent from source cell");
+        }
+    }
+
     // Verify that globally shared edge identities agree between partitions.
     auto globalSupport=source.relation(d-1,d);
     for(Index facet=0;facet<source.entity_count(d-1);++facet) {

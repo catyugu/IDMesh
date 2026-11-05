@@ -159,15 +159,20 @@ PartitionedMesh partition_replicated(const Mesh& global,Index ghost_layers)
 
     MeshBuilder builder(d,global.geometric_dimension());
     std::map<Index,Index> local_vertices,local_extras,local_cells;
-    const auto map_vertex=[&](Index id) -> Index {
-        auto [it,inserted]=local_vertices.try_emplace(id,invalid_index);
-        if(inserted)it->second=builder.add_vertex(global.coordinates()[id]);
-        return it->second;
-    };
+    // Enumerate local corner vertices by ascending source/global ID, not
+    // cell discovery order. This order-preserving renumbering guarantees
+    // canonical local edges/faces have exactly the same orientation on
+    // every Rank that shares them.
+    std::set<Index> used_vertices;
+    for(Index global_cell:order)
+        for(Index vertex:global.entity_vertices(d,global_cell))
+            used_vertices.insert(vertex);
+    for(Index vertex:used_vertices)
+        local_vertices.emplace(vertex,builder.add_vertex(global.coordinates()[vertex]));
     for(Index global_cell:order) {
         std::vector<Index> vertices,extras;
         for(auto v:global.entity_vertices(d,global_cell))
-            vertices.push_back(map_vertex(v));
+            vertices.push_back(local_vertices.at(v));
         const auto geometry=global.cell_geometry_nodes(global_cell);
         for(std::size_t k=vertices.size();k<geometry.size();++k) {
             const Index id=geometry[k];

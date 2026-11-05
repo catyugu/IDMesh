@@ -102,3 +102,7 @@ Its first batched device kernels compute the sum of cell centroids and a
 geometry-connectivity checksum; these do not rebuild or upload connectivity
 on each call. Kokkos Serial is verified in CI. Device backends require a
 matching compiled Kokkos variant and GPU hardware to validate.
+
+Shared facet identity and canonical orientation are both tested across MPI
+ranks. Local corner vertices are renumbered in ascending global vertex order
+so each Rank independently reconstructs the same canonical edge/facet cycle.
