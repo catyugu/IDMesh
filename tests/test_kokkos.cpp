@@ -44,6 +44,29 @@ int main(int argc, char** argv)
                 geometry_checksum += (++offset) * (std::uint64_t(id) + 1);
         if (device_mesh.geometry_connectivity_checksum() != geometry_checksum)
             throw std::runtime_error("device quadratic-geometry CSR mirror mismatch");
+        const auto support = mesh.relation(2, 3);
+        std::vector<double> transmissibility(mesh.entity_count(2), 0);
+        int internal_faces = 0;
+        for (idmesh::Index f = 0; f < mesh.entity_count(2); ++f) {
+            if (support.row(f).size() == 2) {
+                transmissibility[f] = 1.25;
+                ++internal_faces;
+            }
+        }
+        if (internal_faces != 1)
+            throw std::runtime_error("diffusion test requires one internal facet");
+        idmesh::kokkos::DeviceCellField x(2);
+        idmesh::kokkos::DeviceCellField y(2);
+        const std::array<double, 2> source_values{1., 3.};
+        x.upload(source_values);
+        idmesh::kokkos::DeviceDiffusion diffusion(mesh, transmissibility);
+        diffusion.apply(x, y);
+        const auto result = y.download();
+        if (result.size() != 2 || std::abs(result[0] + 2.5) > 1e-12 ||
+            std::abs(result[1] - 2.5) > 1e-12 ||
+            std::abs(result[0] + result[1]) > 1e-12)
+            throw std::runtime_error("device diffusion failed conservation");
+
         status = 0;
         std::cout << "Kokkos: persistent topology mirror and parallel reductions OK\n";
     }

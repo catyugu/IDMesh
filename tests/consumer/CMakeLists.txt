@@ -12,3 +12,8 @@ if(TARGET IDMesh::Kokkos)
     add_executable(idmesh_kokkos_consumer kokkos.cpp)
     target_link_libraries(idmesh_kokkos_consumer PRIVATE IDMesh::Kokkos)
 endif()
+
+if(TARGET IDMesh::MPIKokkos)
+    add_executable(idmesh_mpi_kokkos_consumer mpi_kokkos.cpp)
+    target_link_libraries(idmesh_mpi_kokkos_consumer PRIVATE IDMesh::MPIKokkos)
+endif()

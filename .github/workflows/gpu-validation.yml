@@ -1,0 +1,75 @@
+name: GPU hardware validation
+
+# Never run untrusted pull_request code on a privileged GPU runner.
+# Manually select a trusted, ephemeral CUDA/HIP runner configured by the owner.
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Kokkos GPU backend
+        type: choice
+        options: [CUDA, HIP]
+        required: true
+        default: CUDA
+      runner_label:
+        description: Label of the approved GPU runner
+        required: true
+        default: idmesh-cuda
+      compiler_arch:
+        description: CMake CUDA architecture (75) or HIP target (gfx90a)
+        required: true
+        default: "75"
+      kokkos_arch:
+        description: Kokkos architecture suffix (TURING75 or AMD_GFX90A)
+        required: true
+        default: TURING75
+
+permissions:
+  contents: read
+
+jobs:
+  hardware-kernels:
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 60
+    env:
+      BACKEND: ${{ inputs.backend }}
+      GPU_ARCH: ${{ inputs.compiler_arch }}
+      KOKKOS_ARCH: ${{ inputs.kokkos_arch }}
+      OMPI_MCA_rmaps_base_oversubscribe: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify physical GPU and drivers
+        shell: bash
+        run: |
+          if [[ "$BACKEND" == CUDA ]]; then
+            command -v nvcc
+            nvidia-smi --list-gpus
+            test "$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)" -ge 1
+          elif [[ "$BACKEND" == HIP ]]; then
+            command -v hipcc
+            command -v rocminfo
+            rocminfo | grep -E 'Name:.*gfx[0-9]+' | head -1
+          else
+            exit 1
+          fi
+      - name: Configure hardware backend
+        shell: bash
+        run: |
+          common="-DIDMESH_ENABLE_KOKKOS=ON -DIDMESH_ENABLE_MPI=ON -DIDMESH_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release"
+          if [[ "$BACKEND" == CUDA ]]; then
+            cmake -S . -B build-gpu $common -DIDMESH_KOKKOS_DEVICE_BACKEND=CUDA \
+              -DCMAKE_CUDA_ARCHITECTURES="$GPU_ARCH" "-DKokkos_ARCH_${KOKKOS_ARCH}=ON"
+          else
+            cmake -S . -B build-gpu $common -DIDMESH_KOKKOS_DEVICE_BACKEND=HIP \
+              -DCMAKE_HIP_ARCHITECTURES="$GPU_ARCH" "-DKokkos_ARCH_${KOKKOS_ARCH}=ON"
+          fi
+      - name: Compile GPU kernels and device-aware MPI adapter
+        run: cmake --build build-gpu --parallel 2
+      - name: Validate device-resident diffusion and geometry kernels
+        run: ctest --test-dir build-gpu --output-on-failure -R 'idmesh.kokkos$'
+      - name: Validate Kokkos-backed multi-rank field exchange
+        run: ctest --test-dir build-gpu --output-on-failure -R 'idmesh.mpi.kokkos'
+      - name: Report actual GPU runtime
+        shell: bash
+        run: |
+          if [[ "$BACKEND" == CUDA ]]; then nvidia-smi; else rocminfo | head -60; fi

@@ -48,3 +48,11 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Build halo exchange from explicit global-ID ghost requests without global mesh replication.
 - [ ] External ParMETIS/PT-Scotch partition quality and multi-node weak scaling.
 - [ ] Fully distributed parallel generation of shard files from a global parallel mesh format.
+
+## GPU transport and numerical execution
+- [x] DeviceCellField with explicit Host upload/download.
+- [x] DeviceDiffusion conservative two-point Cell-Facet kernel.
+- [x] Direct GPU-aware MPI capability query and safe failure on unsupported memory spaces.
+- [x] Packed Kokkos device Halo plan, including automatic Host Staging fallback.
+- [ ] Verify CUDA/HIP kernels on physical GPUs using the manual CI workflow.
+- [ ] Verify direct CUDA/ROCm-aware MPI exchange on a capable multi-GPU MPI runtime.

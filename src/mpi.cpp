@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <map>
 #include <mpi.h>
+#if defined(OPEN_MPI) && __has_include(<mpi-ext.h>)
+#include <mpi-ext.h>
+#endif
 #include <numeric>
 #include <set>
 #include <stdexcept>
@@ -71,6 +74,72 @@ namespace idmesh::mpi {
                 return false;
         return true;
     }
+    bool gpu_aware_support(DeviceMemoryKind memory)
+    {
+        ensure_initialized();
+        if (memory == DeviceMemoryKind::Host)
+            return true;
+#if defined(OMPI_HAVE_MPI_EXT_CUDA) && OMPI_HAVE_MPI_EXT_CUDA
+        if (memory == DeviceMemoryKind::CUDA)
+            return MPIX_Query_cuda_support() == 1;
+#endif
+#if defined(OMPI_HAVE_MPI_EXT_ROCM) && OMPI_HAVE_MPI_EXT_ROCM
+        if (memory == DeviceMemoryKind::HIP)
+            return MPIX_Query_rocm_support() == 1;
+#endif
+        return false;
+    }
+
+    int ExchangePlan::peer_count() const noexcept
+    {
+        return data_ ? static_cast<int>(data_->send.size()) : 0;
+    }
+    Index ExchangePlan::local_cell_count() const noexcept
+    {
+        return data_ ? data_->local_cells : 0;
+    }
+    std::span<const Index> ExchangePlan::send_indices(int peer) const
+    {
+        if (!data_ || peer < 0 || peer >= peer_count())
+            throw std::out_of_range("invalid halo send peer");
+        return data_->send[peer];
+    }
+    std::span<const Index> ExchangePlan::receive_indices(int peer) const
+    {
+        if (!data_ || peer < 0 || peer >= peer_count())
+            throw std::out_of_range("invalid halo receive peer");
+        return data_->recv[peer];
+    }
+
+    void ExchangePlan::exchange_packed(
+        const void* send, void* receive, Index components,
+        DeviceMemoryKind memory) const
+    {
+        ensure_initialized();
+        require(data_ != nullptr && components > 0, "invalid packed halo exchange");
+        if (!gpu_aware_support(memory))
+            throw std::runtime_error("MPI is not GPU aware for the requested memory space");
+        const int peers = peer_count();
+        std::vector<int> sc(peers), rc(peers), sd(peers), rd(peers);
+        std::size_t send_size = 0, receive_size = 0;
+        for (int peer = 0; peer < peers; ++peer) {
+            const auto sending = data_->send[peer].size() * components;
+            const auto receiving = data_->recv[peer].size() * components;
+            require(sending <= INT_MAX && receiving <= INT_MAX &&
+                    send_size <= static_cast<std::size_t>(INT_MAX) - sending &&
+                    receive_size <= static_cast<std::size_t>(INT_MAX) - receiving,
+                "packed halo exchange exceeds MPI count/displacement limits");
+            sc[peer] = static_cast<int>(sending);
+            rc[peer] = static_cast<int>(receiving);
+            sd[peer] = static_cast<int>(send_size);
+            rd[peer] = static_cast<int>(receive_size);
+            send_size += sending;
+            receive_size += receiving;
+        }
+        check_mpi(MPI_Alltoallv(send, sc.data(), sd.data(), MPI_DOUBLE,
+            receive, rc.data(), rd.data(), MPI_DOUBLE, MPI_COMM_WORLD));
+    }
+
     void ExchangePlan::exchange_cells(std::span<double> values, Index components) const
     {
         ensure_initialized();

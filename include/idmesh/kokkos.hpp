@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
+#include <vector>
 
 #if defined(_WIN32)
 #if defined(IDMESH_KOKKOS_EXPORTS)
@@ -35,6 +37,37 @@ namespace idmesh::kokkos {
         Index geometry_nodes() const noexcept;
         std::array<double, 3> centroid_sum() const;
         std::uint64_t geometry_connectivity_checksum() const;
+
+    private:
+        struct Data;
+        std::shared_ptr<Data> data_;
+    };
+
+    // Kokkos-owned device field storage. Pointers are device-space addresses:
+    // never dereference them on Host unless that memory space is host accessible.
+    // All fields and kernels require an initialized Kokkos runtime.
+    class IDMESH_KOKKOS_API DeviceCellField {
+    public:
+        explicit DeviceCellField(Index cells, Index components = 1);
+        Index cells() const noexcept;
+        Index components() const noexcept;
+        void upload(std::span<const double> values);
+        std::vector<double> download() const;
+        void* device_data() noexcept;
+        const void* device_data() const noexcept;
+
+    private:
+        struct Data;
+        std::shared_ptr<Data> data_;
+    };
+
+    // Matrix-free, conservative two-point diffusion action on a static
+    // nonmanifold-free mesh. Neumann-zero boundary facets have no contribution.
+    class IDMESH_KOKKOS_API DeviceDiffusion {
+    public:
+        DeviceDiffusion(const Mesh& mesh, std::span<const double> facet_weights);
+        void apply(const DeviceCellField& input, DeviceCellField& output) const;
+        Index cells() const noexcept;
 
     private:
         struct Data;

@@ -86,3 +86,22 @@ jobs:
         run: cmake --build build-basix --target idmesh_orientation_export --parallel 2
       - name: Validate Nedelec DOF symmetry transformations with Basix
         run: python tests/test_basix.py ./build-basix/idmesh_orientation_export
+
+  mpi-kokkos-serial:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MPI runtime and headers
+        run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
+      - name: Configure combined MPI/Kokkos backend
+        run: cmake -S . -B build-joint -DCMAKE_BUILD_TYPE=Release -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON -DIDMESH_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build-joint --parallel 2
+      - name: Run MPI device-halo tests
+        env:
+          OMPI_MCA_rmaps_base_oversubscribe: "1"
+        run: ctest --test-dir build-joint --output-on-failure
+      - name: Install combined SDK
+        run: cmake --install build-joint --prefix install-joint
+      - name: Verify external combined SDK consumer
+        run: cmake -S tests/consumer -B consumer-joint -DCMAKE_PREFIX_PATH=$PWD/install-joint && cmake --build consumer-joint --parallel 2

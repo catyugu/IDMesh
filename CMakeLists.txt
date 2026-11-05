@@ -13,6 +13,8 @@ option(IDMESH_BUILD_TESTS "Build IDMesh tests" ${PROJECT_IS_TOP_LEVEL})
 option(IDMESH_BUILD_EXAMPLES "Build IDMesh examples" ${PROJECT_IS_TOP_LEVEL})
 option(IDMESH_BUILD_BENCHMARKS "Build development-only performance benchmarks" ${PROJECT_IS_TOP_LEVEL})
 option(IDMESH_ENABLE_KOKKOS "Build optional Kokkos backend" OFF)
+set(IDMESH_KOKKOS_DEVICE_BACKEND "SERIAL" CACHE STRING "Kokkos device backend: SERIAL, CUDA or HIP")
+set_property(CACHE IDMESH_KOKKOS_DEVICE_BACKEND PROPERTY STRINGS SERIAL CUDA HIP)
 option(IDMESH_ENABLE_MPI "Build optional MPI distribution backend" OFF)
 option(IDMESH_INSTALL "Install IDMesh SDK" ${PROJECT_IS_TOP_LEVEL})
 
@@ -31,6 +33,25 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 if(IDMESH_ENABLE_KOKKOS)
+    if(IDMESH_KOKKOS_DEVICE_BACKEND STREQUAL "CUDA")
+        enable_language(CUDA)
+        set(CMAKE_CUDA_STANDARD 20)
+        set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+        set(Kokkos_ENABLE_CUDA ON CACHE BOOL "" FORCE)
+        set(Kokkos_ENABLE_COMPILE_AS_CMAKE_LANGUAGE ON CACHE BOOL "" FORCE)
+        set_source_files_properties(src/kokkos.cpp src/mpi_kokkos.cpp
+            tests/test_kokkos.cpp tests/test_mpi_kokkos.cpp PROPERTIES LANGUAGE CUDA)
+    elseif(IDMESH_KOKKOS_DEVICE_BACKEND STREQUAL "HIP")
+        enable_language(HIP)
+        set(CMAKE_HIP_STANDARD 20)
+        set(CMAKE_HIP_STANDARD_REQUIRED ON)
+        set(Kokkos_ENABLE_HIP ON CACHE BOOL "" FORCE)
+        set(Kokkos_ENABLE_COMPILE_AS_CMAKE_LANGUAGE ON CACHE BOOL "" FORCE)
+        set_source_files_properties(src/kokkos.cpp src/mpi_kokkos.cpp
+            tests/test_kokkos.cpp tests/test_mpi_kokkos.cpp PROPERTIES LANGUAGE HIP)
+    elseif(NOT IDMESH_KOKKOS_DEVICE_BACKEND STREQUAL "SERIAL")
+        message(FATAL_ERROR "Unsupported IDMESH_KOKKOS_DEVICE_BACKEND")
+    endif()
     # Kokkos static archives are linked into the SDK's shared adapter.
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     include(cmake/CPM.cmake)
@@ -60,6 +81,20 @@ if(IDMESH_ENABLE_MPI)
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
     set_target_properties(idmesh_mpi PROPERTIES EXPORT_NAME MPI)
+endif()
+
+if(IDMESH_ENABLE_MPI AND IDMESH_ENABLE_KOKKOS)
+    add_library(idmesh_mpi_kokkos SHARED src/mpi_kokkos.cpp)
+    add_library(IDMesh::MPIKokkos ALIAS idmesh_mpi_kokkos)
+    target_compile_features(idmesh_mpi_kokkos PUBLIC cxx_std_20)
+    target_compile_definitions(idmesh_mpi_kokkos PRIVATE IDMESH_MPI_KOKKOS_EXPORTS
+        PUBLIC IDMESH_MPI_KOKKOS_SHARED)
+    target_include_directories(idmesh_mpi_kokkos PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_link_libraries(idmesh_mpi_kokkos PUBLIC idmesh_mpi idmesh_kokkos
+        PRIVATE Kokkos::kokkos MPI::MPI_CXX)
+    set_target_properties(idmesh_mpi_kokkos PROPERTIES EXPORT_NAME MPIKokkos)
 endif()
 
 if(IDMESH_BUILD_TESTS)
@@ -103,6 +138,14 @@ if(IDMESH_BUILD_TESTS)
                 ${MPIEXEC_PREFLAGS} $<TARGET_FILE:idmesh_mpi_shards_test> ${MPIEXEC_POSTFLAGS})
         endforeach()
     endif()
+    if(IDMESH_ENABLE_MPI AND IDMESH_ENABLE_KOKKOS)
+        add_executable(idmesh_mpi_kokkos_test tests/test_mpi_kokkos.cpp)
+        target_link_libraries(idmesh_mpi_kokkos_test PRIVATE
+            idmesh_mpi_kokkos Kokkos::kokkos MPI::MPI_CXX)
+        add_test(NAME idmesh.mpi.kokkos.2
+            COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:idmesh_mpi_kokkos_test> ${MPIEXEC_POSTFLAGS})
+    endif()
 endif()
 
 if(IDMESH_BUILD_EXAMPLES)
@@ -132,6 +175,9 @@ if(IDMESH_INSTALL)
     endif()
     if(IDMESH_ENABLE_MPI)
         list(APPEND _targets idmesh_mpi)
+    endif()
+    if(IDMESH_ENABLE_MPI AND IDMESH_ENABLE_KOKKOS)
+        list(APPEND _targets idmesh_mpi_kokkos)
     endif()
     install(TARGETS ${_targets} EXPORT IDMeshTargets
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

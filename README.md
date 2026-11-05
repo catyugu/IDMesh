@@ -130,3 +130,24 @@ writer still needs a complete source mesh on the calling process.
 The distributed reader works directly with externally generated rank
 shards; shard creation from parallel input formats and dynamic
 repartitioning remain future work.
+
+## GPU-aware MPI and device-side numerical kernels
+
+When both `IDMESH_ENABLE_KOKKOS=ON` and `IDMESH_ENABLE_MPI=ON` are set,
+`IDMesh::MPIKokkos` is available through `idmesh/mpi_kokkos.hpp`.
+`DeviceHaloPlan` packs/unpacks interleaved Cell fields with Kokkos
+device kernels. It uses direct CUDA/ROCm-aware MPI only when capability
+detection confirms support; otherwise `Automatic` falls back to Host
+Staging. `RequireGpuAware` refuses to run without an aware MPI runtime.
+
+`DeviceDiffusion` applies a conservative matrix-free two-point
+Cell-Facet operator to a device-resident scalar `DeviceCellField`, with
+zero Neumann boundary contribution. The GPU tests compare numerical
+results and discrete conservation to CPU expectations. The combined
+MPI/Kokkos Serial path runs automatically in CI.
+
+Real-device validation is provided by the manually dispatched
+`.github/workflows/gpu-validation.yml`. Configure an approved CUDA/HIP
+GPU runner label and matching architecture in the Actions UI; no standard
+GitHub-hosted runner is assumed to contain a GPU. CUDA/HIP verification
+remains unverified until a run on actual hardware succeeds.

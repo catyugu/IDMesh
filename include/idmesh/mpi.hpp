@@ -28,6 +28,13 @@ namespace idmesh::mpi {
     IDMESH_MPI_API int world_rank();
     IDMESH_MPI_API int world_size();
 
+    enum class DeviceMemoryKind : std::uint8_t {
+        Host,
+        CUDA,
+        HIP
+    };
+    IDMESH_MPI_API bool gpu_aware_support(DeviceMemoryKind memory);
+
     struct PartitionedMesh;
 
     class IDMESH_MPI_API ExchangePlan {
@@ -37,6 +44,17 @@ namespace idmesh::mpi {
         // double components per cell. Blocking, thread-unsafe, host-buffer API.
         void exchange_cells(std::span<double> values, Index components = 1) const;
         bool empty() const noexcept;
+        int peer_count() const noexcept;
+        Index local_cell_count() const noexcept;
+        std::span<const Index> send_indices(int peer) const;
+        std::span<const Index> receive_indices(int peer) const;
+
+        // Already-packed contiguous buffers, laid out peer-by-peer in
+        // exactly send_indices()/receive_indices() order. Device pointers are
+        // accepted only when the MPI implementation explicitly reports GPU
+        // awareness. The caller synchronizes device kernels around MPI calls.
+        void exchange_packed(const void* send, void* receive, Index components,
+            DeviceMemoryKind memory) const;
 
     private:
         struct Data;

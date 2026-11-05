@@ -209,3 +209,25 @@ missing off-rank neighbors from geometry. MPI_WORLD is still the
 communicator, metadata use blocking MPI operations, and local shard
 files must be consistent. Extremely large individual messages remain
 subject to MPI_Alltoallv's integer-count limits.
+
+## GPU fields, numerical kernels and direct MPI transport
+
+The Kokkos backend owns `DeviceCellField` buffers and `DeviceDiffusion`
+Cell-Facet CSR weights. Parallel kernels evaluate the conservative
+two-point action on the current default execution space; data transfer
+to/from the Host is explicit. The combined MPI/Kokkos adapter packs
+owned Cell records and unpacks Ghost records using Kokkos kernels.
+
+`DeviceHaloPlan` stores the peer-index maps in device memory and
+supports `Automatic`, `HostStaging`, and `RequireGpuAware` transports.
+When using Open MPI, capability is queried via
+`MPIX_Query_cuda_support` / `MPIX_Query_rocm_support`, when present.
+Direct transport fences the device pack kernel before entering MPI and
+the unpack kernel after MPI. Host Staging copies packed values through
+mirror Views, preserving operation ordering even when the MPI runtime
+does not support direct GPU pointers.
+
+The default CMake backend is `SERIAL`. The optional CUDA/HIP modes
+compile the Kokkos adapter sources in the CUDA/HIP CMake language and
+are exposed as `IDMESH_KOKKOS_DEVICE_BACKEND`. A manual GPU workflow
+tests real devices only on explicitly provisioned runners.
