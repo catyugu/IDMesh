@@ -4,6 +4,7 @@
 #include <vector>
 #include <array>
 #include <type_traits>
+#include <string>
 #include <stdexcept>
 
 namespace idmesh::kokkos {
@@ -107,7 +108,7 @@ DeviceMesh::DeviceMesh(const Mesh& mesh):data_(std::make_shared<Data>())
     auto mirror_indices=[](auto& output,const auto& host,
                            const char* label) {
         using View=std::remove_reference_t<decltype(output)>;
-        output=View(label,host.size());
+        output=View(std::string(label),host.size());
         auto temporary=Kokkos::create_mirror_view(output);
         for(std::size_t i=0;i<host.size();++i)temporary(i)=host[i];
         Kokkos::deep_copy(output,temporary);

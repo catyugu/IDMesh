@@ -41,6 +41,10 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Install Kokkos SDK
+        run: cmake --install build --prefix install-kokkos
+      - name: Build external Kokkos consumer
+        run: cmake -S tests/consumer -B consumer-kokkos -DCMAKE_PREFIX_PATH=$PWD/install-kokkos && cmake --build consumer-kokkos --parallel 2
 
   mpi:
     runs-on: ubuntu-24.04
@@ -56,6 +60,10 @@ jobs:
         env:
           OMPI_MCA_rmaps_base_oversubscribe: "1"
         run: ctest --test-dir build-mpi --output-on-failure
+      - name: Install MPI SDK
+        run: cmake --install build-mpi --prefix install-mpi
+      - name: Build external MPI consumer
+        run: cmake -S tests/consumer -B consumer-mpi -DCMAKE_PREFIX_PATH=$PWD/install-mpi && cmake --build consumer-mpi --parallel 2
 
   basix-integration:
     runs-on: ubuntu-24.04
