@@ -63,13 +63,16 @@ int main(int argc, char** argv)
         if (probe.gpu_aware_available()) {
             // On a GPU-aware MPI runner this exercises direct device buffers.
             check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::RequireGpuAware);
-        } else {
+        }
+        else {
             idmesh::kokkos::DeviceCellField field(partition.mesh.entity_count(
-                partition.mesh.dimension()), 2);
+                                                      partition.mesh.dimension()),
+                2);
             bool rejected = false;
             try {
                 probe.exchange(field, idmesh::mpi::kokkos::DeviceTransport::RequireGpuAware);
-            } catch (const std::runtime_error&) {
+            }
+            catch (const std::runtime_error&) {
                 rejected = true;
             }
             if (!rejected)
