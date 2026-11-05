@@ -32,11 +32,12 @@ enum class CellType : std::uint8_t {
 struct TopologyOptions {
     bool edges = true;
     bool faces = true;
+    bool facets = true;
     bool support = true;
 
     static TopologyOptions full() { return {}; }
-    static TopologyOptions finite_volume() { return {false, true, true}; }
-    static TopologyOptions cells_and_vertices() { return {false, false, false}; }
+    static TopologyOptions finite_volume() { return {false, false, true, true}; }
+    static TopologyOptions cells_and_vertices() { return {false, false, false, false}; }
 };
 
 // The canonical sequence is local[(rotation + i * (reversed ? -1 : 1)) mod n].

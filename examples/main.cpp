@@ -1,11 +1,5 @@
-#include "myproject/core.hpp"
+#include <idmesh/mesh.hpp>
 #include <array>
 #include <iostream>
-
-int main()
-{
-    const std::array<myproject::Sample, 4> samples {{{0, 1}, {1, 3}, {2, 4}, {3, 7}}};
-    const auto fit = myproject::fit_line(samples);
-    std::cout << myproject::format_fit(fit) << '\n';
-    std::cout << "Prediction at x = 4: " << fit.predict(4) << '\n';
-}
+#include <utility>
+int main() { idmesh::MeshBuilder b(2,2); b.add_vertex({0,0,0}); b.add_vertex({1,0,0}); b.add_vertex({0,1,0}); std::array<idmesh::Index,3> v{0,1,2}; b.add_cell(idmesh::CellType::triangle,v); auto m=std::move(b).finalize(); std::cout << m.entity_count(1) << " edges\n"; }

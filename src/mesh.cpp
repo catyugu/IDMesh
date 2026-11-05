@@ -271,8 +271,8 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
     std::array<std::map<Loop, Index>, 4> lookup;
     std::array<std::array<Rows, 4>, 4> incidence;
     const auto want = [&](Index dim) {
-        return dim == 0 || dim == dimension_ || (dim == 1 && options.edges)
-            || (dim == 2 && options.faces);
+        return dim == 0 || dim == dimension_ || (dim == dimension_ - 1 && options.facets)
+            || (dim == 1 && options.edges) || (dim == 2 && options.faces);
     };
     auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
         auto canon = canonicalize(local);
@@ -306,7 +306,7 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
         }
     }
 
-    if (dimension_ == 3 && options.edges && options.faces) {
+    if (dimension_ == 3 && options.edges && want(2)) {
         for (Index f = 0; f < data->vertices[2].size(); ++f) {
             auto edges = polygon_edges(data->vertices[2][f]);
             for (const auto& edge : edges)
@@ -316,7 +316,7 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
     if (dimension_ == 2 && options.edges) {
         // Cell-to-edge was generated above; no extra construction is required.
     }
-    if (dimension_ >= 2 && options.edges) {
+    if (dimension_ >= 2 && want(1)) {
         for (Index e = 0; e < data->vertices[1].size(); ++e) {
             const auto& vertices = data->vertices[1][e];
             require(vertices.size() == 2, "edge must have two vertices");
