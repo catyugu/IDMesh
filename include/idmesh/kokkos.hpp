@@ -1,5 +1,6 @@
 #pragma once
 #include "idmesh/mesh.hpp"
+#include <array>
 #include <cstdint>
 #include <memory>
 
@@ -24,6 +25,21 @@ IDMESH_KOKKOS_API std::uint64_t incidence_count(const Mesh& mesh, Index from, In
 // Persistent mirror of one materialized topology relation in the default
 // Kokkos memory space. No Kokkos header or template is exposed in this ABI.
 // Construct only after Kokkos::initialize(), destroy before finalize().
+// Persistent mirror of topological cell corners plus all geometry nodes.
+// Device storage uses SoA coordinates and CSR cell connectivity.
+// Batched numerical reductions run on the default Kokkos execution space.
+class IDMESH_KOKKOS_API DeviceMesh {
+public:
+    explicit DeviceMesh(const Mesh& mesh);
+    Index cells() const noexcept;
+    Index geometry_nodes() const noexcept;
+    std::array<double,3> centroid_sum() const;
+    std::uint64_t geometry_connectivity_checksum() const;
+private:
+    struct Data;
+    std::shared_ptr<Data> data_;
+};
+
 class IDMESH_KOKKOS_API DeviceRelation {
 public:
     DeviceRelation(const Mesh& mesh, Index from, Index to);

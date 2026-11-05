@@ -140,3 +140,13 @@ the consistency of canonical DOF coefficients through both local views of
 a shared tetrahedral facet. This checks the mesh's geometric permutation
 contract against an independent finite-element DOF representation.
 No finite-element-specific transformation matrices are stored in the mesh.
+
+### Device-resident geometry
+
+`idmesh::kokkos::DeviceMesh` copies all geometry-node coordinates in SoA
+layout, plus cell-to-corner and cell-to-geometry CSR arrays, to Kokkos's
+`DefaultExecutionSpace::memory_space`. It owns these mirrors independently
+of the source mesh. Batched centroid and geometry-connectivity reductions
+exercise the device buffers without repeated upload. Future geometry kernels
+may reuse these buffers to evaluate quadrature-point maps in batches.
+Kokkos compilation remains strictly private to the optional adapter.

@@ -1,6 +1,7 @@
 #include "idmesh/kokkos.hpp"
 #include <Kokkos_Core.hpp>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -33,6 +34,20 @@ int main(int argc,char** argv)
            mirrored.boundary_coefficient_sum()!=signs ||
            mirrored.incidence_count()!=idmesh::kokkos::incidence_count(mesh,3,2))
             throw std::runtime_error("Kokkos device mirror/parallel reduction mismatch");
+        idmesh::kokkos::DeviceMesh device_mesh(mesh);
+        if(device_mesh.cells()!=2 || device_mesh.geometry_nodes()!=5)
+            throw std::runtime_error("device geometry mirror size mismatch");
+        const auto center=device_mesh.centroid_sum();
+        if(std::abs(center[0]-3.25)>1e-12 ||
+           std::abs(center[1])>1e-12 || std::abs(center[2])>1e-12)
+            throw std::runtime_error("device centroid batch mismatch");
+        std::uint64_t geometry_checksum=0;
+        std::uint64_t offset=0;
+        for(idmesh::Index cell=0;cell<2;++cell)
+            for(auto id:mesh.cell_geometry_nodes(cell))
+                geometry_checksum+=(++offset)*(std::uint64_t(id)+1);
+        if(device_mesh.geometry_connectivity_checksum()!=geometry_checksum)
+            throw std::runtime_error("device quadratic-geometry CSR mirror mismatch");
         status=0;
         std::cout<<"Kokkos: persistent topology mirror and parallel reductions OK\n";
     }catch(const std::exception& e){

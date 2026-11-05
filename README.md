@@ -95,3 +95,10 @@ face and edge incidences. `tests/test_basix.py` consumes this output using
 the `fenics-basix` Python bindings backed by Basix C++, checking higher-order
 Nedelec edge reversal and triangular-face dihedral-group transformations.
 Basix remains a test-only dependency; no Basix types enter the SDK API.
+
+The Kokkos adapter also provides `DeviceMesh`, a persistent SoA mirror of
+geometry-node coordinates, cell-to-vertex CSR and cell-to-geometry CSR.
+Its first batched device kernels compute the sum of cell centroids and a
+geometry-connectivity checksum; these do not rebuild or upload connectivity
+on each call. Kokkos Serial is verified in CI. Device backends require a
+matching compiled Kokkos variant and GPU hardware to validate.
