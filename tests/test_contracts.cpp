@@ -1,5 +1,7 @@
 #include <idmesh/mesh.hpp>
+#include <algorithm>
 #include <array>
+#include <numeric>
 #include <cstddef>
 #include <iostream>
 #include <stdexcept>
@@ -124,6 +126,43 @@ void layer_masks()
         fv.validate();
     }
 }
+
+void permutation_invariants()
+{
+    constexpr std::array types {
+        idmesh::CellType::segment,idmesh::CellType::triangle,
+        idmesh::CellType::quadrilateral,idmesh::CellType::tetrahedron,
+        idmesh::CellType::hexahedron,idmesh::CellType::prism,
+        idmesh::CellType::pyramid
+    };
+    for (auto type : types) {
+        const Index dimension=idmesh::cell_dimension(type);
+        const Index n=idmesh::cell_vertex_count(type);
+        std::vector<Index> order(n);
+        std::iota(order.begin(),order.end(),Index{0});
+        unsigned permutations=0;
+        do {
+            idmesh::MeshBuilder builder(dimension,3);
+            for (Index i=0;i<n;++i) builder.add_vertex({double(i),0,0});
+            builder.add_cell(type,order);
+            auto mesh=std::move(builder).finalize();
+            mesh.validate();
+            if (dimension > 1) {
+                const auto relation=mesh.relation(dimension,dimension-1);
+                for (Index facet=0;facet<idmesh::cell_facet_count(type);++facet) {
+                    std::vector<Index> local;
+                    for (auto vertex : idmesh::reference_facet_vertices(type,facet))
+                        local.push_back(order[vertex]);
+                    verify_orientation(local,
+                        mesh.entity_vertices(dimension-1,relation.row(0)[facet]),
+                        relation.row_orientations(0)[facet]);
+                }
+            }
+            ++permutations;
+        } while (permutations<64 && std::next_permutation(order.begin(),order.end()));
+    }
+}
+
 void default_mesh()
 {
     idmesh::Mesh mesh;
@@ -140,6 +179,7 @@ int main()
         all_reference_cells();
         mixed_hex_prism();
         layer_masks();
+        permutation_invariants();
         default_mesh();
         std::cout << "IDMesh contract tests passed\n";
     } catch (const std::exception& e) {

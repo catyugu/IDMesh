@@ -7,8 +7,8 @@
 - [x] Implement optional entity dimensions and explicit CSR/fixed-stride materialization.
 - [x] Expose read-only topology and geometry views.
 - [x] Import first-order ASCII Gmsh 2.2/4.1 meshes with physical cell and facet labels.
-- [ ] Run and verify the optional CPU Kokkos adapter with Kokkos kept out of core public headers.
-- [ ] Test boundary-of-boundary and installation on Linux, Windows and macOS.
+- [x] Run and verify the optional CPU Kokkos adapter with Kokkos kept out of core public headers.
+- [x] Test boundary-of-boundary and installation on Linux, Windows and macOS.
 
 ## Milestone 2: distributed execution
 - Global entity identity and deterministic cross-rank orientation matching.
@@ -26,5 +26,5 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Retain physical group memberships and names from all Gmsh dimensions.
 - [x] Represent quadratic Gmsh geometry nodes separately from topological vertices.
 - [x] Add VTK legacy ASCII and Medit ASCII first-order readers and writers.
-- [ ] Verify high-order and cross-format round-trips on all supported platforms.
+- [x] Verify the supported high-order Gmsh imports and linear-format IO round-trips on all supported platforms.
 - [ ] Provide native high-order VTK and native high-order Medit I/O adapters.
