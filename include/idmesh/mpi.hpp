@@ -79,7 +79,8 @@ namespace idmesh::mpi {
     // the same source mesh, with matching dimension-specific local IDs.
     // Final local topology is owned-cells-then-facet-neighbor ghosts. Source
     // faces (or edges in 2D) and facet support must be materialized.
-    // Large distributed file loading and graph partitioners are separate work.
+    // Use read_partition_shard for rank-local distributed data loading;
+    // partition_graph is a deterministic balanced region-growth baseline.
     IDMESH_MPI_API PartitionedMesh partition_replicated(
         const Mesh& source, Index ghost_layers = 1);
 

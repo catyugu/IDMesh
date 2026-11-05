@@ -154,13 +154,16 @@ namespace idmesh {
         std::map<std::pair<Index, int>, std::string> physical_names_;
     };
 
-    // Gmsh first-order ASCII MSH 2.2 / 4.1; higher-order elements are rejected.
+    // Gmsh ASCII MSH 2.2 / 4.1: first- and second-order standard cells,
+    // geometry-node connectivity, physical groups and names.
     IDMESH_API Mesh read_gmsh(const std::string& filename, TopologyOptions options = TopologyOptions::full());
-    // ASCII legacy VTK UNSTRUCTURED_GRID, linear cells and physical_tag attribute.
+    // ASCII legacy VTK UNSTRUCTURED_GRID with standard linear and supported
+    // quadratic cell types; one physical_tag attribute per exported cell.
     IDMESH_API Mesh read_vtk_legacy(const std::string& filename,
         TopologyOptions options = TopologyOptions::full());
     IDMESH_API void write_vtk_legacy(const Mesh& mesh, const std::string& filename);
-    // ASCII Medit .mesh, first-order element sections and integer references.
+    // ASCII Medit .mesh, linear cells and native Edge/Triangle/Tetra P2;
+    // one integer physical reference per exported cell.
     IDMESH_API Mesh read_medit(const std::string& filename,
         TopologyOptions options = TopologyOptions::full());
     IDMESH_API void write_medit(const Mesh& mesh, const std::string& filename);

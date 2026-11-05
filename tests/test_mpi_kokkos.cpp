@@ -59,6 +59,22 @@ int main(int argc, char** argv)
         const auto partition = idmesh::mpi::partition_replicated(source, 1);
         check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::HostStaging);
         check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::Automatic);
+        idmesh::mpi::kokkos::DeviceHaloPlan probe(partition.exchange, 2);
+        if (probe.gpu_aware_available()) {
+            // On a GPU-aware MPI runner this exercises direct device buffers.
+            check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::RequireGpuAware);
+        } else {
+            idmesh::kokkos::DeviceCellField field(partition.mesh.entity_count(
+                partition.mesh.dimension()), 2);
+            bool rejected = false;
+            try {
+                probe.exchange(field, idmesh::mpi::kokkos::DeviceTransport::RequireGpuAware);
+            } catch (const std::runtime_error&) {
+                rejected = true;
+            }
+            if (!rejected)
+                throw std::runtime_error("unsupported direct GPU-aware MPI was accepted");
+        }
         if (idmesh::mpi::world_rank() == 0)
             std::cout << "MPI+Kokkos: packed device field halo (staging/auto) OK\n";
     }

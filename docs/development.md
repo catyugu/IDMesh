@@ -28,3 +28,19 @@ The one-time format bootstrap workflow only activates with an explicit
 Public SDK headers cannot require Kokkos, MPI, or other third-party
 headers. MPI and device backends are optional libraries and must keep
 their runtime preconditions and scaling limitations documented.
+
+## Hardware validation
+
+`.github/workflows/gpu-validation.yml` runs only through an authorized
+manual workflow dispatch. Select `CUDA` or `HIP`, an approved GPU
+runner label, and the matching CUDA architecture or AMD GFX target.
+The runner must already have the device driver, CUDA/ROCm compiler,
+CMake, and an MPI runtime available. Direct GPU-aware MPI requires a
+runtime compiled with appropriate accelerator support. If unavailable,
+the test still verifies the safe staging path and explicitly records
+that native GPU-aware MPI was not exercised.
+
+GitHub's standard Ubuntu runners cannot validate physical CUDA/HIP
+execution. For a public repo, do not expose a persistent self-hosted
+GPU machine to untrusted pull request workflows. Prefer an isolated,
+ephemeral, manually approved GPU runner.
