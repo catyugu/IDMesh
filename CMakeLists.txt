@@ -29,6 +29,8 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 if(IDMESH_ENABLE_KOKKOS)
+    # Kokkos static archives are linked into the SDK's shared adapter.
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     include(cmake/CPM.cmake)
     CPMFindPackage(NAME Kokkos VERSION 4.5.01
         GITHUB_REPOSITORY kokkos/kokkos GIT_TAG 4.5.01
