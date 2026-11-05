@@ -137,7 +137,11 @@ Rows transpose(const Rows& rows, std::size_t count)
 struct Mesh::Data {
     Index dimension = 0;
     Index geometric_dimension = 0;
+    // Mutable construction scratch, released before publication.
     std::array<std::vector<Loop>, 4> vertices;
+    std::array<Index, 4> counts {};
+    std::array<std::vector<Index>, 4> vertex_offsets;
+    std::array<std::vector<Index>, 4> vertex_indices;
     std::array<std::array<RelationData, 4>, 4> relations;
     std::vector<std::array<double, 3>> coordinates;
     std::vector<CellType> types;
@@ -203,12 +207,12 @@ Index Mesh::geometric_dimension() const { return data_->geometric_dimension; }
 Index Mesh::entity_count(Index dimension) const
 {
     if (dimension > data_->dimension) throw std::out_of_range("entity dimension");
-    return static_cast<Index>(data_->vertices[dimension].size());
+    return data_->counts[dimension];
 }
 bool Mesh::has_entities(Index dimension) const
 {
     return dimension <= data_->dimension && (dimension == 0 || dimension == data_->dimension
-        || !data_->vertices[dimension].empty());
+        || data_->counts[dimension] != 0);
 }
 bool Mesh::has_relation(Index from, Index to) const
 {
@@ -221,9 +225,11 @@ RelationView Mesh::relation(Index from, Index to) const
 }
 std::span<const Index> Mesh::entity_vertices(Index dimension, Index id) const
 {
-    if (dimension > data_->dimension || id >= data_->vertices[dimension].size())
+    if (dimension > data_->dimension || id >= data_->counts[dimension])
         throw std::out_of_range("entity index");
-    return data_->vertices[dimension][id];
+    const auto& offsets = data_->vertex_offsets[dimension];
+    const auto& indices = data_->vertex_indices[dimension];
+    return {indices.data() + offsets[id], offsets[id + 1] - offsets[id]};
 }
 std::span<const std::array<double, 3>> Mesh::coordinates() const { return data_->coordinates; }
 std::span<const CellType> Mesh::cell_types() const { return data_->types; }
@@ -339,6 +345,19 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
             if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1))
                 data->relations[to][from] = compress(transpose(rows, data->vertices[to].size()));
         }
+    }
+    for (Index dim = 0; dim <= dimension_; ++dim) {
+        const auto& lists = data->vertices[dim];
+        data->counts[dim] = static_cast<Index>(lists.size());
+        auto& offsets = data->vertex_offsets[dim];
+        auto& indices = data->vertex_indices[dim];
+        offsets.reserve(lists.size() + 1);
+        offsets.push_back(0);
+        for (const auto& vertices : lists) {
+            indices.insert(indices.end(), vertices.begin(), vertices.end());
+            offsets.push_back(static_cast<Index>(indices.size()));
+        }
+        std::vector<Loop>().swap(data->vertices[dim]);
     }
     Mesh mesh(std::move(data));
     mesh.validate();
