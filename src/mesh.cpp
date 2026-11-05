@@ -271,6 +271,10 @@ Index MeshBuilder::add_cell(CellType type, std::span<const Index> vertices, int 
 
 Mesh MeshBuilder::finalize(TopologyOptions options) &&
 {
+    // The oriented incidence DAG must remain graded. A 3D edge layer
+    // requires the intervening face layer; skipping it is invalid.
+    require(dimension_ != 3 || !options.edges || options.faces || options.facets,
+        "3D edges require faces: skipping an entity dimension is invalid");
     auto data = std::make_shared<Mesh::Data>();
     data->dimension = dimension_;
     data->geometric_dimension = geometric_dimension_;
@@ -314,20 +318,6 @@ Mesh MeshBuilder::finalize(TopologyOptions options) &&
         if (want(dimension_ - 1)) {
             for (const auto& face : faces)
                 attach(dimension_, dimension_ - 1, c, register_entity(dimension_ - 1, face));
-        } else if (dimension_ == 3 && options.edges) {
-            // Transitive Cell-to-Edge incidence has no boundary coefficient.
-            std::map<Index, Incidence> unique;
-            for (const auto& face : faces) {
-                for (const auto& edge : polygon_edges(face)) {
-                    auto entry = register_entity(1, edge);
-                    entry.sign = 0;
-                    unique.try_emplace(entry.entity, entry);
-                }
-            }
-            for (const auto& [id, entry] : unique) {
-                (void)id;
-                attach(3, 1, c, entry);
-            }
         }
     }
 

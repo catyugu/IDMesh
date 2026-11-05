@@ -12,7 +12,7 @@ IDMesh is a C++20, immutable mesh topology kernel for 1D–3D mixed-cell, unstru
 - The complete complex satisfies boundary-of-boundary = 0. A reduced storage configuration does not claim to contain boundary operators for omitted dimensions.
 - Relations are materialized explicitly as CSR or fixed-stride arrays. Device iteration never performs implicit topology construction.
 - Orientation maps local[i] to canonical[i] by the documented rotation/reflection rule, including two-vertex edges.
-- When the 3D face layer is omitted but edges requested, direct cell-to-edge incidences are materialized with zero boundary coefficients: these are transitive relations.
+- The graded incidence DAG cannot skip a dimension: in 3D, requesting edges requires faces. Invalid layer configurations are rejected by finalize(). Direct Cell-to-Vertex and Facet-to-Vertex connectivity is retained as geometry connectivity, not a boundary operator.
 - The builder is mutable; a finalized Mesh is immutable and exposes zero-copy read-only views. No dynamic mesh edits, AMR, remeshing or repartitioning are supported in the first milestone.
 - Geometric coordinates are independent of entity topology. Only affine first-order geometry is in the initial milestone.
 - The base CMake target and installed public headers contain no third-party API types. A separate optional Kokkos backend owns Kokkos execution/runtime dependencies.

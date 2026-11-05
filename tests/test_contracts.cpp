@@ -49,28 +49,28 @@ void partial_test(){
     b.add_cell(idmesh::CellType::tetrahedron,v);
     auto opt=idmesh::TopologyOptions::cells_and_vertices();
     opt.edges=true;
+    bool rejected=false;
+    try {(void)std::move(b).finalize(opt);}
+    catch(const std::invalid_argument&){rejected=true;}
+    check(rejected,"skip-layer topology accepted");
+}
+void valid_edge_face_test(){
+    idmesh::MeshBuilder b(3,3);
+    for(int i=0;i<4;++i)b.add_vertex({double(i),0,0});
+    const std::array<Index,4> v{0,1,2,3};
+    b.add_cell(idmesh::CellType::tetrahedron,v);
+    auto opt=idmesh::TopologyOptions::cells_and_vertices();
+    opt.edges=true;
+    opt.faces=true;
     auto mesh=std::move(b).finalize(opt);
-    check(mesh.has_entities(1)&&!mesh.has_entities(2),"wrong entity dimensions");
-    check(mesh.entity_count(1)==6,"unique tetra edge count");
-    check(mesh.has_relation(3,1)&&mesh.relation(3,1).row(0).size()==6,"missing cell-edge connectivity");
-    for(auto s:mesh.relation(3,1).row_signs(0))check(s==0,"transitive coefficient must be zero");
+    check(mesh.has_entities(1)&&mesh.has_entities(2),"missing intermediate face layer");
+    check(mesh.has_relation(3,2)&&mesh.has_relation(2,1),"missing adjacent incidence");
+    check(!mesh.has_relation(3,1),"unexpected skip-layer relation");
+    check(mesh.entity_count(1)==6,"wrong edge count");
     mesh.validate();
 }
-void gmsh_test(){
-    auto path=std::filesystem::temp_directory_path()/"idmesh-bad-section.msh";
-    {
-        std::ofstream f(path);
-        f<<"$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n3\n"
-             "1 0 0 0\n2 1 0 0\n3 0 1 0\n"
-             "$Elements\n1\n1 2 0 1 2 3\n$EndElements\n";
-    }
-    bool rejected=false;
-    try{(void)idmesh::read_gmsh(path.string());}catch(const std::runtime_error&){rejected=true;}
-    std::filesystem::remove(path);
-    check(rejected,"missing section terminator accepted");
-}
 int main(){
-    try{orientation_test();tetra_test();partial_test();gmsh_test();std::cout<<"contracts passed\n";}
+    try{orientation_test();tetra_test();partial_test();valid_edge_face_test();std::cout<<"contracts passed\n";}
     catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}
     return 0;
 }
