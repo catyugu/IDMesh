@@ -30,6 +30,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx'
+          git add -u
           git commit -m "style: normalize existing C++ sources with clang-format 19"
           git push origin HEAD:main
