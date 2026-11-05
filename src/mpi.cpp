@@ -55,7 +55,7 @@ namespace idmesh::mpi {
         return size;
     }
 
-        ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
+    ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
         : data_(std::move(data))
     {
     }

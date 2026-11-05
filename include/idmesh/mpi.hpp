@@ -3,8 +3,8 @@
 #include "idmesh/mesh.hpp"
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <span>
+#include <string>
 #include <vector>
 
 #if defined(_WIN32)
@@ -64,7 +64,6 @@ namespace idmesh::mpi {
     // Large distributed file loading and graph partitioners are separate work.
     IDMESH_MPI_API PartitionedMesh partition_replicated(
         const Mesh& source, Index ghost_layers = 1);
-
 
     // Fully distributed read: one rank-local ASCII shard per MPI process.
     // Shared entity IDs and owners are negotiated via a distributed registry.
