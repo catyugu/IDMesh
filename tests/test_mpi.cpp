@@ -9,144 +9,149 @@
 #include <vector>
 
 namespace {
-using idmesh::Index;
-void require(bool condition,const char* message)
-{
-    if(!condition)throw std::runtime_error(message);
-}
-idmesh::Mesh source_mesh()
-{
-    idmesh::MeshBuilder builder(2,2);
-    for(const auto& p:std::array<std::array<double,3>,6>{{
-        {0,0,0},{1,0,0},{1,1,0},{0,1,0},{2,0,0},{2,1,0}
-    }})builder.add_vertex(p);
-    const std::array<Index,4> a{0,1,2,3};
-    const std::array<Index,3> b{1,4,2},c{4,5,2};
-    builder.add_cell(idmesh::CellType::quadrilateral,a,41);
-    builder.add_cell(idmesh::CellType::triangle,b,42);
-    builder.add_cell(idmesh::CellType::triangle,c,43);
-    const std::array<Index,2> boundary{0,1};
-    builder.add_facet_tag(boundary,71);
-    return std::move(builder).finalize(idmesh::TopologyOptions::finite_volume());
-}
-void run(const idmesh::Mesh& source,Index depth)
-{
-    const auto rank=idmesh::mpi::world_rank(),size=idmesh::mpi::world_size();
-    const auto part=idmesh::mpi::partition_replicated(source,depth);
-    const auto d=part.mesh.dimension();
-    require(part.global_ids.size()==d+1 && part.owner_ranks.size()==d+1,
-            "missing distributed identity arrays");
-    const Index n=part.mesh.entity_count(d);
-    require(n==part.global_ids[d].size(),"local cell-global identity mismatch");
-    require(part.owned_cells<=n,"owned count exceeds local cells");
-    for(Index i=0;i<n;++i) {
-        const auto global_id=part.global_ids[d][i];
-        const int owner=static_cast<int>(global_id*size/source.entity_count(d));
-        require(part.owner_ranks[d][i]==owner,"inconsistent cell ownership");
-        require((i<part.owned_cells)==(owner==rank),
-                "owned/ghost cell ordering incorrect");
+    using idmesh::Index;
+    void require(bool condition, const char* message)
+    {
+        if (!condition)
+            throw std::runtime_error(message);
     }
-    std::vector<double> values(n*3,-1);
-    for(Index i=0;i<part.owned_cells;++i)
-        for(Index component=0;component<3;++component)
-            values[i*3+component]=100*part.global_ids[d][i]+component;
-    part.exchange.exchange_cells(values,3);
-    for(Index i=0;i<n;++i)
-        for(Index component=0;component<3;++component)
-            require(values[i*3+component]==100*part.global_ids[d][i]+component,
+    idmesh::Mesh source_mesh()
+    {
+        idmesh::MeshBuilder builder(2, 2);
+        for (const auto& p : std::array<std::array<double, 3>, 6> {{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {2, 0, 0}, {2, 1, 0}}})
+            builder.add_vertex(p);
+        const std::array<Index, 4> a {0, 1, 2, 3};
+        const std::array<Index, 3> b {1, 4, 2}, c {4, 5, 2};
+        builder.add_cell(idmesh::CellType::quadrilateral, a, 41);
+        builder.add_cell(idmesh::CellType::triangle, b, 42);
+        builder.add_cell(idmesh::CellType::triangle, c, 43);
+        const std::array<Index, 2> boundary {0, 1};
+        builder.add_facet_tag(boundary, 71);
+        return std::move(builder).finalize(idmesh::TopologyOptions::finite_volume());
+    }
+    void run(const idmesh::Mesh& source, Index depth)
+    {
+        const auto rank = idmesh::mpi::world_rank(), size = idmesh::mpi::world_size();
+        const auto part = idmesh::mpi::partition_replicated(source, depth);
+        const auto d = part.mesh.dimension();
+        require(part.global_ids.size() == d + 1 && part.owner_ranks.size() == d + 1,
+            "missing distributed identity arrays");
+        const Index n = part.mesh.entity_count(d);
+        require(n == part.global_ids[d].size(), "local cell-global identity mismatch");
+        require(part.owned_cells <= n, "owned count exceeds local cells");
+        for (Index i = 0; i < n; ++i) {
+            const auto global_id = part.global_ids[d][i];
+            const int owner = static_cast<int>(global_id * size / source.entity_count(d));
+            require(part.owner_ranks[d][i] == owner, "inconsistent cell ownership");
+            require((i < part.owned_cells) == (owner == rank),
+                "owned/ghost cell ordering incorrect");
+        }
+        std::vector<double> values(n * 3, -1);
+        for (Index i = 0; i < part.owned_cells; ++i)
+            for (Index component = 0; component < 3; ++component)
+                values[i * 3 + component] = 100 * part.global_ids[d][i] + component;
+        part.exchange.exchange_cells(values, 3);
+        for (Index i = 0; i < n; ++i)
+            for (Index component = 0; component < 3; ++component)
+                require(values[i * 3 + component] == 100 * part.global_ids[d][i] + component,
                     "halo exchange corrupted ghost field");
-    std::vector<double> scalar(n,-1);
-    for(Index i=0;i<part.owned_cells;++i)
-        scalar[i]=part.global_ids[d][i]+10;
-    part.exchange.exchange_cells(scalar);
-    for(Index i=0;i<n;++i)
-        require(scalar[i]==part.global_ids[d][i]+10,
+        std::vector<double> scalar(n, -1);
+        for (Index i = 0; i < part.owned_cells; ++i)
+            scalar[i] = part.global_ids[d][i] + 10;
+        part.exchange.exchange_cells(scalar);
+        for (Index i = 0; i < n; ++i)
+            require(scalar[i] == part.global_ids[d][i] + 10,
                 "second exchange plan invocation failed");
 
-    for(Index k=0;k<d;++k) {
-        require(part.global_ids[k].size()==part.mesh.entity_count(k),
+        for (Index k = 0; k < d; ++k) {
+            require(part.global_ids[k].size() == part.mesh.entity_count(k),
                 "shared entity global ID count");
-        require(part.owner_ranks[k].size()==part.mesh.entity_count(k),
+            require(part.owner_ranks[k].size() == part.mesh.entity_count(k),
                 "shared entity ownership count");
-        for(Index e=0;e<part.mesh.entity_count(k);++e) {
-            require(part.global_ids[k][e]<source.entity_count(k),
+            for (Index e = 0; e < part.mesh.entity_count(k); ++e) {
+                require(part.global_ids[k][e] < source.entity_count(k),
                     "invalid shared entity global ID");
-            require(part.owner_ranks[k][e]>=0 && part.owner_ranks[k][e]<size,
+                require(part.owner_ranks[k][e] >= 0 && part.owner_ranks[k][e] < size,
                     "invalid subentity owner rank");
+            }
         }
-    }
-    int local_owned=static_cast<int>(part.owned_cells),sum=0;
-    MPI_Allreduce(&local_owned,&sum,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
-    require(sum==static_cast<int>(source.entity_count(d)),
+        int local_owned = static_cast<int>(part.owned_cells), sum = 0;
+        MPI_Allreduce(&local_owned, &sum, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        require(sum == static_cast<int>(source.entity_count(d)),
             "some cells lost or multiply owned");
 
-
-    // Cross-rank orientation identity is stronger than matching facet IDs:
-    // each local entity's canonical global vertex cycle must match the
-    // source entity, even when ranks discovered cells in different orders.
-    for(Index dimension=1;dimension<d;++dimension)
-        for(Index entity=0;entity<part.mesh.entity_count(dimension);++entity) {
-            const auto source_id=part.global_ids[dimension][entity];
-            const auto local_vertices=part.mesh.entity_vertices(dimension,entity);
-            const auto global_vertices=source.entity_vertices(dimension,source_id);
-            require(local_vertices.size()==global_vertices.size(),
+        // Cross-rank orientation identity is stronger than matching facet IDs:
+        // each local entity's canonical global vertex cycle must match the
+        // source entity, even when ranks discovered cells in different orders.
+        for (Index dimension = 1; dimension < d; ++dimension)
+            for (Index entity = 0; entity < part.mesh.entity_count(dimension); ++entity) {
+                const auto source_id = part.global_ids[dimension][entity];
+                const auto local_vertices = part.mesh.entity_vertices(dimension, entity);
+                const auto global_vertices = source.entity_vertices(dimension, source_id);
+                require(local_vertices.size() == global_vertices.size(),
                     "shared entity vertex arity mismatch");
-            for(std::size_t j=0;j<local_vertices.size();++j)
-                require(part.global_ids[0][local_vertices[j]]==global_vertices[j],
+                for (std::size_t j = 0; j < local_vertices.size(); ++j)
+                    require(part.global_ids[0][local_vertices[j]] == global_vertices[j],
                         "cross-rank canonical orientation mismatch");
-        }
-    const auto local_cf=part.mesh.relation(d,d-1);
-    const auto global_cf=source.relation(d,d-1);
-    for(Index local_cell=0;local_cell<n;++local_cell) {
-        const Index global_cell=static_cast<Index>(part.global_ids[d][local_cell]);
-        auto local_faces=local_cf.row(local_cell);
-        auto local_orientations=local_cf.row_orientations(local_cell);
-        auto local_signs=local_cf.row_signs(local_cell);
-        auto source_faces=global_cf.row(global_cell);
-        for(std::size_t j=0;j<local_faces.size();++j) {
-            const auto global_face=part.global_ids[d-1][local_faces[j]];
-            bool matched=false;
-            for(std::size_t k=0;k<source_faces.size();++k) {
-                if(source_faces[k]!=global_face)continue;
-                matched=true;
-                const auto a=local_orientations[j];
-                const auto b=global_cf.row_orientations(global_cell)[k];
-                require(a.rotation==b.rotation && a.reversed==b.reversed
-                        && local_signs[j]==global_cf.row_signs(global_cell)[k],
-                        "local-to-canonical facet orientation changed across ranks");
             }
-            require(matched,"partition facet is absent from source cell");
+        const auto local_cf = part.mesh.relation(d, d - 1);
+        const auto global_cf = source.relation(d, d - 1);
+        for (Index local_cell = 0; local_cell < n; ++local_cell) {
+            const Index global_cell = static_cast<Index>(part.global_ids[d][local_cell]);
+            auto local_faces = local_cf.row(local_cell);
+            auto local_orientations = local_cf.row_orientations(local_cell);
+            auto local_signs = local_cf.row_signs(local_cell);
+            auto source_faces = global_cf.row(global_cell);
+            for (std::size_t j = 0; j < local_faces.size(); ++j) {
+                const auto global_face = part.global_ids[d - 1][local_faces[j]];
+                bool matched = false;
+                for (std::size_t k = 0; k < source_faces.size(); ++k) {
+                    if (source_faces[k] != global_face)
+                        continue;
+                    matched = true;
+                    const auto a = local_orientations[j];
+                    const auto b = global_cf.row_orientations(global_cell)[k];
+                    require(a.rotation == b.rotation && a.reversed == b.reversed
+                            && local_signs[j] == global_cf.row_signs(global_cell)[k],
+                        "local-to-canonical facet orientation changed across ranks");
+                }
+                require(matched, "partition facet is absent from source cell");
+            }
+        }
+
+        // Verify that globally shared edge identities agree between partitions.
+        auto globalSupport = source.relation(d - 1, d);
+        for (Index facet = 0; facet < source.entity_count(d - 1); ++facet) {
+            if (globalSupport.row(facet).size() != 2)
+                continue;
+            int local_present = 0, all_present = 0;
+            for (auto id : part.global_ids[d - 1])
+                if (id == facet) {
+                    local_present = 1;
+                    break;
+                }
+            MPI_Allreduce(&local_present, &all_present, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+            require(all_present >= 2, "partition interface has inconsistent shared facet ID");
         }
     }
-
-    // Verify that globally shared edge identities agree between partitions.
-    auto globalSupport=source.relation(d-1,d);
-    for(Index facet=0;facet<source.entity_count(d-1);++facet) {
-        if(globalSupport.row(facet).size()!=2)continue;
-        int local_present=0,all_present=0;
-        for(auto id:part.global_ids[d-1])
-            if(id==facet){local_present=1;break;}
-        MPI_Allreduce(&local_present,&all_present,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
-        require(all_present>=2,"partition interface has inconsistent shared facet ID");
-    }
-}
 }
 
-int main(int argc,char** argv)
+int main(int argc, char** argv)
 {
-    MPI_Init(&argc,&argv);
+    MPI_Init(&argc, &argv);
     try {
-        auto global=source_mesh();
-        run(global,1);
-        run(global,2);
-        if(idmesh::mpi::world_rank()==0)
-            std::cout<<"MPI: partition, shared identity, 1/2 ghost layers and exchanges OK\n";
+        auto global = source_mesh();
+        run(global, 1);
+        run(global, 2);
+        if (idmesh::mpi::world_rank() == 0)
+            std::cout << "MPI: partition, shared identity, 1/2 ghost layers and exchanges OK\n";
         MPI_Finalize();
         return 0;
-    } catch(const std::exception& e) {
-        std::cerr<<"MPI test failed on rank "<<idmesh::mpi::world_rank()
-                 <<": "<<e.what()<<'\n';
-        MPI_Abort(MPI_COMM_WORLD,1);
+    }
+    catch (const std::exception& e) {
+        std::cerr << "MPI test failed on rank " << idmesh::mpi::world_rank()
+                  << ": " << e.what() << '\n';
+        MPI_Abort(MPI_COMM_WORLD, 1);
         return 1;
     }
 }
