@@ -185,24 +185,6 @@ void medit_round_trip()
     has_group(mesh,2,31,true);
 }
 
-void no_silent_quadratic_loss()
-{
-    idmesh::MeshBuilder builder(1,1);
-    const auto a=builder.add_vertex({0,0,0});
-    const auto b=builder.add_vertex({1,0,0});
-    const auto extra=builder.add_geometry_node({0.5,0,0});
-    const std::array<Index,2> nodes{a,b};
-    const std::array<Index,1> mids{extra};
-    builder.add_quadratic_cell(idmesh::CellType::segment,nodes,mids);
-    const auto mesh=std::move(builder).finalize();
-    bool vtk_rejected=false,medit_rejected=false;
-    try { idmesh::write_vtk_legacy(mesh,temporary("idmesh-reject.vtk").string()); }
-    catch(const std::runtime_error&) { vtk_rejected=true; }
-    try { idmesh::write_medit(mesh,temporary("idmesh-reject.mesh").string()); }
-    catch(const std::runtime_error&) { medit_rejected=true; }
-    check(vtk_rejected && medit_rejected,"linear-only writers discarded quadratic geometry");
-}
-}
 
 
 void mixed_geometry_orders()
@@ -255,7 +237,6 @@ int main()
         quadratic_gmsh41_multigroup();
         legacy_vtk_round_trip();
         medit_round_trip();
-        no_silent_quadratic_loss();
         mixed_geometry_orders();
         many_labels();
         std::cout << "IDMesh high-order/IO tests passed\n";

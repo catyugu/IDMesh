@@ -60,6 +60,15 @@ Additional formats:
 - `read_medit` / `write_medit`: Medit ASCII `.mesh` first-order cells and
   integer region references.
 
-VTK/Medit writers reject quadratic cells and multiple physical groups on one
-top-dimensional cell, as those writer variants cannot preserve this information.
-Use Gmsh for round-tripping quadratic geometry and multi-group metadata.
+The `idmesh/geometry.hpp` API evaluates the first- and second-order
+isoparametric map and its analytic Jacobian at a reference coordinate.
+Reference node positions use Gmsh ordering, with conventional [-1,1] interval
+and tensor-product coordinates and unit simplex coordinates.
+
+VTK legacy ASCII now reads/writes 10 common quadratic variants (line3, tri6,
+quad8/9, tet10, hex20/27, wedge15/18, pyramid13), with explicit Gmsh-VTK
+node-order permutations. VTK's 14-node pyramid mapping is unavailable and
+is rejected. Medit ASCII reads/writes native `EdgesP2`, `TrianglesP2`, and
+`TetrahedraP2`; unsupported P2 shapes and custom ordering keywords are
+rejected. Both formats retain one physical tag per element; multi-membership
+on top cells is rejected rather than silently lost.

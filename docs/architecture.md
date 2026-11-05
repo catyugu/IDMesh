@@ -59,8 +59,7 @@ quadrilateral 8/9, tetrahedron 10, hexahedron 20/27, prism 15/18 and pyramid
 high-order nodes do not increase the number of topological vertices. Purely
 linear meshes reuse their existing cell-to-vertex arrays and allocate no
 separate geometry-connectivity CSR. Geometry
-interpolation and finite-element shape functions are responsibilities of the
-discretization layer.
+interpolation is now provided by the optional geometry evaluation API; finite-element field shape functions and DOF transformations remain responsibilities of the discretization layer.
 
 ## IO capabilities and limitations
 
@@ -77,3 +76,26 @@ discretization layer.
   physical memberships on a top-dimensional element. Writers reject such
   cases instead of silently dropping labels. Neither VTK nor Medit writer
   silently discards high-order geometry; both reject order-two input.
+
+## Reference geometry maps
+
+`idmesh/geometry.hpp` evaluates `x(xi) = sum_i N_i(xi) X_i` and
+`J_{aj} = sum_i X_{ia} dN_i/dxi_j`. Shape functions use Lagrange bases
+for simplex and tensor cells, quadratic serendipity on quad8/hex20,
+tensor-product triangle × interval on prism18, the 15-node wedge basis,
+and collapsed rational pyramid bases for pyramid5/13/14. Derivatives are
+computed from the same expressions using forward-mode scalar differentiation.
+The collapsed pyramid coordinate chart has a singular derivative at its apex
+(z=1); evaluate_geometry rejects Jacobian evaluation at that point.
+
+All reference node arrays use Gmsh ordering; the VTK adapter explicitly
+permutes Tet10, Hex20/27, Wedge15/18 and Pyramid13. Cartesian tensor cells
+use [-1,1] coordinates. Simplices use nonnegative barycentric coordinates
+whose sum is at most 1. Prism combines a unit reference triangle with
+z in [-1,1]; pyramid has base [-1,1]^2 at z=0 and apex at (0,0,1).
+
+High-order VTK legacy ASCII uses native cell codes (21-29, 32) where
+supported. Pyramid14 has no matching classical VTK type and is explicitly
+rejected. Medit ASCII uses `EdgesP2`, `TrianglesP2`, `TetrahedraP2`
+with direct node order. Medit custom P2 ordering sections and other P2
+shape families are rejected, pending a standard-preserving adapter.

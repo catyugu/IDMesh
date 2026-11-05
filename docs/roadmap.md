@@ -27,4 +27,6 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Represent quadratic Gmsh geometry nodes separately from topological vertices.
 - [x] Add VTK legacy ASCII and Medit ASCII first-order readers and writers.
 - [x] Verify the supported high-order Gmsh imports and linear-format IO round-trips on all supported platforms.
-- [ ] Provide native high-order VTK and native high-order Medit I/O adapters.
+- [x] Implement analytic order-1/2 geometry interpolation and Jacobians for all standard cell families.
+- [x] Add supported native VTK quadratic types and Medit P2 (line/triangle/tetrahedron).
+- [ ] Add custom Medit Ordering descriptors and extended pyramid14 VTK Lagrange encoding.
