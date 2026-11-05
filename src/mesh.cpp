@@ -26,6 +26,11 @@ Canonical canonicalize(std::span<const Index> local)
 {
     require(!local.empty(), "empty entity");
     Canonical result;
+    if (local.size() == 2) {
+        result.vertices = {std::min(local[0], local[1]), std::max(local[0], local[1])};
+        result.orientation = {0, local[0] > local[1]};
+        return result;
+    }
     for (std::size_t r = 0; r < local.size(); ++r) {
         for (int direction : {1, -1}) {
             std::vector<Index> candidate;
