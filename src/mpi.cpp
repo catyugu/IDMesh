@@ -125,9 +125,7 @@ namespace idmesh::mpi {
         for (int peer = 0; peer < peers; ++peer) {
             const auto sending = data_->send[peer].size() * components;
             const auto receiving = data_->recv[peer].size() * components;
-            require(sending <= INT_MAX && receiving <= INT_MAX &&
-                    send_size <= static_cast<std::size_t>(INT_MAX) - sending &&
-                    receive_size <= static_cast<std::size_t>(INT_MAX) - receiving,
+            require(sending <= INT_MAX && receiving <= INT_MAX && send_size <= static_cast<std::size_t>(INT_MAX) - sending && receive_size <= static_cast<std::size_t>(INT_MAX) - receiving,
                 "packed halo exchange exceeds MPI count/displacement limits");
             sc[peer] = static_cast<int>(sending);
             rc[peer] = static_cast<int>(receiving);

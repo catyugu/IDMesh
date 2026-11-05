@@ -57,14 +57,12 @@ int main(int argc, char** argv)
             throw std::runtime_error("diffusion test requires one internal facet");
         idmesh::kokkos::DeviceCellField x(2);
         idmesh::kokkos::DeviceCellField y(2);
-        const std::array<double, 2> source_values{1., 3.};
+        const std::array<double, 2> source_values {1., 3.};
         x.upload(source_values);
         idmesh::kokkos::DeviceDiffusion diffusion(mesh, transmissibility);
         diffusion.apply(x, y);
         const auto result = y.download();
-        if (result.size() != 2 || std::abs(result[0] + 2.5) > 1e-12 ||
-            std::abs(result[1] - 2.5) > 1e-12 ||
-            std::abs(result[0] + result[1]) > 1e-12)
+        if (result.size() != 2 || std::abs(result[0] + 2.5) > 1e-12 || std::abs(result[1] - 2.5) > 1e-12 || std::abs(result[0] + result[1]) > 1e-12)
             throw std::runtime_error("device diffusion failed conservation");
 
         status = 0;

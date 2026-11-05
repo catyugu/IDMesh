@@ -1,8 +1,8 @@
 #include "idmesh/kokkos.hpp"
 #include <Kokkos_Core.hpp>
 #include <array>
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -161,7 +161,6 @@ namespace idmesh::kokkos {
         return result;
     }
 
-
     struct DeviceCellField::Data {
         Index cells = 0;
         Index components = 0;
@@ -172,8 +171,7 @@ namespace idmesh::kokkos {
         : data_(std::make_shared<Data>())
     {
         check_runtime();
-        if (components == 0 ||
-            static_cast<std::uint64_t>(cells) * components > invalid_index)
+        if (components == 0 || static_cast<std::uint64_t>(cells) * components > invalid_index)
             throw std::invalid_argument("invalid device field shape");
         data_->cells = cells;
         data_->components = components;
@@ -254,7 +252,7 @@ namespace idmesh::kokkos {
             fo[f + 1] = fo[f] + static_cast<Index>(support.row(f).size());
 
         const auto create_index_view = [](const char* name,
-                    std::span<const Index> values) {
+                                           std::span<const Index> values) {
             Kokkos::View<Index*, MemorySpace> device(name, values.size());
             auto host = Kokkos::create_mirror_view(device);
             for (std::size_t i = 0; i < values.size(); ++i)
@@ -282,8 +280,7 @@ namespace idmesh::kokkos {
     void DeviceDiffusion::apply(
         const DeviceCellField& input, DeviceCellField& output) const
     {
-        if (input.cells() != data_->cells || output.cells() != data_->cells ||
-            input.components() != 1 || output.components() != 1)
+        if (input.cells() != data_->cells || output.cells() != data_->cells || input.components() != 1 || output.components() != 1)
             throw std::invalid_argument("diffusion requires one scalar per cell");
         const auto cell_offsets = data_->cell_offsets;
         const auto cell_facets = data_->cell_facets;
@@ -292,9 +289,7 @@ namespace idmesh::kokkos {
         const auto weight = data_->weights;
         const auto* x = static_cast<const double*>(input.device_data());
         auto* y = static_cast<double*>(output.device_data());
-        Kokkos::parallel_for("idmesh_conservative_diffusion",
-            Kokkos::RangePolicy<ExecutionSpace>(0, data_->cells),
-            KOKKOS_LAMBDA(const Index cell) {
+        Kokkos::parallel_for("idmesh_conservative_diffusion", Kokkos::RangePolicy<ExecutionSpace>(0, data_->cells), KOKKOS_LAMBDA(const Index cell) {
                 double residual = 0;
                 for (Index i = cell_offsets(cell);
                      i < cell_offsets(cell + 1); ++i) {
@@ -308,8 +303,7 @@ namespace idmesh::kokkos {
                     const Index neighbor = a == cell ? b : a;
                     residual += weight(facet) * (x[cell] - x[neighbor]);
                 }
-                y[cell] = residual;
-            });
+                y[cell] = residual; });
         ExecutionSpace().fence();
     }
     Index DeviceDiffusion::cells() const noexcept
