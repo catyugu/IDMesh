@@ -39,3 +39,12 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [ ] Scalable distributed mesh input and graph-based partitioning.
 - [ ] GPU-backed field buffers, asynchronous device-aware halo exchange and CUDA/HIP CI.
 - [x] Add executable Basix C++-backed Nedelec DOF-transformation integration tests and CI.
+
+## Scalable distributed input
+- [x] Deterministic Cell dual-graph balanced region-growing partitioner.
+- [x] Serial graph partition to rank-local shard exporter (1/2 Ghost layers).
+- [x] Independently read owned/ghost Cell and quadratic geometry shards on each MPI Rank.
+- [x] Distributed registry for unique shared entity IDs and ownership.
+- [x] Build halo exchange from explicit global-ID ghost requests without global mesh replication.
+- [ ] External ParMETIS/PT-Scotch partition quality and multi-node weak scaling.
+- [ ] Fully distributed parallel generation of shard files from a global parallel mesh format.

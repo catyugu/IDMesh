@@ -106,3 +106,27 @@ matching compiled Kokkos variant and GPU hardware to validate.
 Shared facet identity and canonical orientation are both tested across MPI
 ranks. Local corner vertices are renumbered in ascending global vertex order
 so each Rank independently reconstructs the same canonical edge/facet cycle.
+
+## Scalable rank-local partition-shard input
+
+The MPI backend now offers `partition_graph(mesh, n)`,
+`write_partition_shards(mesh, owners, ghost_depth, prefix)`, and
+`read_partition_shard(prefix + "." + rank + ".idm")`.
+The preprocessing writer uses the Cell/Facet dual graph to create a
+balanced, connectivity-guided partition and produces individual ASCII
+shards. Each runtime Rank opens only its own file, containing owned
+cells, explicit Ghost cells, their required vertices and optional
+quadratic geometry nodes. It never loads or gathers the global mesh.
+
+The reader negotiates globally unique Edge/Facet IDs and consistent
+entity ownership through a distributed key registry, then derives a
+deterministic `ExchangePlan` from owned/ghost cell-ID requests.
+`tests/test_mpi_shards.cpp` validates two- and three-rank reading,
+global identities, Ghost exchange and quadratic connectivity.
+
+The bundled graph partitioner is a deterministic balanced region-growing
+heuristic, not an optimal cut or ParMETIS replacement. The preprocessing
+writer still needs a complete source mesh on the calling process.
+The distributed reader works directly with externally generated rank
+shards; shard creation from parallel input formats and dynamic
+repartitioning remain future work.

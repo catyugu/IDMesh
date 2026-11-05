@@ -51,7 +51,7 @@ endif()
 
 if(IDMESH_ENABLE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
-    add_library(idmesh_mpi SHARED src/mpi.cpp)
+    add_library(idmesh_mpi SHARED src/mpi.cpp src/mpi_shard.cpp src/mpi_partition.cpp)
     add_library(IDMesh::MPI ALIAS idmesh_mpi)
     target_compile_features(idmesh_mpi PUBLIC cxx_std_20)
     target_compile_definitions(idmesh_mpi PRIVATE IDMESH_MPI_EXPORTS PUBLIC IDMESH_MPI_SHARED)
@@ -95,6 +95,13 @@ if(IDMESH_BUILD_TESTS)
         add_test(NAME idmesh.mpi.3
             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3
                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:idmesh_mpi_test> ${MPIEXEC_POSTFLAGS})
+        add_executable(idmesh_mpi_shards_test tests/test_mpi_shards.cpp)
+        target_link_libraries(idmesh_mpi_shards_test PRIVATE idmesh_mpi MPI::MPI_CXX)
+        foreach(_ranks IN ITEMS 2 3)
+            add_test(NAME idmesh.mpi.shards.${_ranks}
+                COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${_ranks}
+                ${MPIEXEC_PREFLAGS} $<TARGET_FILE:idmesh_mpi_shards_test> ${MPIEXEC_POSTFLAGS})
+        endforeach()
     endif()
 endif()
 

@@ -160,3 +160,52 @@ renumbering makes the canonical edge direction and facet vertex cycle
 identical after mapping to global IDs on every Rank. The MPI regression test
 compares all shared local entity vertex sequences and Cell-to-Facet
 permutation/sign codes against the common source mesh on 2 and 3 ranks.
+
+## Rank-local distributed mesh reading and graph partitioning
+
+The `IDMESH_SHARD 1` ASCII schema is:
+
+```text
+IDMESH_SHARD 1
+DIM <topology_dimension> <geometry_dimension>
+VERTICES <count>
+<global_vertex_id> <x> <y> <z>
+GEOMETRY_NODES <count>
+<global_geometry_id> <x> <y> <z>
+CELLS <count>
+<global_cell_id> <owner_rank> <cell_type_enum> <primary_tag> <num_geometry_nodes> <ids...>
+LABELS <count>
+<dimension> <tag> <count> <global_corner_ids... or single global_cell_id>
+NAMES <count>
+<dimension> <tag> "<name>"
+END
+```
+
+Each Rank reads only its local shard. Top-dimensional cells are sorted
+into owned cells followed by Ghost cells. Corner vertices receive local
+IDs sorted by external global vertex identity, so their canonical edge
+and facet orientations agree across ranks. Every materialized subentity
+is registered by `(dimension, sorted global corner key)` with a
+distributed hash-sharded registry. The registry assigns unique
+dimension-local 64-bit global IDs and chooses the minimum owning Rank
+among incident cells. Requests and answers use bounded MPI_Alltoallv,
+with storage proportional to local entities plus the Rank's hash
+registry share, rather than the complete global mesh.
+
+Ghost cell-field communication plans use a separate exchange of global
+cell-ID requests with cell owners. The existing `ExchangePlan` then
+operates without accessing the original mesh or the registry.
+
+`partition_graph` performs balanced region growing on the
+Facet-adjacency cell dual graph, initializing well-separated seeds and
+using BFS frontiers. `write_partition_shards` expands a configurable
+number of Ghost layers, then writes only required vertices and geometric
+nodes. This is a **serial preprocessing** route; partition quality and
+scalability are not claimed comparable to ParMETIS.
+
+Limitations: shards carry explicit first- or second-order Cell
+connectivity and supplied Ghost layers; the reader does not infer
+missing off-rank neighbors from geometry. MPI_WORLD is still the
+communicator, metadata use blocking MPI operations, and local shard
+files must be consistent. Extremely large individual messages remain
+subject to MPI_Alltoallv's integer-count limits.

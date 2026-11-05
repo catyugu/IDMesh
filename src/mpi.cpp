@@ -1,4 +1,5 @@
 #include "idmesh/mpi.hpp"
+#include "mpi_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -54,11 +55,7 @@ namespace idmesh::mpi {
         return size;
     }
 
-    struct ExchangePlan::Data {
-        std::vector<std::vector<Index>> send, recv;
-        Index local_cells = 0;
-    };
-    ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
+        ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
         : data_(std::move(data))
     {
     }

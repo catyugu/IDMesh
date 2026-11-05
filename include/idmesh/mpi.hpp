@@ -3,6 +3,7 @@
 #include "idmesh/mesh.hpp"
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <span>
 #include <vector>
 
@@ -43,6 +44,7 @@ namespace idmesh::mpi {
         explicit ExchangePlan(std::shared_ptr<Data> data);
         friend struct PartitionedMesh;
         friend PartitionedMesh partition_replicated(const Mesh&, Index);
+        friend PartitionedMesh read_partition_shard(const std::string&, TopologyOptions);
     };
 
     struct PartitionedMesh {
@@ -62,5 +64,17 @@ namespace idmesh::mpi {
     // Large distributed file loading and graph partitioners are separate work.
     IDMESH_MPI_API PartitionedMesh partition_replicated(
         const Mesh& source, Index ghost_layers = 1);
+
+
+    // Fully distributed read: one rank-local ASCII shard per MPI process.
+    // Shared entity IDs and owners are negotiated via a distributed registry.
+    IDMESH_MPI_API PartitionedMesh read_partition_shard(
+        const std::string& path, TopologyOptions options = TopologyOptions::full());
+
+    // Source-side deterministic facet dual-graph partition and shard exporter.
+    // The source-side preprocessing operation is not a distributed file reader.
+    IDMESH_MPI_API std::vector<int> partition_graph(const Mesh& source, int parts);
+    IDMESH_MPI_API void write_partition_shards(const Mesh& source,
+        std::span<const int> owners, Index ghost_layers, const std::string& prefix);
 
 } // namespace idmesh::mpi
