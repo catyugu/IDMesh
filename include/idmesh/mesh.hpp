@@ -66,7 +66,7 @@ namespace idmesh {
         bool oriented() const noexcept { return !coefficients.empty(); }
     };
 
-    struct RelationView {
+    struct IDMESH_API RelationView {
         std::span<const Index> offsets;
         std::span<const Index> targets;
         std::span<const std::int8_t> coefficients;
