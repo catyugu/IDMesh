@@ -31,15 +31,40 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md) and [develo
 
 ## Benchmarks
 
-`IDMESH_BUILD_BENCHMARKS` controls the standalone `idmesh_benchmark` executable (enabled for top-level development, disabled as a subproject). It is never installed.
+`IDMESH_BUILD_BENCHMARKS` controls the standalone `idmesh_benchmark` executable
+(enabled for top-level development, disabled as a subproject). It is never installed.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON
 cmake --build build --config Release
+
+# Backward-compatible 2D mixed triangle/quad smoke.
 ./build/idmesh_benchmark 128 20
+
+# 3D six-tetrahedron cubes (6 * side^3 cells), 5 independent trials.
+./build/idmesh_benchmark 32 10 --dim 3 --shape simplex --trials 5
+
+# 3D mixed hexahedron/prism and pure hexahedron cases.
+./build/idmesh_benchmark 32 10 --dim 3 --shape mixed --trials 5
+./build/idmesh_benchmark 32 10 --dim 3 --shape tensor --trials 5
 ```
 
-CSV columns report construction time, cell-to-vertex traversal time, materialized relation bytes, and a traversal checksum for minimal, finite-volume and full configurations. This is a baseline rather than a statistically rigorous performance harness: run repeated trials in an isolated release build before drawing performance conclusions.
+The CSV output reports **input construction** separately from `finalize()`.
+For each materialized `Cell -> Vertex`, `Cell -> Facet`, and
+`Facet -> Cell` relation it records the median (p50) and nearest-rank
+p95 of traversal times, plus a deterministic traversal checksum. Missing
+relations produce no traversal row. The benchmark compares minimal, finite-volume
+and full materialization configurations for the same mesh.
+
+`relation_bytes` sums visible relation offset, index, sign and orientation
+array payloads. It excludes entity-to-vertex data stored separately, cell
+metadata, coordinates, allocator overhead and transient construction memory:
+it is **not** an estimate of total resident mesh memory. Absolute timings
+are machine-dependent; use comparable Release builds and isolated runs before
+drawing performance conclusions. The generated meshes are structured
+conforming benchmark families; they do not replace tests on imported
+industrial non-structured geometries.
+
 
 ## Geometry order and additional formats
 
