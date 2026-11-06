@@ -15,6 +15,21 @@ cmake --build consumer-build --config Release
 
 See `AGENTS.md` for a short developer checklist. MPI and Kokkos are opt-in.
 
+## CMake layout
+
+The root `CMakeLists.txt` owns project options and the build entry points.
+`cmake/Dependencies.cmake` acquires optional MPI/Kokkos dependencies and
+configures CUDA/HIP when requested. `cmake/Targets.cmake` defines the core
+and optional adapter libraries; `cmake/Install.cmake` exports the installed
+SDK. The `tests/`, `examples/`, and `benchmarks/` directories each own
+their executable targets and test registration.
+
+Build options, public target aliases (`IDMesh::IDMesh`, `IDMesh::Kokkos`,
+`IDMesh::MPI`, `IDMesh::MPIKokkos`), installed package files, and CTest
+names remain stable. Test and example executables stage their required
+runtime DLLs on Windows because they now build in subdirectories.
+
+
 ## Formatting
 
 The checked-in `.clang-format` uses **clang-format 19.1.7**.
