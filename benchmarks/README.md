@@ -70,7 +70,9 @@ import real Gmsh 2.2/4.1 ASCII datasets separately and record their origin.
 ## Timing and memory semantics
 
 `input_ms_p50` times generated builder input; `finalize_ms_p50` times
-finalization. For Gmsh input, the public import API combines file parsing and
+finalization. `validate_ms_p50` times one additional explicit exhaustive
+`Mesh::validate()` pass after finalization, which helps estimate the validation
+component already included by `finalize()`. For Gmsh input, the public import API combines file parsing and
 finalization, so `finalize_ms_p50` covers both and `input_ms_p50` is zero.
 
 `visible_payload_bytes` is the exposed logical array payload lower bound.
@@ -113,3 +115,26 @@ persistent geometry/relation mirror construction and upload separately from
 resident reductions. Device upload includes host packing, allocation,
 staging and synchronization. Real GPU timings require CUDA/HIP hardware and
 a matching Kokkos build; Kokkos Serial is only a CPU correctness proxy.
+
+
+## Finalization decomposition
+
+For topology-construction profiling, compare downward-only and support-enabled
+configurations in separate processes:
+
+```sh
+./build-bench/idmesh_benchmark 24 1 --dim 3 --shape simplex \
+  --config finite_volume_downward --trials 1
+./build-bench/idmesh_benchmark 24 1 --dim 3 --shape simplex \
+  --config finite_volume --trials 1
+./build-bench/idmesh_benchmark 24 1 --dim 3 --shape simplex \
+  --config full_downward --trials 1
+./build-bench/idmesh_benchmark 24 1 --dim 3 --shape simplex \
+  --config full --trials 1
+```
+
+The support-enabled minus downward-only time approximates support-transpose
+cost. The FVM-to-full difference captures the additional Edge/Face
+materialization work. Add `--cell-labels` to assign one physical tag to every
+generated top-dimensional Cell; comparing the same command without the flag
+isolates a deliberately label-heavy finalization workload.

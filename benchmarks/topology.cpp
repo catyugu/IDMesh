@@ -71,12 +71,17 @@ namespace {
             if (token == "--help") {
                 std::cout << "Usage: idmesh_benchmark [side] [rounds] [--dim 2|3] "
                              "[--shape simplex|tensor|mixed] [--trials N] "
-                             "[--scramble] [--seed N] [--jitter D] [--gmsh FILE] [--config all|minimal|finite_volume|full]\n"
+                             "[--scramble] [--cell-labels] [--seed N] [--jitter D] [--gmsh FILE] "
+                             "[--config all|minimal|finite_volume_downward|finite_volume|full_downward|full]\n"
                              "Output: CSV, including mesh payload and process memory.\n";
                 std::exit(0);
             }
             if (token == "--scramble") {
                 args.generated.scramble = true;
+                continue;
+            }
+            if (token == "--cell-labels") {
+                args.generated.cell_labels = true;
                 continue;
             }
             if (token == "--dim" || token == "--shape" || token == "--trials"
@@ -118,8 +123,13 @@ namespace {
             }
         }
         if (args.configuration != "all" && args.configuration != "minimal"
-            && args.configuration != "finite_volume" && args.configuration != "full")
-            throw std::invalid_argument("invalid --config; use all, minimal, finite_volume or full");
+            && args.configuration != "finite_volume_downward"
+            && args.configuration != "finite_volume"
+            && args.configuration != "full_downward"
+            && args.configuration != "full")
+            throw std::invalid_argument(
+                "invalid --config; use all, minimal, finite_volume_downward, "
+                "finite_volume, full_downward or full");
         const auto& g = args.generated;
         if ((g.dimension != 2 && g.dimension != 3) || args.trials == 0
             || args.trials > 100 || args.rounds == 0 || g.side == 0
@@ -288,7 +298,7 @@ namespace {
 
     void run(const Arguments& args, idmesh::TopologyOptions options, const char* configuration)
     {
-        Timing input, finalize, resident, rss_baseline, rss_after_input,
+        Timing input, finalize, validate, resident, rss_baseline, rss_after_input,
             rss_increase, peak_baseline, peak_after_input, peak_after_finalize,
             peak_increase;
         std::vector<Walk> walks;
@@ -327,10 +337,13 @@ namespace {
                 mesh = idmesh::read_gmsh(args.gmsh, options);
             }
             const auto finalized = Clock::now();
+            mesh.validate();
+            const auto validated = Clock::now();
             const auto final_rss = resident_bytes();
             const auto final_peak = peak_resident_bytes();
             input.samples.push_back(milliseconds(start, input_ready));
             finalize.samples.push_back(milliseconds(input_ready, finalized));
+            validate.samples.push_back(milliseconds(finalized, validated));
             resident.samples.push_back(static_cast<double>(final_rss));
             rss_baseline.samples.push_back(static_cast<double>(before_rss));
             rss_after_input.samples.push_back(static_cast<double>(after_input_rss));
@@ -380,6 +393,7 @@ namespace {
                       << configuration << ',' << walks[j].name << ',' << cell_count << ','
                       << facet_count << ',' << edge_count << ',' << args.trials << ',' << args.rounds
                       << ',' << input.median() << ',' << finalize.median() << ',' << finalize.p95()
+                      << ',' << validate.median() << ',' << validate.p95()
                       << ',' << walk.time.median() << ',' << walk.time.p95()
                       << ',' << relation_payload << ','
                       << (cell_count ? double(relation_payload) / cell_count : 0.)
@@ -406,7 +420,8 @@ int main(int argc, char** argv)
         const auto args = parse_arguments(argc, argv);
         std::cout << std::fixed << std::setprecision(3)
                   << "dimension,shape,side,configuration,relation,cells,facets,edges,trials,rounds,"
-                     "input_ms_p50,finalize_ms_p50,finalize_ms_p95,traversal_ms_p50,"
+                     "input_ms_p50,finalize_ms_p50,finalize_ms_p95,validate_ms_p50,"
+                     "validate_ms_p95,traversal_ms_p50,"
                      "traversal_ms_p95,relation_bytes,relation_bytes_per_cell,checksum,"
                      "source,scramble,seed,jitter,visible_payload_bytes,"
                      "process_rss_bytes_p50,process_peak_rss_bytes,incidences_per_round,"
@@ -417,8 +432,18 @@ int main(int argc, char** argv)
         // Gmsh input has a single combined read+finalize operation in finalize_ms.
         if (args.configuration == "all" || args.configuration == "minimal")
             run(args, idmesh::TopologyOptions::cells_and_vertices(), "minimal");
+        if (args.configuration == "all" || args.configuration == "finite_volume_downward") {
+            auto options = idmesh::TopologyOptions::finite_volume();
+            options.support = false;
+            run(args, options, "finite_volume_downward");
+        }
         if (args.configuration == "all" || args.configuration == "finite_volume")
             run(args, idmesh::TopologyOptions::finite_volume(), "finite_volume");
+        if (args.configuration == "all" || args.configuration == "full_downward") {
+            auto options = idmesh::TopologyOptions::full();
+            options.support = false;
+            run(args, options, "full_downward");
+        }
         if (args.configuration == "all" || args.configuration == "full")
             run(args, idmesh::TopologyOptions::full(), "full");
     }

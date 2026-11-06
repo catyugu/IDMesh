@@ -26,6 +26,7 @@ namespace idmesh_bench {
         bool scramble = false;
         std::uint64_t seed = 0;
         double jitter = 0.0;
+        bool cell_labels = false;
     };
 
     inline const char* shape_name(Shape shape)
@@ -136,7 +137,7 @@ namespace idmesh_bench {
                 for (const auto& tet : std::array<std::array<Index, 4>, 6> {{{{v0, v1, v2, v6}}, {{v0, v2, v3, v6}},
                          {{v0, v3, v7, v6}}, {{v0, v7, v4, v6}},
                          {{v0, v4, v5, v6}}, {{v0, v5, v1, v6}}}}) {
-                    builder.add_cell(idmesh::CellType::tetrahedron, tet);
+                    builder.add_cell(idmesh::CellType::tetrahedron, tet, args.cell_labels ? 1 : 0);
                 }
             }
             else if (split) {
