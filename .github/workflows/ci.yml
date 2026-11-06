@@ -14,42 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  style:
-    name: style advisory
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install pinned clang-format
-        run: python3 -m venv .venv && .venv/bin/python -m pip install clang-format==19.1.7
-      - name: Check formatting without blocking CI
-        id: style
-        shell: bash
-        env:
-          CLANG_FORMAT: .venv/bin/clang-format
-        run: |
-          bash scripts/format-cpp.sh
-          if git diff --quiet -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx'; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "C/C++ formatting is clean." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' > clang-format.patch
-            echo "::warning title=clang-format drift::Formatting differs from clang-format 19.1.7; see the patch artifact."
-            {
-              echo "### clang-format drift detected"
-              echo
-              echo "The build is not blocked. Apply `bash scripts/format-cpp.sh` locally."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload formatting patch
-        if: steps.style.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clang-format-patch
-          path: clang-format.patch
-          if-no-files-found: error
-          retention-days: 7
-
   native:
     name: native / ${{ matrix.name }}
     strategy:

@@ -29,8 +29,8 @@ CLANG_FORMAT=.venv/bin/clang-format bash scripts/check-format.sh
 On Windows, the binary resides at `.venv/Scripts/clang-format.exe`;
 Git Bash can execute the shell scripts. Configure the optional staged-file
 hook using `git config core.hooksPath .githooks`. Run
-`scripts/format-cpp.sh` to format files. CI reports style drift as an
-advisory patch; local lint and the pre-commit hook fail on style drift.
+`scripts/format-cpp.sh` to format files. Formatting checks run through the
+local pre-commit hook or the manual lint command; CI has no formatting job.
 
 ## API and failure contracts
 

@@ -1,12 +1,11 @@
 # Verification and known limits
 
-IDMesh uses its repository CI to verify source formatting, native C++20
-compilation, numerical examples, MPI multi-rank behavior and Kokkos's
-CPU execution backend.
+IDMesh uses its repository CI to verify native C++20 compilation,
+numerical examples, MPI multi-rank behavior and Kokkos's CPU execution
+backend. Source formatting is checked locally through the pre-commit hook.
 
 | Area | Automated verification | Scope |
 | --- | --- | --- |
-| C++ formatting | pinned clang-format 19.1.7 | all tracked .h/.hpp/.cpp |
 | Serial core | Linux GCC, Windows MSVC, macOS Clang | reference cells, oriented incidence, Gmsh, VTK, Medit, geometric Jacobians |
 | Independent applications | `examples` CI job, three CTest examples | Basix orientation, conservative FVM flux, and mixed-cell FEM/FEEC exact sequence CG=0 / DC=0 |
 | Distributed MPI | OpenMPI with 2 and 3 ranks | replicated and rank-local shards, dual-graph cuts, 1/2 Ghost layers, shared global IDs and field exchanges |
