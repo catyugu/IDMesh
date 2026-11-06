@@ -19,17 +19,46 @@ namespace idmesh {
             }
         }
 
+        // Standard intermediate entities have at most four corner vertices.
+        // Keep construction keys inline so facet/edge canonicalization performs
+        // no per-entity heap allocation.
+        struct EntityKey {
+            std::array<Index, 4> vertices {};
+            std::uint8_t count = 0;
+
+            std::span<const Index> view() const
+            {
+                return {vertices.data(), count};
+            }
+            std::size_t size() const { return count; }
+            const Index* begin() const { return vertices.data(); }
+            const Index* end() const { return vertices.data() + count; }
+            Index operator[](std::size_t i) const { return vertices[i]; }
+            bool operator==(const EntityKey&) const = default;
+        };
+
         struct Canonical {
-            std::vector<Index> vertices;
+            EntityKey key;
             Orientation orientation;
         };
 
+        EntityKey make_key(std::span<const Index> vertices)
+        {
+            require(!vertices.empty() && vertices.size() <= 4, "unsupported entity arity");
+            EntityKey result;
+            result.count = static_cast<std::uint8_t>(vertices.size());
+            std::copy(vertices.begin(), vertices.end(), result.vertices.begin());
+            return result;
+        }
+
         Canonical canonicalize(std::span<const Index> local)
         {
-            require(!local.empty(), "empty entity");
+            require(!local.empty() && local.size() <= 4, "unsupported entity arity");
             Canonical result;
+            result.key.count = static_cast<std::uint8_t>(local.size());
             if (local.size() == 2) {
-                result.vertices = {std::min(local[0], local[1]), std::max(local[0], local[1])};
+                result.key.vertices[0] = std::min(local[0], local[1]);
+                result.key.vertices[1] = std::max(local[0], local[1]);
                 const bool reversed = local[0] > local[1];
                 result.orientation = {static_cast<std::uint16_t>(reversed ? 1 : 0), reversed};
                 return result;
@@ -47,56 +76,52 @@ namespace idmesh {
                     break;
                 }
             }
-            result.vertices.reserve(local.size());
             for (std::size_t i = 0; i < local.size(); ++i) {
                 const auto position = reversed
                     ? (first + local.size() - i) % local.size()
                     : (first + i) % local.size();
-                result.vertices.push_back(local[position]);
+                result.key.vertices[i] = local[position];
             }
             result.orientation = {static_cast<std::uint16_t>(first), reversed};
             return result;
         }
 
-        using Loop = std::vector<Index>;
+        using Loop = EntityKey;
 
         // Keys are compared in full: hash collisions never merge distinct entities.
         // Entity IDs remain assigned in the order of first appearance.
         struct LoopHash {
-            std::size_t operator()(const Loop& vertices) const noexcept
+            std::size_t operator()(const Loop& key) const noexcept
             {
                 std::size_t hash = sizeof(std::size_t) == 8
                     ? std::size_t {14695981039346656037ULL}
                     : std::size_t {2166136261U};
-                for (Index vertex : vertices) {
+                for (Index vertex : key) {
                     hash ^= vertex;
                     hash *= sizeof(std::size_t) == 8
                         ? std::size_t {1099511628211ULL}
                         : std::size_t {16777619U};
                 }
+                hash ^= key.count;
                 return hash;
             }
         };
 
-        std::vector<Loop> boundary_loops(CellType type, std::span<const Index> v)
+        EntityKey boundary_loop(CellType type, Index facet, std::span<const Index> vertices)
         {
-            std::vector<Loop> result;
-            result.reserve(cell_facet_count(type));
-            for (Index f = 0; f < cell_facet_count(type); ++f) {
-                Loop loop;
-                for (auto local : reference_facet_vertices(type, f))
-                    loop.push_back(v[local]);
-                result.push_back(std::move(loop));
-            }
+            EntityKey result;
+            const auto local_vertices = reference_facet_vertices(type, facet);
+            result.count = static_cast<std::uint8_t>(local_vertices.size());
+            for (std::size_t i = 0; i < local_vertices.size(); ++i)
+                result.vertices[i] = vertices[local_vertices[i]];
             return result;
         }
 
-        std::vector<Loop> polygon_edges(std::span<const Index> vertices)
+        EntityKey polygon_edge(std::span<const Index> vertices, std::size_t edge)
         {
-            std::vector<Loop> result;
-            for (std::size_t i = 0; i < vertices.size(); ++i)
-                result.push_back({vertices[i], vertices[(i + 1) % vertices.size()]});
-            return result;
+            const std::array<Index, 2> endpoints {
+                vertices[edge], vertices[(edge + 1) % vertices.size()]};
+            return make_key(endpoints);
         }
 
         struct RelationData {
@@ -692,7 +717,7 @@ namespace idmesh {
                 const auto begin = offsets[id];
                 return {indices.data() + begin, offsets[id + 1] - begin};
             }
-            return data->vertices[dim][id];
+            return data->vertices[dim][id].view();
         };
 
         // No additional geometry-connectivity storage for purely linear meshes.
@@ -739,10 +764,10 @@ namespace idmesh {
         auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
             auto canon = canonicalize(local);
             require(data->vertices[dim].size() < invalid_index, "too many topology entities");
-            auto [it, inserted] = lookup[dim].try_emplace(canon.vertices,
+            auto [it, inserted] = lookup[dim].try_emplace(canon.key,
                 static_cast<Index>(data->vertices[dim].size()));
             if (inserted)
-                data->vertices[dim].push_back(std::move(canon.vertices));
+                data->vertices[dim].push_back(canon.key);
             return {it->second, static_cast<std::int8_t>(canon.orientation.sign()), canon.orientation};
         };
         auto attach = [&](Index from, Index to, Index id, Incidence entry) {
@@ -758,18 +783,22 @@ namespace idmesh {
             }
             if (dimension_ == 1)
                 continue;
-            auto faces = boundary_loops(data->types[c], vertices);
             if (want(dimension_ - 1)) {
-                for (const auto& face : faces)
-                    attach(dimension_, dimension_ - 1, c, register_entity(dimension_ - 1, face));
+                for (Index facet = 0; facet < cell_facet_count(data->types[c]); ++facet) {
+                    const auto face = boundary_loop(data->types[c], facet, vertices);
+                    attach(dimension_, dimension_ - 1, c,
+                        register_entity(dimension_ - 1, face.view()));
+                }
             }
         }
 
         if (dimension_ == 3 && options.edges && want(2)) {
             for (Index f = 0; f < data->vertices[2].size(); ++f) {
-                auto edges = polygon_edges(data->vertices[2][f]);
-                for (const auto& edge : edges)
-                    attach(2, 1, f, register_entity(1, edge));
+                const auto vertices = data->vertices[2][f].view();
+                for (std::size_t edge = 0; edge < vertices.size(); ++edge) {
+                    const auto endpoints = polygon_edge(vertices, edge);
+                    attach(2, 1, f, register_entity(1, endpoints.view()));
+                }
             }
         }
         if (dimension_ == 2 && options.edges) {
@@ -822,11 +851,11 @@ namespace idmesh {
                 entity = assigned.front();
             }
             else if (want(dim)) {
-                const auto found = lookup[dim].find(key.vertices);
+                const auto found = lookup[dim].find(key.key);
                 if (found != lookup[dim].end())
                     entity = found->second;
             }
-            append_label(dim, entity, key.vertices, assignment.tag);
+            append_label(dim, entity, key.key.view(), assignment.tag);
             if (dim == dimension_ - 1 && entity != invalid_index) {
                 if (data->facet_tags.empty())
                     data->facet_tags.resize(dim == 0
