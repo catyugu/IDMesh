@@ -119,6 +119,7 @@ namespace idmesh {
         struct Data;
         std::shared_ptr<const Data> data_;
         explicit Mesh(std::shared_ptr<const Data> data);
+        void validate_structure() const;
         friend class MeshBuilder;
     };
 

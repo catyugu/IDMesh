@@ -64,3 +64,16 @@ A trusted workflow may invoke it with `backend` (CUDA or HIP),
 `runner_label`, `compiler_arch` and `kokkos_arch`. The GPU validation
 workflow is not directly invokable from the Actions **Run workflow** UI
 and does not start on push or pull request.
+
+
+## Validation levels
+
+`MeshBuilder::finalize()` performs structural checks required for publishing an
+immutable mesh: relation shapes and ranges, geometry connectivity, label
+references, and storage consistency. The public `Mesh::validate()` call repeats
+those checks and additionally evaluates the exhaustive oriented-complex
+invariant `boundary(boundary(entity)) = 0`.
+
+Tests and diagnostic tools should call `Mesh::validate()` when they need the
+full mathematical invariant check. Production construction does not repeat the
+more expensive boundary-of-boundary pass on every finalized full topology.

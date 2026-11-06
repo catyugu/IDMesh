@@ -951,11 +951,11 @@ namespace idmesh {
             data->physical_labels.push_back({label.dimension, label.entity, vertices, label.tag});
         }
         Mesh mesh(std::move(data));
-        mesh.validate();
+        mesh.validate_structure();
         return mesh;
     }
 
-    void Mesh::validate() const
+    void Mesh::validate_structure() const
     {
         if (!data_)
             throw std::logic_error("empty mesh");
@@ -1017,6 +1017,11 @@ namespace idmesh {
                             throw std::logic_error("dangling incidence");
             }
         }
+    }
+
+    void Mesh::validate() const
+    {
+        validate_structure();
         // Each oriented codimension-two boundary must cancel.
         for (Index k = 2; k <= data_->dimension; ++k) {
             if (!has_relation(k, k - 1) || !has_relation(k - 1, k - 2))
