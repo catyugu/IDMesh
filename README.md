@@ -32,8 +32,8 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md) and [develo
 ## Benchmarks
 
 `IDMESH_BUILD_BENCHMARKS` enables two standalone developer executables.
-CI **compiles and runs only tiny correctness smoke cases**; it never uses CI
-timings as performance regressions. Neither benchmark is installed.
+Benchmarks are **local developer tools only**: GitHub Actions neither compiles
+nor executes them. Neither benchmark is installed.
 
 ```sh
 cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON
@@ -45,7 +45,7 @@ cmake --build build-bench --config Release
 # 3D tetrahedra, hexahedra and mixed hex/prism.
 ./build-bench/idmesh_benchmark 32 10 --dim 3 --shape simplex --trials 5
 ./build-bench/idmesh_benchmark 32 10 --dim 3 --shape tensor --trials 5
-./build-bench/idmesh_benchmark 32 10 --dim 3 --shape mixed --trials 5
+./build-bench/idmesh_benchmark 32 10 --dim 3 --shape mixed --config finite_volume --trials 5
 
 # Deterministically scramble vertex numbering and cell insertion order,
 # optionally perturb interior coordinates without changing connectivity.
@@ -81,6 +81,14 @@ Memory fields have **different meanings**:
 - `process_peak_rss_bytes` is the **process-lifetime** high-water mark,
   including construction and prior trials/configurations; it is not a
   per-mesh peak allocation metric.
+
+For reliable peak-memory comparisons, pass `--config minimal`, `--config
+finite_volume` or `--config full` and run each in a **separate process**, ideally
+with `--trials 1` repeated across independent runs. The CSV additionally
+reports process RSS and high-water marks before input, after input and after
+finalization, along with baseline-relative increases. These metrics are
+process-wide and include allocator overhead and transient construction memory.
+See [local benchmark protocol](benchmarks/README.md).
 
 The CSV has `incidences_per_round` for throughput calculations. Use identical
 Release flags, isolated processes, and multiple trials for comparisons; the

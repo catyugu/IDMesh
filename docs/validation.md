@@ -14,7 +14,7 @@ CPU execution backend.
 | MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | device pack/unpack, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
 | External FE | Basix-backed Nedelec transformation CI | rotation/reflection group relations and shared-facet consistency |
 | Package consumers | CMake installed-package tests | core, MPI, Kokkos and combined adapters |
-| Benchmark smoke | tiny 2D Gmsh and scrambled 3D generated cases; Kokkos Serial when enabled | functional CSV/traversal/device checks only; no CI performance thresholds |
+
 
 ## Device-hardware acceptance
 
@@ -41,6 +41,10 @@ the repository's available CI runners. The reusable workflow can run
 only through a trusted calling workflow with an approved GPU runner and
 must not be represented as a passing hardware test until that hardware
 execution completes successfully.
+
+Local-only benchmarks are intentionally excluded from all GitHub Actions
+workflows and CTest registration. See `benchmarks/README.md` for isolated-process
+memory measurements and reproducible performance runs.
 
 ## Performance scope
 

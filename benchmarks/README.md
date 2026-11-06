@@ -1,69 +1,94 @@
-# Reproducible benchmark protocol
+# Reproducible local performance benchmarks
 
-The benchmark executables are disabled in ordinary SDK builds. Configure a
-dedicated Release build with `-DIDMESH_BUILD_BENCHMARKS=ON`. Set
-`-DIDMESH_ENABLE_KOKKOS=ON` only when comparing the optional Kokkos
-adapter. The CPU and Kokkos executables emit CSV on stdout.
+IDMesh benchmarks are **developer-only**. They are not built, executed, or
+timed by GitHub Actions. The automated CI checks functional SDK correctness,
+while all performance and memory analysis must run locally on a controlled
+machine.
 
-## CPU measurement matrix
-
-Run at least five trials per configuration and collect several independent
-process runs for stable RSS and timing comparisons. Examples:
+Configure an independent Release build:
 
 ```sh
-./idmesh_benchmark 32 10 --dim 3 --shape simplex --trials 5 > tet.csv
-./idmesh_benchmark 32 10 --dim 3 --shape tensor --trials 5 > hex.csv
-./idmesh_benchmark 32 10 --dim 3 --shape mixed --trials 5 > mixed.csv
-./idmesh_benchmark 32 10 --dim 3 --shape mixed --scramble --seed 2026 --jitter 0.1 --trials 5 > scrambled.csv
-./idmesh_benchmark 2 10 --gmsh /absolute/path/to/model.msh --trials 5 > imported.csv
+cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release \
+  -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF
+cmake --build build-bench --config Release --target idmesh_benchmark
 ```
 
-For each family and each materialization (minimal, finite-volume, full),
-compare finalization time, available adjacency traversal time, incidence
-throughput, logical payload and process RSS. A zero process RSS field means
-the current platform cannot report it. RSS high-water marks refer to the
-entire executable lifetime. They must not be subtracted across the three
-sequential materialization cases to infer per-mesh heap allocation.
+## Workload matrix
 
-The generated scrambled workload permutes vertex IDs and cell insertion
-order with a fixed PRNG seed. Optional jitter perturbs interior coordinates
-but preserves all cell connectivity. These are controlled synthetic stress
-cases, not replacements for imported industrial meshes.
+Each command measures **one topology materialization per process**. This is
+essential: process peak RSS is a lifetime high-water mark; running minimal,
+finite-volume and full consecutively in one process contaminates the peak.
+Use `--trials 1` for clean memory measurements, repeat independent processes
+at least five times for a distribution, and retain the CSVs.
 
-The Gmsh code path has a combined public read/finalize API; its
-`finalize_ms_p50` field includes I/O, parsing and mesh construction.
-Consequently, its `input_ms_p50` is zero. Do not compare Gmsh's combined
-number to the synthetic builder's finalize-only number without stating
-this distinction.
+```sh
+./build-bench/idmesh_benchmark 56 5 --dim 3 --shape simplex \
+  --config finite_volume --trials 1 > tet-fvm.csv
+./build-bench/idmesh_benchmark 48 5 --dim 3 --shape mixed \
+  --scramble --seed 2026 --jitter 0.10 --config full --trials 1 > mixed-full.csv
+./build-bench/idmesh_benchmark 64 5 --dim 3 --shape tensor \
+  --config minimal --trials 1 > hex-minimal.csv
+./build-bench/idmesh_benchmark 192 5 --dim 2 --shape mixed \
+  --config full --trials 1 > two-dimensional.csv
+./build-bench/idmesh_benchmark 2 5 --gmsh /path/to/industrial.msh \
+  --config finite_volume --trials 1 > imported.csv
+```
 
-The first 18 CPU CSV columns remain backward compatible with the original
-topology benchmark. New columns include an estimated visible payload lower
-bound, whole-process RSS and incidence counts per traversal round. CPU
-traversal timings cover all requested repetitions; divide by `rounds`
-to obtain a per-round estimate. Recheck checksums after refactors.
+For direct per-configuration timing distributions, `--trials 5` can be used,
+but memory snapshots may then include allocator caching from earlier trials.
+The default `--config all` remains convenient for functional comparisons,
+but is **not** suitable for comparing per-config peak memory. A full topology
+comparison should execute each case in a fresh process.
 
-## Kokkos measurements
+The generated workload covers structured tet, hex, and mixed hex/prism
+meshes. `--scramble` independently permutes vertex IDs and insertion order,
+and `--jitter` perturbs interior coordinates without changing connectivity.
+These stress cases do not represent industrial unstructured mesh geometry;
+import real Gmsh 2.2/4.1 ASCII datasets separately and record their origin.
 
-The optional `idmesh_kokkos_benchmark` uses identical generated/Gmsh
-inputs and the same three topology configurations. It measures:
+## Timing and memory semantics
 
-- Persistent geometry mirror construction and upload.
-- Persistent Cell-Facet relation mirror construction and upload, if present.
-- Resident batch centroid reductions.
-- Resident geometry-index checksum.
-- Resident relation incidence reductions, if present.
+`input_ms_p50` times generated builder input; `finalize_ms_p50` times
+finalization. For Gmsh input, the public import API combines file parsing and
+finalization, so `finalize_ms_p50` covers both and `input_ms_p50` is zero.
 
-Mirroring measurements include host packing and intermediate buffer
-allocation, so they do not isolate raw host-to-device bandwidth.
-Kernel timing excludes initial upload; it includes reduction dispatch and
-completion. Use actual GPU hardware and a correctly configured Kokkos
-device backend before calling any CUDA/HIP numbers device results.
+`visible_payload_bytes` is the exposed logical array payload lower bound.
+It excludes vector capacity, allocation overhead, maps, object control blocks,
+temporary builder memory, and any lazy caches. It is *not* physical RSS.
 
-## Environment record
+Memory columns are process-wide measurements, rather than per-mesh allocator
+instrumentation:
 
-Record the repository SHA, compiler/flags, CPU/GPU, memory capacity,
-operating system, Kokkos backend, mesh input provenance, Gmsh version if
-available, and whether execution was pinned to particular cores. Prefer
-single-user isolated runs and measure identical releases when comparing
-implementations. CI smoke tests only verify correctness and build
-integration; CI timing numbers are not suitable performance evidence.
+- `rss_before_bytes_p50`: RSS before input/builder construction.
+- `rss_after_input_bytes_p50`: RSS after generated input preparation, before
+  finalize; for Gmsh input this equals the baseline, because import and
+  finalize cannot be independently timed.
+- `process_rss_bytes_p50`: RSS after finalize.
+- `rss_delta_bytes_p50`: nonnegative difference between post-finalize RSS and
+  baseline RSS; it includes retained allocator pages and unrelated allocations.
+- `peak_before_bytes_p50`, `peak_after_input_bytes_p50`,
+  `peak_after_finalize_bytes_p50`: process high-water marks at phase boundaries.
+- `peak_delta_bytes_p50`: increase in process peak RSS over its pre-input
+  value. It captures transient build allocations even if they are later freed.
+- `rss_delta_bytes_per_cell_p50`: post-finalize process RSS increase per Cell;
+  this is only an indicative cost, not an exact heap accounting.
+- `process_peak_rss_bytes`: high-water RSS across all benchmark trials and
+  configurations in the process; **never** subtract sequential configurations.
+
+A zero RSS value means the platform cannot supply it. The only interpretable
+peak comparison is separate, fresh processes with identical environments.
+Do not report timings or memory measurements from shared CI runners.
+
+`relation_bytes` counts the visible relation offsets/indices/sign/orientation
+payload. Traversal checksum and `incidences_per_round` detect functional
+changes across revisions. Time the same built revision, identical inputs,
+compiler flags, CPU affinity, warm-up policy and operating system before
+claiming a speedup. Report medians and spread over independent processes.
+
+## Optional Kokkos measurements
+
+The `idmesh_kokkos_benchmark` executable is also local-only. It measures
+persistent geometry/relation mirror construction and upload separately from
+resident reductions. Device upload includes host packing, allocation,
+staging and synchronization. Real GPU timings require CUDA/HIP hardware and
+a matching Kokkos build; Kokkos Serial is only a CPU correctness proxy.

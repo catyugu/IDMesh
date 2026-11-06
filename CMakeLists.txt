@@ -178,20 +178,6 @@ if(IDMESH_BUILD_BENCHMARKS)
         add_executable(idmesh_kokkos_benchmark benchmarks/kokkos.cpp)
         target_link_libraries(idmesh_kokkos_benchmark PRIVATE idmesh_kokkos Kokkos::kokkos)
     endif()
-    if(IDMESH_BUILD_TESTS)
-        # Functional smoke only; CI timings must never be treated as performance data.
-        add_test(NAME idmesh.benchmark.generated
-            COMMAND idmesh_benchmark 2 1 --dim 3 --shape mixed --scramble
-                --seed 17 --jitter 0.05 --trials 1)
-        add_test(NAME idmesh.benchmark.gmsh
-            COMMAND idmesh_benchmark 2 1 --gmsh
-                ${PROJECT_SOURCE_DIR}/benchmarks/fixtures/mixed_2d.msh --trials 1)
-        if(IDMESH_ENABLE_KOKKOS)
-            add_test(NAME idmesh.benchmark.kokkos
-                COMMAND idmesh_kokkos_benchmark 2 1 --dim 3 --shape mixed
-                    --scramble --trials 1)
-        endif()
-    endif()
 endif()
 
 if(IDMESH_INSTALL)

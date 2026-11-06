@@ -39,6 +39,7 @@ namespace {
         unsigned rounds = 20;
         unsigned trials = 5;
         std::string gmsh;
+        std::string configuration = "all";
     };
 
     unsigned parse_unsigned(const char* value)
@@ -70,7 +71,7 @@ namespace {
             if (token == "--help") {
                 std::cout << "Usage: idmesh_benchmark [side] [rounds] [--dim 2|3] "
                              "[--shape simplex|tensor|mixed] [--trials N] "
-                             "[--scramble] [--seed N] [--jitter D] [--gmsh FILE]\n"
+                             "[--scramble] [--seed N] [--jitter D] [--gmsh FILE] [--config all|minimal|finite_volume|full]\n"
                              "Output: CSV, including mesh payload and process memory.\n";
                 std::exit(0);
             }
@@ -79,7 +80,7 @@ namespace {
                 continue;
             }
             if (token == "--dim" || token == "--shape" || token == "--trials"
-                || token == "--seed" || token == "--jitter" || token == "--gmsh") {
+                || token == "--seed" || token == "--jitter" || token == "--gmsh" || token == "--config") {
                 if (++i >= argc)
                     throw std::invalid_argument("missing benchmark option value");
                 if (token == "--dim")
@@ -92,6 +93,8 @@ namespace {
                     args.generated.seed = parse_seed(argv[i]);
                 else if (token == "--gmsh")
                     args.gmsh = argv[i];
+                else if (token == "--config")
+                    args.configuration = argv[i];
                 else {
                     std::size_t consumed = 0;
                     args.generated.jitter = std::stod(argv[i], &consumed);
@@ -114,6 +117,9 @@ namespace {
                 throw std::invalid_argument("unexpected positional benchmark argument");
             }
         }
+        if (args.configuration != "all" && args.configuration != "minimal"
+            && args.configuration != "finite_volume" && args.configuration != "full")
+            throw std::invalid_argument("invalid --config; use all, minimal, finite_volume or full");
         const auto& g = args.generated;
         if ((g.dimension != 2 && g.dimension != 3) || args.trials == 0
             || args.trials > 100 || args.rounds == 0 || g.side == 0
@@ -281,7 +287,9 @@ namespace {
 
     void run(const Arguments& args, idmesh::TopologyOptions options, const char* configuration)
     {
-        Timing input, finalize, resident;
+        Timing input, finalize, resident, rss_baseline, rss_after_input,
+            rss_increase, peak_baseline, peak_after_input, peak_after_finalize,
+            peak_increase;
         std::vector<Walk> walks;
         std::vector<Traversal> samples;
         Index dimension = args.generated.dimension;
@@ -299,12 +307,18 @@ namespace {
         std::size_t relation_payload = 0, total_payload = 0;
         std::uint64_t peak = 0;
         for (unsigned trial = 0; trial < args.trials; ++trial) {
+            const auto before_rss = resident_bytes();
+            const auto before_peak = peak_resident_bytes();
             const auto start = Clock::now();
             idmesh::Mesh mesh;
             Clock::time_point input_ready;
+            std::uint64_t after_input_rss = before_rss;
+            std::uint64_t after_input_peak = before_peak;
             if (args.gmsh.empty()) {
                 auto builder = idmesh_bench::make_input(args.generated);
                 input_ready = Clock::now();
+                after_input_rss = resident_bytes();
+                after_input_peak = peak_resident_bytes();
                 mesh = std::move(builder).finalize(options);
             }
             else {
@@ -312,10 +326,19 @@ namespace {
                 mesh = idmesh::read_gmsh(args.gmsh, options);
             }
             const auto finalized = Clock::now();
+            const auto final_rss = resident_bytes();
+            const auto final_peak = peak_resident_bytes();
             input.samples.push_back(milliseconds(start, input_ready));
             finalize.samples.push_back(milliseconds(input_ready, finalized));
-            resident.samples.push_back(static_cast<double>(resident_bytes()));
-            peak = std::max(peak, peak_resident_bytes());
+            resident.samples.push_back(static_cast<double>(final_rss));
+            rss_baseline.samples.push_back(static_cast<double>(before_rss));
+            rss_after_input.samples.push_back(static_cast<double>(after_input_rss));
+            rss_increase.samples.push_back(static_cast<double>(final_rss > before_rss ? final_rss - before_rss : 0));
+            peak_baseline.samples.push_back(static_cast<double>(before_peak));
+            peak_after_input.samples.push_back(static_cast<double>(after_input_peak));
+            peak_after_finalize.samples.push_back(static_cast<double>(final_peak));
+            peak_increase.samples.push_back(static_cast<double>(final_peak > before_peak ? final_peak - before_peak : 0));
+            peak = std::max(peak, final_peak);
 
             const Index dim = mesh.dimension();
             if (trial == 0) {
@@ -363,7 +386,15 @@ namespace {
                       << args.generated.scramble << ',' << args.generated.seed << ','
                       << args.generated.jitter << ',' << total_payload << ','
                       << static_cast<std::uint64_t>(resident.median()) << ',' << peak << ','
-                      << walk.incidences << '\n';
+                      << walk.incidences << ','
+                      << static_cast<std::uint64_t>(rss_baseline.median()) << ','
+                      << static_cast<std::uint64_t>(rss_after_input.median()) << ','
+                      << static_cast<std::uint64_t>(rss_increase.median()) << ','
+                      << static_cast<std::uint64_t>(peak_baseline.median()) << ','
+                      << static_cast<std::uint64_t>(peak_after_input.median()) << ','
+                      << static_cast<std::uint64_t>(peak_after_finalize.median()) << ','
+                      << static_cast<std::uint64_t>(peak_increase.median()) << ','
+                      << (cell_count ? rss_increase.median() / cell_count : 0.0) << '\n';
         }
     }
 }
@@ -377,11 +408,18 @@ int main(int argc, char** argv)
                      "input_ms_p50,finalize_ms_p50,finalize_ms_p95,traversal_ms_p50,"
                      "traversal_ms_p95,relation_bytes,relation_bytes_per_cell,checksum,"
                      "source,scramble,seed,jitter,visible_payload_bytes,"
-                     "process_rss_bytes_p50,process_peak_rss_bytes,incidences_per_round\n";
+                     "process_rss_bytes_p50,process_peak_rss_bytes,incidences_per_round,"
+                     "rss_before_bytes_p50,rss_after_input_bytes_p50,rss_delta_bytes_p50,"
+                     "peak_before_bytes_p50,peak_after_input_bytes_p50,"
+                     "peak_after_finalize_bytes_p50,peak_delta_bytes_p50,"
+                     "rss_delta_bytes_per_cell_p50\n";
         // Gmsh input has a single combined read+finalize operation in finalize_ms.
-        run(args, idmesh::TopologyOptions::cells_and_vertices(), "minimal");
-        run(args, idmesh::TopologyOptions::finite_volume(), "finite_volume");
-        run(args, idmesh::TopologyOptions::full(), "full");
+        if (args.configuration == "all" || args.configuration == "minimal")
+            run(args, idmesh::TopologyOptions::cells_and_vertices(), "minimal");
+        if (args.configuration == "all" || args.configuration == "finite_volume")
+            run(args, idmesh::TopologyOptions::finite_volume(), "finite_volume");
+        if (args.configuration == "all" || args.configuration == "full")
+            run(args, idmesh::TopologyOptions::full(), "full");
     }
     catch (const std::exception& error) {
         std::cerr << "benchmark error: " << error.what() << '\n';
