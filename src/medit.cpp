@@ -1,4 +1,5 @@
 #include "idmesh/mesh.hpp"
+#include "contracts.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,11 +15,6 @@
 
 namespace idmesh {
     namespace {
-        void require(bool condition, const char* reason)
-        {
-            if (!condition)
-                throw std::runtime_error(reason);
-        }
         struct Record {
             CellType type;
             Index dimension;
@@ -96,7 +92,7 @@ namespace idmesh {
         std::istringstream sanitized_input(const std::string& filename)
         {
             std::ifstream f(filename);
-            require(bool(f), "cannot open Medit input");
+            detail::require_runtime(bool(f), "cannot open Medit input");
             std::ostringstream out;
             std::string line;
             while (std::getline(f, line)) {
@@ -120,53 +116,53 @@ namespace idmesh {
         std::vector<Record> records;
         while (in >> key) {
             if (key == "MeshVersionFormatted") {
-                require(bool(in >> version) && version >= 1 && version <= 2,
+                detail::require_runtime(bool(in >> version) && version >= 1 && version <= 2,
                     "unsupported Medit version");
             }
             else if (key == "Dimension") {
-                require(bool(in >> space) && (space == 2 || space == 3),
+                detail::require_runtime(bool(in >> space) && (space == 2 || space == 3),
                     "Medit geometric dimension must be 2 or 3");
             }
             else if (key == "Vertices") {
-                require(version != 0 && space != 0 && !seen_vertices, "invalid Medit vertex section");
+                detail::require_runtime(version != 0 && space != 0 && !seen_vertices, "invalid Medit vertex section");
                 seen_vertices = true;
                 std::size_t count = 0;
-                require(bool(in >> count) && count < invalid_index, "invalid Medit vertex count");
+                detail::require_runtime(bool(in >> count) && count < invalid_index, "invalid Medit vertex count");
                 positions.resize(count);
                 vertex_tags.resize(count);
                 for (std::size_t i = 0; i < count; ++i) {
                     for (Index j = 0; j < space; ++j)
-                        require(bool(in >> positions[i][j]), "invalid Medit vertex coordinate");
-                    require(bool(in >> vertex_tags[i]), "invalid Medit vertex tag");
+                        detail::require_runtime(bool(in >> positions[i][j]), "invalid Medit vertex coordinate");
+                    detail::require_runtime(bool(in >> vertex_tags[i]), "invalid Medit vertex tag");
                 }
             }
             else if (key == "End") {
                 break;
             }
             else {
-                require(seen_vertices, "Medit elements must follow Vertices");
+                detail::require_runtime(seen_vertices, "Medit elements must follow Vertices");
                 const auto kind = keyword_type(key);
                 std::size_t count = 0;
-                require(bool(in >> count), "invalid Medit element count");
+                detail::require_runtime(bool(in >> count), "invalid Medit element count");
                 for (std::size_t j = 0; j < count; ++j) {
                     Record element {kind.type, cell_dimension(kind.type), {}, 0};
                     element.nodes.resize(kind.nodes);
                     for (auto& id : element.nodes) {
                         std::uint64_t vertex = 0;
-                        require(bool(in >> vertex) && vertex > 0 && vertex <= positions.size(),
+                        detail::require_runtime(bool(in >> vertex) && vertex > 0 && vertex <= positions.size(),
                             "invalid Medit node index");
                         id = static_cast<Index>(vertex - 1);
                     }
-                    require(bool(in >> element.tag), "invalid Medit element reference");
+                    detail::require_runtime(bool(in >> element.tag), "invalid Medit element reference");
                     records.push_back(std::move(element));
                 }
             }
         }
-        require(version != 0 && seen_vertices && !records.empty(), "incomplete Medit mesh");
+        detail::require_runtime(version != 0 && seen_vertices && !records.empty(), "incomplete Medit mesh");
         Index dimension = 0;
         for (auto& r : records)
             dimension = std::max(dimension, r.dimension);
-        require(dimension <= space, "topological dimension exceeds geometry dimension");
+        detail::require_runtime(dimension <= space, "topological dimension exceeds geometry dimension");
         std::set<Index> corner_points;
         for (auto& r : records)
             for (Index j = 0; j < cell_vertex_count(r.type); ++j)
@@ -225,11 +221,11 @@ namespace idmesh {
         std::vector<OutputCell> cells;
         const Index d = mesh.dimension();
         for (const auto& label : mesh.labels())
-            require(label.value != 0,
+            detail::require_runtime(label.value != 0,
                 "Medit uses zero as the unlabeled reference");
         for (Index c = 0; c < mesh.entity_count(d); ++c) {
             const auto tags = mesh.labels(d, c);
-            require(tags.size() <= 1, "Medit cannot store multiple labels on one cell");
+            detail::require_runtime(tags.size() <= 1, "Medit cannot store multiple labels on one cell");
             const auto ids = mesh.cell_geometry_nodes(c);
             // Reject before touching the output file.
             (void)keyword_name(mesh.cell_types()[c], static_cast<Index>(ids.size()));
@@ -247,7 +243,7 @@ namespace idmesh {
         }
         const Index embedding = std::max<Index>(2, mesh.geometric_dimension());
         std::ofstream out(filename);
-        require(bool(out), "cannot open Medit output");
+        detail::require_runtime(bool(out), "cannot open Medit output");
         out << "MeshVersionFormatted 2\nDimension " << embedding << "\n\n";
         out << "Vertices\n"
             << mesh.geometry_node_count() << '\n'
@@ -258,7 +254,7 @@ namespace idmesh {
                 out << p[j] << ' ';
             if (v < mesh.entity_count(0)) {
                 const auto tags = mesh.labels(0, v);
-                require(tags.size() <= 1, "Medit cannot store multiple labels on one vertex");
+                detail::require_runtime(tags.size() <= 1, "Medit cannot store multiple labels on one vertex");
                 out << (tags.empty() ? 0 : tags.front().value) << '\n';
             }
             else
@@ -287,6 +283,6 @@ namespace idmesh {
             }
         }
         out << "\nEnd\n";
-        require(bool(out), "Medit write failure");
+        detail::require_runtime(bool(out), "Medit write failure");
     }
 } // namespace idmesh

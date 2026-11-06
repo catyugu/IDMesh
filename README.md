@@ -30,6 +30,9 @@ cmake --install build --prefix install
 The main branch CI builds and tests Linux/GCC, Windows/MSVC and macOS/Clang
 SDKs and publishes the installed trees as workflow artifacts.
 
+For developer setup, contract rules and formatting checks see
+[AGENTS.md](AGENTS.md) and [development conventions](docs/development.md).
+
 ## Use from CMake
 
 After installing IDMesh:

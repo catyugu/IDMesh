@@ -57,17 +57,28 @@ jobs:
           - name: linux-gcc
             os: ubuntu-24.04
             sdk_name: IDMesh-linux-gcc-Release
+            shared: OFF
           - name: windows-msvc
             os: windows-2022
             sdk_name: IDMesh-windows-msvc-Release
+            shared: OFF
           - name: macos-clang
             os: macos-15
             sdk_name: IDMesh-macos-clang-Release
+            shared: OFF
+          - name: linux-gcc-shared
+            os: ubuntu-24.04
+            sdk_name: IDMesh-linux-gcc-shared-Release
+            shared: ON
+          - name: windows-msvc-shared
+            os: windows-2022
+            sdk_name: IDMesh-windows-msvc-shared-Release
+            shared: ON
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_BUILD_BENCHMARKS=OFF
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_BUILD_BENCHMARKS=OFF -DBUILD_SHARED_LIBS=${{ matrix.shared }}
       - name: Build
         run: cmake --build build --config Release --parallel 2
       - name: Test
@@ -140,52 +151,3 @@ jobs:
         run: cmake --build build-examples --target idmesh_basix_orientation idmesh_fvm idmesh_fem --parallel 2
       - name: Run examples
         run: ctest --test-dir build-examples --output-on-failure -R '^idmesh[.]example[.](basix_orientation|fvm|fem)$'
-
-  cleanup:
-    name: actions retention
-    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [style, native, linux-backends, examples]
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Prune obsolete main-branch workflow runs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
-          KEEP_CI_RUNS: "8"
-        shell: bash
-        run: |
-          mapfile -t runs < <(
-            gh api --paginate "/repos/$GITHUB_REPOSITORY/actions/runs?branch=main&per_page=100" \
-              --jq '.workflow_runs[] | [.id, .name, .status] | @tsv'
-          )
-
-          kept=0
-          deleted=0
-          for row in "${runs[@]}"; do
-            IFS=$'\t' read -r id name status <<< "$row"
-            [[ "$id" == "$CURRENT_RUN_ID" ]] && continue
-            [[ "$status" != "completed" ]] && continue
-
-            delete=false
-            if [[ "$name" == "CI" ]]; then
-              if (( kept < KEEP_CI_RUNS )); then
-                ((kept += 1))
-              else
-                delete=true
-              fi
-            else
-              delete=true
-            fi
-
-            if [[ "$delete" == true ]]; then
-              gh api --method DELETE "/repos/$GITHUB_REPOSITORY/actions/runs/$id"
-              ((deleted += 1))
-            fi
-          done
-
-          echo "Kept $kept completed CI runs and deleted $deleted obsolete or legacy runs." \
-            >> "$GITHUB_STEP_SUMMARY"

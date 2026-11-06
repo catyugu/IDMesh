@@ -1,23 +1,11 @@
 #pragma once
 
+#include "idmesh/export.hpp"
+
 #include "idmesh/kokkos.hpp"
 #include "idmesh/mpi.hpp"
 #include <cstdint>
 #include <memory>
-
-#if defined(_WIN32)
-#if defined(IDMESH_MPI_KOKKOS_EXPORTS)
-#define IDMESH_MPI_KOKKOS_API __declspec(dllexport)
-#elif defined(IDMESH_MPI_KOKKOS_SHARED)
-#define IDMESH_MPI_KOKKOS_API __declspec(dllimport)
-#else
-#define IDMESH_MPI_KOKKOS_API
-#endif
-#elif defined(__GNUC__) || defined(__clang__)
-#define IDMESH_MPI_KOKKOS_API __attribute__((visibility("default")))
-#else
-#define IDMESH_MPI_KOKKOS_API
-#endif
 
 namespace idmesh::mpi::kokkos {
 

@@ -1,24 +1,12 @@
 #pragma once
+
+#include "idmesh/export.hpp"
 #include "idmesh/mesh.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <vector>
-
-#if defined(_WIN32)
-#if defined(IDMESH_KOKKOS_EXPORTS)
-#define IDMESH_KOKKOS_API __declspec(dllexport)
-#elif defined(IDMESH_KOKKOS_SHARED)
-#define IDMESH_KOKKOS_API __declspec(dllimport)
-#else
-#define IDMESH_KOKKOS_API
-#endif
-#elif defined(__GNUC__) || defined(__clang__)
-#define IDMESH_KOKKOS_API __attribute__((visibility("default")))
-#else
-#define IDMESH_KOKKOS_API
-#endif
 
 namespace idmesh::kokkos {
     // Persistent mirrors own memory in Kokkos::DefaultExecutionSpace::memory_space

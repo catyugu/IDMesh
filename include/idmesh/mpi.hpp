@@ -1,5 +1,7 @@
 #pragma once
 
+#include "idmesh/export.hpp"
+
 #include "idmesh/mesh.hpp"
 #include <cstdint>
 #include <memory>
@@ -7,20 +9,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#if defined(_WIN32)
-#if defined(IDMESH_MPI_EXPORTS)
-#define IDMESH_MPI_API __declspec(dllexport)
-#elif defined(IDMESH_MPI_SHARED)
-#define IDMESH_MPI_API __declspec(dllimport)
-#else
-#define IDMESH_MPI_API
-#endif
-#elif defined(__GNUC__) || defined(__clang__)
-#define IDMESH_MPI_API __attribute__((visibility("default")))
-#else
-#define IDMESH_MPI_API
-#endif
 
 namespace idmesh::mpi {
 

@@ -1,4 +1,5 @@
 #include "idmesh/mesh.hpp"
+#include "contracts.hpp"
 
 #include <algorithm>
 #include <array>
@@ -16,11 +17,6 @@
 namespace idmesh {
     namespace {
 
-        void require(bool condition, const char* reason)
-        {
-            if (!condition)
-                throw std::runtime_error(reason);
-        }
 
         struct ElementInfo {
             CellType type;
@@ -87,7 +83,7 @@ namespace idmesh {
         void expect_end(std::istream& input, const std::string& section)
         {
             std::string marker;
-            require(static_cast<bool>(input >> marker) && marker == "$End" + section.substr(1),
+            detail::require_runtime(static_cast<bool>(input >> marker) && marker == "$End" + section.substr(1),
                 "missing or incorrect Gmsh section terminator");
         }
 
@@ -109,152 +105,152 @@ namespace idmesh {
         std::string section;
         while (in >> section) {
             if (section == "$MeshFormat") {
-                require(!seen_format, "duplicate MeshFormat section");
+                detail::require_runtime(!seen_format, "duplicate MeshFormat section");
                 seen_format = true;
                 unsigned format = 0, data_size = 0;
-                require(static_cast<bool>(in >> version >> format >> data_size),
+                detail::require_runtime(static_cast<bool>(in >> version >> format >> data_size),
                     "invalid MeshFormat header");
-                require(format == 0 && data_size == 8 && ((version >= 2.2 && version < 2.3) || (version >= 4.1 && version < 4.2)),
+                detail::require_runtime(format == 0 && data_size == 8 && ((version >= 2.2 && version < 2.3) || (version >= 4.1 && version < 4.2)),
                     "only ASCII Gmsh MSH 2.2 and 4.1 are supported");
                 expect_end(in, section);
             }
             else if (section == "$PhysicalNames") {
-                require(seen_format, "MeshFormat must precede PhysicalNames");
+                detail::require_runtime(seen_format, "MeshFormat must precede PhysicalNames");
                 std::uint64_t count = 0;
-                require(static_cast<bool>(in >> count), "invalid PhysicalNames header");
+                detail::require_runtime(static_cast<bool>(in >> count), "invalid PhysicalNames header");
                 for (std::uint64_t i = 0; i < count; ++i) {
                     Index dim = 0;
                     int tag = 0;
                     std::string name;
-                    require(static_cast<bool>(in >> dim >> tag >> std::quoted(name)),
+                    detail::require_runtime(static_cast<bool>(in >> dim >> tag >> std::quoted(name)),
                         "invalid PhysicalNames entry");
-                    require(dim <= 3, "invalid PhysicalNames dimension");
+                    detail::require_runtime(dim <= 3, "invalid PhysicalNames dimension");
                     physical_names[{dim, tag}] = std::move(name);
                 }
                 expect_end(in, section);
             }
             else if (section == "$Entities") {
-                require(version >= 4.1 && !seen_entities, "invalid duplicate Entities section");
+                detail::require_runtime(version >= 4.1 && !seen_entities, "invalid duplicate Entities section");
                 seen_entities = true;
                 std::array<std::uint64_t, 4> counts {};
                 for (auto& count : counts)
-                    require(static_cast<bool>(in >> count), "invalid Entities header");
+                    detail::require_runtime(static_cast<bool>(in >> count), "invalid Entities header");
                 std::string line;
                 std::getline(in, line);
                 for (unsigned dim = 0; dim <= 3; ++dim) {
                     for (std::uint64_t i = 0; i < counts[dim]; ++i) {
-                        require(static_cast<bool>(std::getline(in, line)), "truncated Entities");
+                        detail::require_runtime(static_cast<bool>(std::getline(in, line)), "truncated Entities");
                         std::istringstream record(line);
                         std::uint64_t id = 0;
                         double ignored = 0;
-                        require(static_cast<bool>(record >> id), "invalid entity tag");
+                        detail::require_runtime(static_cast<bool>(record >> id), "invalid entity tag");
                         for (unsigned component = 0; component < (dim == 0 ? 3U : 6U); ++component)
-                            require(static_cast<bool>(record >> ignored), "invalid entity bounds");
+                            detail::require_runtime(static_cast<bool>(record >> ignored), "invalid entity bounds");
                         std::uint64_t group_count = 0;
-                        require(static_cast<bool>(record >> group_count), "invalid physical group count");
+                        detail::require_runtime(static_cast<bool>(record >> group_count), "invalid physical group count");
                         std::vector<int> groups(group_count);
                         for (auto& group : groups)
-                            require(static_cast<bool>(record >> group), "invalid physical group");
-                        require(entity_physical.emplace(EntityKey {dim, id}, std::move(groups)).second,
+                            detail::require_runtime(static_cast<bool>(record >> group), "invalid physical group");
+                        detail::require_runtime(entity_physical.emplace(EntityKey {dim, id}, std::move(groups)).second,
                             "duplicate geometrical entity tag");
                     }
                 }
                 expect_end(in, section);
             }
             else if (section == "$Nodes") {
-                require(seen_format && !seen_nodes, "missing format or duplicate Nodes");
+                detail::require_runtime(seen_format && !seen_nodes, "missing format or duplicate Nodes");
                 seen_nodes = true;
                 if (version < 4) {
                     std::uint64_t count = 0;
-                    require(static_cast<bool>(in >> count), "invalid Nodes header");
+                    detail::require_runtime(static_cast<bool>(in >> count), "invalid Nodes header");
                     for (std::uint64_t i = 0; i < count; ++i) {
                         std::uint64_t id;
                         std::array<double, 3> position;
-                        require(static_cast<bool>(in >> id >> position[0] >> position[1] >> position[2]),
+                        detail::require_runtime(static_cast<bool>(in >> id >> position[0] >> position[1] >> position[2]),
                             "truncated Gmsh nodes");
-                        require(nodes.emplace(id, position).second, "duplicate Gmsh node tag");
+                        detail::require_runtime(nodes.emplace(id, position).second, "duplicate Gmsh node tag");
                     }
                 }
                 else {
                     std::uint64_t blocks, total, min_tag, max_tag;
-                    require(static_cast<bool>(in >> blocks >> total >> min_tag >> max_tag),
+                    detail::require_runtime(static_cast<bool>(in >> blocks >> total >> min_tag >> max_tag),
                         "invalid Nodes block header");
                     for (std::uint64_t block = 0; block < blocks; ++block) {
                         unsigned dim = 0, parametric = 0;
                         std::uint64_t entity = 0, count = 0;
-                        require(static_cast<bool>(in >> dim >> entity >> parametric >> count),
+                        detail::require_runtime(static_cast<bool>(in >> dim >> entity >> parametric >> count),
                             "invalid Nodes block");
-                        require(dim <= 3 && parametric <= 1, "invalid Gmsh node classification");
+                        detail::require_runtime(dim <= 3 && parametric <= 1, "invalid Gmsh node classification");
                         std::vector<std::uint64_t> tags(count);
                         for (auto& tag : tags)
-                            require(static_cast<bool>(in >> tag), "missing node tag");
+                            detail::require_runtime(static_cast<bool>(in >> tag), "missing node tag");
                         for (auto tag : tags) {
                             std::array<double, 3> position;
-                            require(static_cast<bool>(in >> position[0] >> position[1] >> position[2]),
+                            detail::require_runtime(static_cast<bool>(in >> position[0] >> position[1] >> position[2]),
                                 "missing Gmsh node coordinate");
                             for (unsigned i = 0; i < (parametric ? dim : 0); ++i) {
                                 double parameter;
-                                require(static_cast<bool>(in >> parameter), "missing parametric coordinate");
+                                detail::require_runtime(static_cast<bool>(in >> parameter), "missing parametric coordinate");
                             }
-                            require(nodes.emplace(tag, position).second, "duplicate Gmsh node tag");
+                            detail::require_runtime(nodes.emplace(tag, position).second, "duplicate Gmsh node tag");
                         }
                     }
-                    require(nodes.size() == total, "Gmsh node count mismatch");
+                    detail::require_runtime(nodes.size() == total, "Gmsh node count mismatch");
                 }
                 expect_end(in, section);
             }
             else if (section == "$Elements") {
-                require(seen_format && !seen_elements, "missing format or duplicate Elements");
+                detail::require_runtime(seen_format && !seen_elements, "missing format or duplicate Elements");
                 seen_elements = true;
                 if (version < 4) {
                     std::uint64_t count = 0;
-                    require(static_cast<bool>(in >> count), "invalid Elements header");
+                    detail::require_runtime(static_cast<bool>(in >> count), "invalid Elements header");
                     for (std::uint64_t i = 0; i < count; ++i) {
                         std::uint64_t id = 0;
                         unsigned kind = 0, n_tags = 0;
-                        require(static_cast<bool>(in >> id >> kind >> n_tags), "invalid Gmsh element");
+                        detail::require_runtime(static_cast<bool>(in >> id >> kind >> n_tags), "invalid Gmsh element");
                         const auto info = element_info(kind);
                         Element element {info, {}, {}};
                         for (unsigned j = 0; j < n_tags; ++j) {
                             int tag = 0;
-                            require(static_cast<bool>(in >> tag), "truncated Gmsh element tags");
+                            detail::require_runtime(static_cast<bool>(in >> tag), "truncated Gmsh element tags");
                             if (j == 0 && tag != 0)
                                 element.physical.push_back(tag);
                         }
                         element.nodes.resize(info.nodes);
                         for (auto& node : element.nodes)
-                            require(static_cast<bool>(in >> node), "truncated element connectivity");
+                            detail::require_runtime(static_cast<bool>(in >> node), "truncated element connectivity");
                         elements.push_back(std::move(element));
                     }
                 }
                 else {
                     std::uint64_t blocks, count, min_tag, max_tag;
-                    require(static_cast<bool>(in >> blocks >> count >> min_tag >> max_tag),
+                    detail::require_runtime(static_cast<bool>(in >> blocks >> count >> min_tag >> max_tag),
                         "invalid Elements block header");
                     std::uint64_t read = 0;
                     for (std::uint64_t block = 0; block < blocks; ++block) {
                         unsigned dim = 0, kind = 0;
                         std::uint64_t entity = 0, n = 0;
-                        require(static_cast<bool>(in >> dim >> entity >> kind >> n),
+                        detail::require_runtime(static_cast<bool>(in >> dim >> entity >> kind >> n),
                             "invalid Elements block");
                         const auto info = element_info(kind);
-                        require(info.dimension == dim, "Gmsh element dimension mismatch");
+                        detail::require_runtime(info.dimension == dim, "Gmsh element dimension mismatch");
                         const auto found = entity_physical.find({dim, entity});
                         const std::vector<int> groups = found == entity_physical.end()
                             ? std::vector<int> {}
                             : found->second;
                         for (std::uint64_t j = 0; j < n; ++j) {
                             std::uint64_t id = 0;
-                            require(static_cast<bool>(in >> id), "truncated element tag");
+                            detail::require_runtime(static_cast<bool>(in >> id), "truncated element tag");
                             Element element {info, {}, groups};
                             element.nodes.resize(info.nodes);
                             for (auto& node : element.nodes)
-                                require(static_cast<bool>(in >> node), "truncated element connectivity");
+                                detail::require_runtime(static_cast<bool>(in >> node), "truncated element connectivity");
                             elements.push_back(std::move(element));
                         }
                         read += n;
                     }
-                    require(read == count, "Gmsh element count mismatch");
+                    detail::require_runtime(read == count, "Gmsh element count mismatch");
                 }
                 expect_end(in, section);
             }
@@ -263,18 +259,18 @@ namespace idmesh {
                 std::string line;
                 std::getline(in, line);
                 while (std::getline(in, line) && line != end) { }
-                require(line == end, "unterminated Gmsh section");
+                detail::require_runtime(line == end, "unterminated Gmsh section");
             }
             else {
                 throw std::runtime_error("unexpected Gmsh section delimiter: " + section);
             }
         }
-        require(seen_format && seen_nodes && seen_elements, "missing required Gmsh section");
-        require(!nodes.empty() && !elements.empty(), "empty Gmsh mesh");
+        detail::require_runtime(seen_format && seen_nodes && seen_elements, "missing required Gmsh section");
+        detail::require_runtime(!nodes.empty() && !elements.empty(), "empty Gmsh mesh");
         Index dimension = 0;
         for (const auto& element : elements)
             dimension = std::max(dimension, element.info.dimension);
-        require(dimension >= 1 && dimension <= 3, "mesh needs at least one 1D-3D element");
+        detail::require_runtime(dimension >= 1 && dimension <= 3, "mesh needs at least one 1D-3D element");
 
         // High-order geometric nodes never become topological mesh vertices. Even
         // isolated lower-dimensional physical entities keep their corner vertices
@@ -282,11 +278,11 @@ namespace idmesh {
         std::set<std::uint64_t> corner_tags;
         for (const auto& element : elements) {
             for (Index j = 0; j < element.info.corners; ++j) {
-                require(nodes.contains(element.nodes[j]), "element references missing Gmsh node");
+                detail::require_runtime(nodes.contains(element.nodes[j]), "element references missing Gmsh node");
                 corner_tags.insert(element.nodes[j]);
             }
             for (auto tag : element.nodes)
-                require(nodes.contains(tag), "element references missing Gmsh node");
+                detail::require_runtime(nodes.contains(tag), "element references missing Gmsh node");
         }
         MeshBuilder builder(dimension, 3);
         std::map<std::uint64_t, Index> corners;

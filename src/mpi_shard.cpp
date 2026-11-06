@@ -1,5 +1,7 @@
 #include "idmesh/mpi.hpp"
 #include "mpi_internal.hpp"
+#include "contracts.hpp"
+#include "mpi_errors.hpp"
 
 #include <algorithm>
 #include <array>
@@ -24,17 +26,6 @@
 namespace idmesh::mpi {
     namespace {
 
-        void require(bool condition, const char* reason)
-        {
-            if (!condition)
-                throw std::runtime_error(reason);
-        }
-
-        void mpi_check(int result)
-        {
-            if (result != MPI_SUCCESS)
-                throw std::runtime_error("distributed mesh MPI operation failed");
-        }
 
         struct ReceivedBytes {
             std::vector<int> counts;
@@ -53,22 +44,22 @@ namespace idmesh::mpi {
         {
             static_assert(std::is_trivially_copyable_v<T>);
             int size = 0;
-            mpi_check(MPI_Comm_size(comm, &size));
-            require(sends.size() == static_cast<std::size_t>(size),
+            ::idmesh::mpi::detail::check_mpi(MPI_Comm_size(comm, &size), "MPI_Comm_size");
+            ::idmesh::detail::require_argument(sends.size() == static_cast<std::size_t>(size),
                 "MPI record destination count mismatch");
             std::vector<int> sc(size), rc(size), sd(size), rd(size);
             for (int peer = 0; peer < size; ++peer) {
-                require(sends[peer].size() <= static_cast<std::size_t>(INT_MAX) / sizeof(T),
+                ::idmesh::detail::require_argument(sends[peer].size() <= static_cast<std::size_t>(INT_MAX) / sizeof(T),
                     "MPI record message exceeds int count");
                 sc[peer] = static_cast<int>(sends[peer].size() * sizeof(T));
             }
-            mpi_check(MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT,
-                comm));
+            ::idmesh::mpi::detail::check_mpi(MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT,
+                comm), "MPI_Alltoall");
             std::size_t ns = 0, nr = 0;
             for (int peer = 0; peer < size; ++peer) {
-                require(rc[peer] >= 0 && rc[peer] % sizeof(T) == 0,
+                ::idmesh::detail::require_argument(rc[peer] >= 0 && rc[peer] % sizeof(T) == 0,
                     "invalid MPI record message byte count");
-                require(ns <= static_cast<std::size_t>(INT_MAX) - sc[peer] && nr <= static_cast<std::size_t>(INT_MAX) - rc[peer],
+                ::idmesh::detail::require_argument(ns <= static_cast<std::size_t>(INT_MAX) - sc[peer] && nr <= static_cast<std::size_t>(INT_MAX) - rc[peer],
                     "MPI_Alltoallv displacement exceeds int range");
                 sd[peer] = static_cast<int>(ns);
                 rd[peer] = static_cast<int>(nr);
@@ -81,8 +72,8 @@ namespace idmesh::mpi {
                 std::copy(bucket.begin(), bucket.end(), send_data.begin() + write);
                 write += bucket.size();
             }
-            mpi_check(MPI_Alltoallv(send_data.data(), sc.data(), sd.data(), MPI_BYTE,
-                recv_data.data(), rc.data(), rd.data(), MPI_BYTE, comm));
+            ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(send_data.data(), sc.data(), sd.data(), MPI_BYTE,
+                recv_data.data(), rc.data(), rd.data(), MPI_BYTE, comm), "MPI_Alltoallv");
             Received<T> result;
             result.values = std::move(recv_data);
             result.counts.resize(size);
@@ -120,85 +111,85 @@ namespace idmesh::mpi {
         Shard parse_shard(const std::string& path, int rank, int size)
         {
             std::ifstream file(path);
-            require(static_cast<bool>(file), "cannot open local IDMesh partition shard");
+            ::idmesh::detail::require_runtime(static_cast<bool>(file), "cannot open local IDMesh partition shard");
             Shard shard;
             std::string word;
             int version = 0;
-            require(static_cast<bool>(file >> word >> version) && word == "IDMESH_SHARD" && version == 2, "invalid IDMesh shard version");
-            require(static_cast<bool>(file >> word >> shard.dimension >> shard.geometric_dimension) && word == "DIM" && shard.dimension >= 1 && shard.dimension <= 3 && shard.geometric_dimension >= shard.dimension && shard.geometric_dimension <= 3, "invalid shard dimensions");
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> version) && word == "IDMESH_SHARD" && version == 2, "invalid IDMesh shard version");
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> shard.dimension >> shard.geometric_dimension) && word == "DIM" && shard.dimension >= 1 && shard.dimension <= 3 && shard.geometric_dimension >= shard.dimension && shard.geometric_dimension <= 3, "invalid shard dimensions");
             std::size_t count = 0;
-            require(static_cast<bool>(file >> word >> count) && word == "VERTICES" && count < invalid_index, "invalid shard VERTICES section");
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "VERTICES" && count < invalid_index, "invalid shard VERTICES section");
             for (std::size_t i = 0; i < count; ++i) {
                 std::uint64_t id = 0;
                 std::array<double, 3> p {};
-                require(static_cast<bool>(file >> id >> p[0] >> p[1] >> p[2]),
+                ::idmesh::detail::require_runtime(static_cast<bool>(file >> id >> p[0] >> p[1] >> p[2]),
                     "truncated shard vertex");
-                require(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]),
+                ::idmesh::detail::require_argument(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]),
                     "nonfinite shard vertex");
-                require(shard.vertices.emplace(id, p).second, "duplicate shard vertex");
+                ::idmesh::detail::require_runtime(shard.vertices.emplace(id, p).second, "duplicate shard vertex");
             }
-            require(static_cast<bool>(file >> word >> count) && word == "GEOMETRY_NODES" && count < invalid_index, "invalid GEOMETRY_NODES section");
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "GEOMETRY_NODES" && count < invalid_index, "invalid GEOMETRY_NODES section");
             for (std::size_t i = 0; i < count; ++i) {
                 std::uint64_t id = 0;
                 std::array<double, 3> p {};
-                require(static_cast<bool>(file >> id >> p[0] >> p[1] >> p[2]),
+                ::idmesh::detail::require_runtime(static_cast<bool>(file >> id >> p[0] >> p[1] >> p[2]),
                     "truncated shard high-order node");
-                require(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]),
+                ::idmesh::detail::require_argument(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]),
                     "nonfinite high-order node");
-                require(shard.geometry_nodes.emplace(id, p).second,
+                ::idmesh::detail::require_runtime(shard.geometry_nodes.emplace(id, p).second,
                     "duplicate shard high-order node");
             }
-            require(static_cast<bool>(file >> word >> count) && word == "CELLS" && count < invalid_index, "invalid shard CELLS section");
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "CELLS" && count < invalid_index, "invalid shard CELLS section");
             std::set<std::uint64_t> seen;
             for (std::size_t i = 0; i < count; ++i) {
                 Cell cell;
                 unsigned type = 0;
                 std::size_t nodes = 0;
-                require(static_cast<bool>(file >> cell.id >> cell.owner >> type >> nodes), "invalid shard cell header");
-                require(cell.owner >= 0 && cell.owner < size && type >= static_cast<unsigned>(CellType::segment) && type <= static_cast<unsigned>(CellType::pyramid),
+                ::idmesh::detail::require_runtime(static_cast<bool>(file >> cell.id >> cell.owner >> type >> nodes), "invalid shard cell header");
+                ::idmesh::detail::require_runtime(cell.owner >= 0 && cell.owner < size && type >= static_cast<unsigned>(CellType::segment) && type <= static_cast<unsigned>(CellType::pyramid),
                     "invalid shard cell owner or type");
                 cell.type = static_cast<CellType>(type);
-                require(cell_dimension(cell.type) == shard.dimension && nodes >= cell_vertex_count(cell.type) && nodes <= 27,
+                ::idmesh::detail::require_argument(cell_dimension(cell.type) == shard.dimension && nodes >= cell_vertex_count(cell.type) && nodes <= 27,
                     "invalid cell dimension or geometry arity");
                 cell.geometry.resize(nodes);
                 for (auto& id : cell.geometry)
-                    require(static_cast<bool>(file >> id), "truncated shard cell geometry");
+                    ::idmesh::detail::require_runtime(static_cast<bool>(file >> id), "truncated shard cell geometry");
                 for (Index j = 0; j < cell_vertex_count(cell.type); ++j)
-                    require(shard.vertices.contains(cell.geometry[j]),
+                    ::idmesh::detail::require_argument(shard.vertices.contains(cell.geometry[j]),
                         "cell references missing global corner vertex");
                 for (std::size_t j = cell_vertex_count(cell.type); j < nodes; ++j)
-                    require(shard.geometry_nodes.contains(cell.geometry[j]),
+                    ::idmesh::detail::require_argument(shard.geometry_nodes.contains(cell.geometry[j]),
                         "cell references missing high-order geometry node");
-                require(seen.insert(cell.id).second, "duplicate shard global cell ID");
+                ::idmesh::detail::require_runtime(seen.insert(cell.id).second, "duplicate shard global cell ID");
                 shard.cells.push_back(std::move(cell));
             }
-            require(static_cast<bool>(file >> word >> count) && word == "LABELS",
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "LABELS",
                 "missing shard LABELS section");
             for (std::size_t i = 0; i < count; ++i) {
                 Label label;
                 std::size_t n = 0;
-                require(static_cast<bool>(file >> label.dimension >> label.value >> n) && label.dimension <= shard.dimension && n >= 1 && n <= 4,
+                ::idmesh::detail::require_runtime(static_cast<bool>(file >> label.dimension >> label.value >> n) && label.dimension <= shard.dimension && n >= 1 && n <= 4,
                     "invalid shard label header");
                 label.entities.resize(n);
                 for (auto& id : label.entities)
-                    require(static_cast<bool>(file >> id), "truncated shard label");
+                    ::idmesh::detail::require_runtime(static_cast<bool>(file >> id), "truncated shard label");
                 shard.labels.push_back(std::move(label));
             }
-            require(static_cast<bool>(file >> word >> count) && word == "NAMES",
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "NAMES",
                 "missing shard NAMES section");
             for (std::size_t i = 0; i < count; ++i) {
                 Index dimension = 0;
                 int value = 0;
                 std::string name;
-                require(static_cast<bool>(file >> dimension >> value >> std::quoted(name))
+                ::idmesh::detail::require_runtime(static_cast<bool>(file >> dimension >> value >> std::quoted(name))
                         && dimension <= shard.dimension,
                     "invalid shard label name");
                 shard.label_names[{dimension, value}] = std::move(name);
             }
-            require(static_cast<bool>(file >> word) && word == "END",
+            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word) && word == "END",
                 "missing shard END marker");
-            require(!(file >> word), "trailing garbage after shard END");
-            require(!shard.cells.empty(), "shard requires at least one local cell");
+            ::idmesh::detail::require_runtime(!(file >> word), "trailing garbage after shard END");
+            ::idmesh::detail::require_runtime(!shard.cells.empty(), "shard requires at least one local cell");
             std::stable_sort(shard.cells.begin(), shard.cells.end(),
                 [rank](const Cell& a, const Cell& b) {
                     return std::tuple {a.owner != rank, a.id} < std::tuple {b.owner != rank, b.id};
@@ -257,9 +248,9 @@ namespace idmesh::mpi {
         const Shard input = parse_shard(path, rank, size);
         const Index dim = input.dimension;
         Index min_dim = 0, max_dim = 0;
-        mpi_check(MPI_Allreduce(&dim, &min_dim, 1, MPI_UNSIGNED, MPI_MIN, comm));
-        mpi_check(MPI_Allreduce(&dim, &max_dim, 1, MPI_UNSIGNED, MPI_MAX, comm));
-        require(min_dim == max_dim, "shards disagree on topological dimension");
+        ::idmesh::mpi::detail::check_mpi(MPI_Allreduce(&dim, &min_dim, 1, MPI_UNSIGNED, MPI_MIN, comm), "MPI_Allreduce");
+        ::idmesh::mpi::detail::check_mpi(MPI_Allreduce(&dim, &max_dim, 1, MPI_UNSIGNED, MPI_MAX, comm), "MPI_Allreduce");
+        ::idmesh::detail::require_runtime(min_dim == max_dim, "shards disagree on topological dimension");
 
         MeshBuilder builder(input.dimension, input.geometric_dimension);
         std::map<std::uint64_t, Index> vertices, high_order, cells;
@@ -285,7 +276,7 @@ namespace idmesh::mpi {
             const Index local = extras.empty()
                 ? builder.add_cell(cell.type, corners)
                 : builder.add_quadratic_cell(cell.type, corners, extras);
-            require(local == cell_ids.size(), "unexpected shard builder cell ordering");
+            ::idmesh::detail::require_runtime(local == cell_ids.size(), "unexpected shard builder cell ordering");
             cells[cell.id] = local;
             cell_ids.push_back(cell.id);
             cell_owners.push_back(cell.owner);
@@ -294,13 +285,13 @@ namespace idmesh::mpi {
         }
         for (const Label& label : input.labels) {
             if (label.dimension == dim) {
-                require(label.entities.size() == 1 && cells.contains(label.entities[0]), "invalid top-cell label reference");
+                ::idmesh::detail::require_argument(label.entities.size() == 1 && cells.contains(label.entities[0]), "invalid top-cell label reference");
                 builder.add_cell_label(cells.at(label.entities[0]), label.value);
             }
             else {
                 std::vector<Index> corners;
                 for (auto id : label.entities) {
-                    require(vertices.contains(id), "label refers to missing shard vertex");
+                    ::idmesh::detail::require_runtime(vertices.contains(id), "label refers to missing shard vertex");
                     corners.push_back(vertices.at(id));
                 }
                 builder.add_label(label.dimension, corners, label.value);
@@ -348,7 +339,7 @@ namespace idmesh::mpi {
                 Key key;
                 key.dim = static_cast<std::uint8_t>(k);
                 key.arity = static_cast<std::uint8_t>(local.size());
-                require(key.arity > 0 && key.arity <= 4, "invalid shared entity arity");
+                ::idmesh::detail::require_argument(key.arity > 0 && key.arity <= 4, "invalid shared entity arity");
                 for (std::size_t j = 0; j < local.size(); ++j)
                     key.ids[j] = local_to_global_vertex[local[j]];
                 std::sort(key.ids.begin(), key.ids.begin() + key.arity);
@@ -369,8 +360,8 @@ namespace idmesh::mpi {
                 ++local_unique[key.dim];
         }
         for (Index k = 1; k < dim; ++k) {
-            mpi_check(MPI_Exscan(&local_unique[k], &prefix[k], 1,
-                MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm));
+            ::idmesh::mpi::detail::check_mpi(MPI_Exscan(&local_unique[k], &prefix[k], 1,
+                MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm), "MPI_Exscan");
             if (rank == 0)
                 prefix[k] = 0;
         }
@@ -383,7 +374,7 @@ namespace idmesh::mpi {
             for (const auto& item : members) {
                 min_owner = std::min(min_owner, item.proposed_owner < size ? item.proposed_owner : item.requester);
             }
-            require(min_owner >= 0 && min_owner < size, "invalid entity owner");
+            ::idmesh::detail::require_runtime(min_owner >= 0 && min_owner < size, "invalid entity owner");
             for (auto item : members) {
                 item.global_id = global;
                 item.proposed_owner = min_owner;
@@ -397,24 +388,24 @@ namespace idmesh::mpi {
         for (const auto& answer : answers.values) {
             const auto k = answer.key.dim;
             const auto e = answer.local_entity;
-            require(k < dim && e < partition->global_ids[k].size() && !assigned[k][e], "duplicate or invalid distributed entity response");
+            ::idmesh::detail::require_runtime(k < dim && e < partition->global_ids[k].size() && !assigned[k][e], "duplicate or invalid distributed entity response");
             assigned[k][e] = true;
             partition->global_ids[k][e] = answer.global_id;
             partition->owner_ranks[k][e] = answer.proposed_owner;
         }
         for (Index k = 0; k < dim; ++k)
-            require(std::all_of(assigned[k].begin(), assigned[k].end(),
+            ::idmesh::detail::require_argument(std::all_of(assigned[k].begin(), assigned[k].end(),
                         [](bool value) { return value; }),
                 "missing distributed entity response");
 
         std::map<std::uint64_t, Index> owned_cells;
         for (Index c = 0; c < owned; ++c)
-            require(owned_cells.emplace(partition->global_ids[dim][c], c).second,
+            ::idmesh::detail::require_argument(owned_cells.emplace(partition->global_ids[dim][c], c).second,
                 "duplicate owned global cell ID");
         std::vector<std::vector<Request>> ghost_requests(size);
         for (Index c = owned; c < partition->mesh.entity_count(dim); ++c) {
             const int owner = partition->owner_ranks[dim][c];
-            require(owner != rank, "ghost cell wrongly owned by local rank");
+            ::idmesh::detail::require_argument(owner != rank, "ghost cell wrongly owned by local rank");
             ghost_requests[owner].push_back({partition->global_ids[dim][c], c});
         }
         const auto incoming_ghosts = exchange_records(comm, ghost_requests);
@@ -432,7 +423,7 @@ namespace idmesh::mpi {
             for (int i = 0; i < count; ++i) {
                 const auto& request = incoming_ghosts.values[first + i];
                 const auto found = owned_cells.find(request.global_cell);
-                require(found != owned_cells.end(), "requested ghost owner lacks its cell");
+                ::idmesh::detail::require_runtime(found != owned_cells.end(), "requested ghost owner lacks its cell");
                 exchange->send[peer].push_back(found->second);
             }
         }

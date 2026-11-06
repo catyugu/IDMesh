@@ -1,5 +1,7 @@
 #pragma once
 
+#include "idmesh/export.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -7,18 +9,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-
-#if defined(_WIN32) && defined(IDMESH_SHARED)
-#if defined(IDMESH_EXPORTS)
-#define IDMESH_API __declspec(dllexport)
-#else
-#define IDMESH_API __declspec(dllimport)
-#endif
-#elif defined(IDMESH_SHARED) && (defined(__GNUC__) || defined(__clang__))
-#define IDMESH_API __attribute__((visibility("default")))
-#else
-#define IDMESH_API
-#endif
 
 namespace idmesh {
 

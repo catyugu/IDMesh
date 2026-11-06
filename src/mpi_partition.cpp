@@ -1,4 +1,5 @@
 #include "idmesh/mpi.hpp"
+#include "contracts.hpp"
 
 #include <algorithm>
 #include <array>
@@ -20,16 +21,11 @@
 namespace idmesh::mpi {
     namespace {
 
-        void require(bool value, const char* explanation)
-        {
-            if (!value)
-                throw std::runtime_error(explanation);
-        }
 
         std::vector<std::vector<Index>> dual_graph(const Mesh& mesh)
         {
             const auto dim = mesh.dimension();
-            require(mesh.has_relation(dim - 1, dim),
+            ::idmesh::detail::require_argument(mesh.has_relation(dim - 1, dim),
                 "graph partitioning requires Facet-to-Cell support");
             const auto cells = mesh.entity_count(dim);
             std::vector<std::vector<Index>> graph(cells);
@@ -77,7 +73,7 @@ namespace idmesh::mpi {
     std::vector<int> partition_graph(const Mesh& source, int parts)
     {
         const Index count = source.entity_count(source.dimension());
-        require(parts > 0 && count >= static_cast<Index>(parts),
+        ::idmesh::detail::require_argument(parts > 0 && count >= static_cast<Index>(parts),
             "graph partitioner needs one or more owned cells per Rank");
         const auto graph = dual_graph(source);
         std::vector<Index> seeds {0};
@@ -93,7 +89,7 @@ namespace idmesh::mpi {
                     best = nearest[cell];
                 }
             }
-            require(selected != invalid_index, "could not choose graph partition seed");
+            ::idmesh::detail::require_runtime(selected != invalid_index, "could not choose graph partition seed");
             seeds.push_back(selected);
             const auto distance = distance_from(graph, selected);
             for (Index cell = 0; cell < count; ++cell)
@@ -152,7 +148,7 @@ namespace idmesh::mpi {
                     if (owners[neighbor] == -1)
                         frontiers[p].push_back(neighbor);
             }
-            require(progress, "graph partitioner failed to balance cells");
+            ::idmesh::detail::require_runtime(progress, "graph partitioner failed to balance cells");
         }
         return owners;
     }
@@ -162,23 +158,23 @@ namespace idmesh::mpi {
     {
         const Index d = source.dimension();
         const Index n = source.entity_count(d);
-        require(owners.size() == n && ghost_layers <= 8,
+        ::idmesh::detail::require_argument(owners.size() == n && ghost_layers <= 8,
             "invalid shard owner count or ghost depth");
-        require(n > 0, "cannot export empty source mesh");
+        ::idmesh::detail::require_argument(n > 0, "cannot export empty source mesh");
         int parts = 0;
         for (int owner : owners) {
-            require(owner >= 0 && owner < std::numeric_limits<int>::max() - 1,
+            ::idmesh::detail::require_argument(owner >= 0 && owner < std::numeric_limits<int>::max() - 1,
                 "invalid shard owner rank");
             parts = std::max(parts, owner + 1);
         }
-        require(parts >= 1, "empty shard partition");
+        ::idmesh::detail::require_argument(parts >= 1, "empty shard partition");
         const auto graph = dual_graph(source);
         std::vector<std::vector<Index>> owned(parts);
         for (Index cell = 0; cell < n; ++cell)
             owned[owners[cell]].push_back(cell);
 
         for (int rank = 0; rank < parts; ++rank) {
-            require(!owned[rank].empty(), "every exported shard must own cells");
+            ::idmesh::detail::require_argument(!owned[rank].empty(), "every exported shard must own cells");
             std::vector<bool> seen(n);
             std::vector<Index> frontier;
             for (Index c : owned[rank]) {
@@ -235,7 +231,7 @@ namespace idmesh::mpi {
             }
 
             std::ofstream out(prefix + "." + std::to_string(rank) + ".idm");
-            require(static_cast<bool>(out), "cannot create partition shard file");
+            ::idmesh::detail::require_runtime(static_cast<bool>(out), "cannot create partition shard file");
             out << "IDMESH_SHARD 2\nDIM " << d << ' ' << source.geometric_dimension() << '\n';
             out << std::setprecision(17);
             out << "VERTICES " << corners.size() << '\n';
@@ -273,7 +269,7 @@ namespace idmesh::mpi {
             for (const auto& [key, name] : names)
                 out << key.first << ' ' << key.second << ' ' << std::quoted(name) << '\n';
             out << "END\n";
-            require(static_cast<bool>(out), "partition shard write failure");
+            ::idmesh::detail::require_runtime(static_cast<bool>(out), "partition shard write failure");
         }
     }
 

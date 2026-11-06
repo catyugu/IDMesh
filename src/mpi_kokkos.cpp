@@ -1,4 +1,5 @@
 #include "idmesh/mpi_kokkos.hpp"
+#include "contracts.hpp"
 
 #include <Kokkos_Core.hpp>
 #include <algorithm>
@@ -53,10 +54,10 @@ namespace idmesh::mpi::kokkos {
     DeviceHaloPlan::DeviceHaloPlan(const ExchangePlan& plan, Index components)
         : data_(std::make_shared<Data>())
     {
-        if (!Kokkos::is_initialized())
-            throw std::logic_error("initialize Kokkos before creating DeviceHaloPlan");
-        if (components == 0 || plan.rank_count() <= 0)
-            throw std::invalid_argument("invalid device halo component or plan");
+        ::idmesh::detail::require_state(Kokkos::is_initialized(),
+            "initialize Kokkos before creating DeviceHaloPlan");
+        ::idmesh::detail::require_argument(components != 0 && plan.rank_count() > 0,
+            "invalid device halo component or plan");
         data_->plan = plan;
         data_->cells = plan.local_cell_count();
         data_->components = components;
@@ -68,7 +69,7 @@ namespace idmesh::mpi::kokkos {
             recv.insert(recv.end(), r.begin(), r.end());
         }
         if (send.size() > static_cast<std::size_t>(invalid_index) / components || recv.size() > static_cast<std::size_t>(invalid_index) / components)
-            throw std::overflow_error("device halo count exceeds local index limit");
+            throw std::length_error("device halo count exceeds local index limit");
         data_->sending = static_cast<Index>(send.size());
         data_->receiving = static_cast<Index>(recv.size());
         data_->send_cells = copy_to_device("idmesh_device_halo_send_ids", send);

@@ -1,4 +1,5 @@
 #include "idmesh/mesh.hpp"
+#include "contracts.hpp"
 #include "second_order.hpp"
 
 #include <algorithm>
@@ -15,11 +16,6 @@
 
 namespace idmesh {
     namespace {
-        void require(bool condition, const char* reason)
-        {
-            if (!condition)
-                throw std::runtime_error(reason);
-        }
         struct CellRecord {
             CellType type;
             Index dimension;
@@ -161,47 +157,47 @@ namespace idmesh {
     Mesh read_vtk_legacy(const std::string& filename, BuildOptions options)
     {
         std::ifstream in(filename);
-        require(bool(in), "cannot open VTK legacy file");
+        detail::require_runtime(bool(in), "cannot open VTK legacy file");
         std::string line;
-        require(bool(std::getline(in, line)) && line.rfind("# vtk DataFile", 0) == 0,
+        detail::require_runtime(bool(std::getline(in, line)) && line.rfind("# vtk DataFile", 0) == 0,
             "invalid VTK legacy header");
-        require(bool(std::getline(in, line)), "missing VTK title");
-        require(bool(std::getline(in, line)) && line == "ASCII",
+        detail::require_runtime(bool(std::getline(in, line)), "missing VTK title");
+        detail::require_runtime(bool(std::getline(in, line)) && line == "ASCII",
             "only ASCII VTK legacy files are supported");
-        require(bool(std::getline(in, line)) && line == "DATASET UNSTRUCTURED_GRID",
+        detail::require_runtime(bool(std::getline(in, line)) && line == "DATASET UNSTRUCTURED_GRID",
             "expected VTK UNSTRUCTURED_GRID");
         std::string keyword, type;
         std::size_t point_count = 0;
-        require(bool(in >> keyword >> point_count >> type) && keyword == "POINTS" && point_count < invalid_index, "invalid VTK POINTS");
+        detail::require_runtime(bool(in >> keyword >> point_count >> type) && keyword == "POINTS" && point_count < invalid_index, "invalid VTK POINTS");
         std::vector<std::array<double, 3>> points(point_count);
         for (auto& p : points)
             for (auto& x : p)
-                require(bool(in >> x), "truncated VTK POINTS");
+                detail::require_runtime(bool(in >> x), "truncated VTK POINTS");
         std::size_t cell_count = 0, words = 0;
-        require(bool(in >> keyword >> cell_count >> words) && keyword == "CELLS" && cell_count < invalid_index, "invalid VTK CELLS");
+        detail::require_runtime(bool(in >> keyword >> cell_count >> words) && keyword == "CELLS" && cell_count < invalid_index, "invalid VTK CELLS");
         std::vector<CellRecord> cells(cell_count);
         std::size_t actual = 0;
         for (auto& cell : cells) {
             std::size_t n = 0;
-            require(bool(in >> n) && n <= 27, "invalid VTK cell arity");
+            detail::require_runtime(bool(in >> n) && n <= 27, "invalid VTK cell arity");
             actual += n + 1;
             cell.nodes.resize(n);
             for (auto& id : cell.nodes) {
                 std::uint64_t value = 0;
-                require(bool(in >> value) && value < points.size(), "invalid VTK point ID");
+                detail::require_runtime(bool(in >> value) && value < points.size(), "invalid VTK point ID");
                 id = static_cast<Index>(value);
             }
         }
-        require(words == actual, "VTK CELLS word count mismatch");
+        detail::require_runtime(words == actual, "VTK CELLS word count mismatch");
         std::size_t type_count = 0;
-        require(bool(in >> keyword >> type_count) && keyword == "CELL_TYPES" && type_count == cells.size(), "invalid VTK CELL_TYPES");
+        detail::require_runtime(bool(in >> keyword >> type_count) && keyword == "CELL_TYPES" && type_count == cells.size(), "invalid VTK CELL_TYPES");
         for (auto& cell : cells) {
             int code = 0;
-            require(bool(in >> code), "truncated VTK CELL_TYPES");
+            detail::require_runtime(bool(in >> code), "truncated VTK CELL_TYPES");
             const auto [kind, dim] = vtk_type(code);
             cell.type = kind;
             cell.dimension = dim;
-            require(vtk_node_count(code) == cell.nodes.size(), "invalid VTK cell node count");
+            detail::require_runtime(vtk_node_count(code) == cell.nodes.size(), "invalid VTK cell node count");
         }
         enum class Attribute { none,
             cells,
@@ -210,27 +206,27 @@ namespace idmesh {
         while (in >> keyword) {
             if (keyword == "CELL_DATA" || keyword == "POINT_DATA") {
                 std::size_t count = 0;
-                require(bool(in >> count), "invalid VTK data header");
+                detail::require_runtime(bool(in >> count), "invalid VTK data header");
                 domain = keyword == "CELL_DATA" ? Attribute::cells : Attribute::points;
-                require(count == (domain == Attribute::cells ? cells.size() : points.size()),
+                detail::require_runtime(count == (domain == Attribute::cells ? cells.size() : points.size()),
                     "VTK data size mismatch");
             }
             else if (keyword == "SCALARS") {
-                require(domain != Attribute::none, "SCALARS outside data section");
+                detail::require_runtime(domain != Attribute::none, "SCALARS outside data section");
                 std::string name, kind, rest, lookup, table;
-                require(bool(in >> name >> kind), "invalid VTK SCALARS");
+                detail::require_runtime(bool(in >> name >> kind), "invalid VTK SCALARS");
                 std::getline(in, rest);
                 std::size_t components = 1;
                 if (auto pos = rest.find_first_not_of(" \t\r"); pos != std::string::npos)
                     components = std::stoul(rest.substr(pos));
-                require(components >= 1 && components <= 32, "unsupported VTK scalar components");
-                require(bool(in >> lookup >> table) && lookup == "LOOKUP_TABLE",
+                detail::require_runtime(components >= 1 && components <= 32, "unsupported VTK scalar components");
+                detail::require_runtime(bool(in >> lookup >> table) && lookup == "LOOKUP_TABLE",
                     "missing VTK scalar lookup table");
                 const auto count = domain == Attribute::cells ? cells.size() : points.size();
                 for (std::size_t i = 0; i < count; ++i) {
                     for (std::size_t c = 0; c < components; ++c) {
                         double value = 0;
-                        require(bool(in >> value), "truncated VTK scalar array");
+                        detail::require_runtime(bool(in >> value), "truncated VTK scalar array");
                         if (domain == Attribute::cells && name == "physical_tag" && components == 1)
                             cells[i].tag = static_cast<int>(value);
                     }
@@ -242,7 +238,7 @@ namespace idmesh {
         Index dimension = 0;
         for (auto& cell : cells)
             dimension = std::max(dimension, cell.dimension);
-        require(dimension >= 1, "VTK has no mesh cells");
+        detail::require_runtime(dimension >= 1, "VTK has no mesh cells");
 
         // Only topological corners are mesh vertices. Shared quadratic points
         // retain their identity in the independent geometry-node pool.
@@ -301,11 +297,11 @@ namespace idmesh {
         std::vector<OutputCell> cells;
         const Index d = mesh.dimension();
         for (const auto& label : mesh.labels())
-            require(label.value != 0,
+            detail::require_runtime(label.value != 0,
                 "VTK legacy uses zero as the unlabeled sentinel");
         for (Index c = 0; c < mesh.entity_count(d); ++c) {
             const auto groups = mesh.labels(d, c);
-            require(groups.size() <= 1, "VTK legacy cannot store multiple labels on one cell");
+            detail::require_runtime(groups.size() <= 1, "VTK legacy cannot store multiple labels on one cell");
             const auto ids = mesh.cell_geometry_nodes(c);
             const auto type = mesh.cell_types()[c];
             const int code = vtk_type(type, static_cast<Index>(ids.size()));
@@ -332,7 +328,7 @@ namespace idmesh {
                 std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.value});
         }
         std::ofstream out(filename);
-        require(bool(out), "cannot open VTK output");
+        detail::require_runtime(bool(out), "cannot open VTK output");
         out << "# vtk DataFile Version 3.0\nIDMesh\nASCII\nDATASET UNSTRUCTURED_GRID\n"
             << std::setprecision(17);
         out << "POINTS " << mesh.geometry_node_count() << " double\n";
@@ -357,6 +353,6 @@ namespace idmesh {
                                                "LOOKUP_TABLE default\n";
         for (auto& cell : cells)
             out << cell.tag << '\n';
-        require(bool(out), "VTK output failure");
+        detail::require_runtime(bool(out), "VTK output failure");
     }
 } // namespace idmesh

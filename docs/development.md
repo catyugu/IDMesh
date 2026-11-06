@@ -1,27 +1,67 @@
 # Development conventions
 
-## Formatting
+## Working loop
 
-The repository uses the checked-in `.clang-format` style with
-**clang-format 19.1.7** as the reference formatter. On Windows, the
-following commands work in Git Bash; on Linux/macOS, use a shell.
+From a fresh clone, use CMake 3.26+ and a C++20 compiler:
 
 ```sh
-python -m pip install clang-format==19.1.7
-git config core.hooksPath .githooks
-bash scripts/format-cpp.sh
-bash scripts/check-format.sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+cmake --install build --config Release --prefix install
+cmake -S tests/consumer -B consumer-build -DCMAKE_PREFIX_PATH="$PWD/install"
+cmake --build consumer-build --config Release
 ```
 
-The Git pre-commit hook verifies the *staged* version of changed C/C++
-files and rejects a nonconforming commit. It does not rewrite partially
-staged worktree files. Apply `clang-format -i path/to/file.cpp`, stage it,
-and retry. Override the executable with `CLANG_FORMAT` if needed.
+See `AGENTS.md` for a short developer checklist. MPI and Kokkos are opt-in.
 
-CI independently runs the repository-wide formatter check, so commits
-made without the local hook cannot bypass formatting enforcement.
-The one-time format bootstrap workflow only activates with an explicit
-`[format-bootstrap]` commit message or manual dispatch.
+## Formatting
+
+The checked-in `.clang-format` uses **clang-format 19.1.7**.
+Provision this development tool locally, without a global installation:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install 'clang-format==19.1.7'
+CLANG_FORMAT=.venv/bin/clang-format bash scripts/check-format.sh
+```
+
+On Windows, the binary resides at `.venv/Scripts/clang-format.exe`;
+Git Bash can execute the shell scripts. Configure the optional staged-file
+hook using `git config core.hooksPath .githooks`. Run
+`scripts/format-cpp.sh` to format files. CI reports style drift as an
+advisory patch; local lint and the pre-commit hook fail on style drift.
+
+## API and failure contracts
+
+Only `include/idmesh/` is part of the installed public API. The
+`export.hpp` header owns all DLL/shared-library export definitions.
+Implementation-private helpers live in `src/`.
+
+Invalid caller arguments use `std::invalid_argument`; bad indices use
+`std::out_of_range`; invalid object state uses `std::logic_error`;
+size limits use `std::length_error`. Invalid file content, I/O failures
+and MPI call failures use `std::runtime_error`. MPI errors include the
+failed operation and an error description where supported. The private
+`src/contracts.hpp` defines lightweight helpers; avoid repeating
+messages at successive layers.
+
+`IDMESH_ASSERT` is for programmer mistakes in internal invariants only.
+It emits a diagnostic to stderr and terminates in both Debug and Release.
+External inputs must be checked and rejected by exception. The library
+does not implement logging, print routine status, or choose exit codes;
+the caller controls reporting.
+
+`Index` and topology offsets are uint32_t with `invalid_index`
+reserved; MPI global IDs are uint64_t. Use std::size_t for host memory
+counts and check representational limits before narrowing.
+
+## Verification
+
+Retain core functional/contract tests, independent installed-package
+consumers, optional MPI/Kokkos paths and the existing hardware-validation
+policy. Examples and benchmark executables may print diagnostics. The
+benchmark remains a local-only tool rather than a CI gate.
 
 ## Technical scope
 

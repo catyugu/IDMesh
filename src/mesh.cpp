@@ -1,4 +1,5 @@
 #include "idmesh/mesh.hpp"
+#include "contracts.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -13,12 +14,6 @@
 namespace idmesh {
     namespace {
 
-        void require(bool condition, const char* message)
-        {
-            if (!condition) {
-                throw std::invalid_argument(message);
-            }
-        }
 
         // Standard intermediate entities have at most four corner vertices.
         // Keep construction keys inline so facet/edge canonicalization performs
@@ -45,7 +40,7 @@ namespace idmesh {
 
         EntityKey make_key(std::span<const Index> vertices)
         {
-            require(!vertices.empty() && vertices.size() <= 4, "unsupported entity arity");
+            IDMESH_ASSERT(!vertices.empty() && vertices.size() <= 4);
             EntityKey result;
             result.count = static_cast<std::uint8_t>(vertices.size());
             std::copy(vertices.begin(), vertices.end(), result.vertices.begin());
@@ -54,7 +49,7 @@ namespace idmesh {
 
         Canonical canonicalize(std::span<const Index> local)
         {
-            require(!local.empty() && local.size() <= 4, "unsupported entity arity");
+            IDMESH_ASSERT(!local.empty() && local.size() <= 4);
             Canonical result;
             result.key.count = static_cast<std::uint8_t>(local.size());
             if (local.size() == 2) {
@@ -157,14 +152,14 @@ namespace idmesh {
 
         RelationData allocate_relation(std::span<const Index> counts, bool oriented)
         {
-            require(counts.size() < invalid_index, "too many relation rows");
+            detail::require_length(counts.size() < invalid_index, "too many relation rows");
             RelationData result;
             result.present = true;
             result.rows = static_cast<Index>(counts.size());
             std::size_t total = 0;
             for (Index count : counts) {
                 total += count;
-                require(total < invalid_index, "too many relation entries");
+                detail::require_length(total < invalid_index, "too many relation entries");
             }
             const bool fixed = counts.empty()
                 || std::all_of(counts.begin(), counts.end(),
@@ -202,8 +197,8 @@ namespace idmesh {
         {
             std::vector<Index> counts(row_count, 0);
             for (const auto& pending : entries) {
-                require(pending.row < row_count, "invalid relation row");
-                require(counts[pending.row] < invalid_index, "relation row overflow");
+                IDMESH_ASSERT(pending.row < row_count);
+                detail::require_length(counts[pending.row] < invalid_index, "relation row overflow");
                 ++counts[pending.row];
             }
             auto result = allocate_relation(counts, oriented);
@@ -225,8 +220,8 @@ namespace idmesh {
         {
             std::vector<Index> counts(row_count, 0);
             for (Index target : forward.indices) {
-                require(target < row_count, "invalid transposed relation target");
-                require(counts[target] < invalid_index, "transposed relation row overflow");
+                IDMESH_ASSERT(target < row_count);
+                detail::require_length(counts[target] < invalid_index, "transposed relation row overflow");
                 ++counts[target];
             }
             const bool oriented = !forward.signs.empty();
@@ -538,8 +533,8 @@ namespace idmesh {
     MeshBuilder::MeshBuilder(Index dimension, Index geometric_dimension)
         : data_(std::make_unique<Data>())
     {
-        require(dimension >= 1 && dimension <= 3, "topological dimension must be 1..3");
-        require(geometric_dimension >= dimension && geometric_dimension <= 3,
+        detail::require_argument(dimension >= 1 && dimension <= 3, "topological dimension must be 1..3");
+        detail::require_argument(geometric_dimension >= dimension && geometric_dimension <= 3,
             "invalid geometric dimension");
         data_->dimension_ = dimension;
         data_->geometric_dimension_ = geometric_dimension;
@@ -554,27 +549,27 @@ namespace idmesh {
     Index MeshBuilder::add_vertex(std::array<double, 3> position)
     {
         for (double coordinate : position)
-            require(std::isfinite(coordinate), "nonfinite coordinate");
-        require(data_->coordinates_.size() < invalid_index, "too many vertices");
+            detail::require_argument(std::isfinite(coordinate), "nonfinite coordinate");
+        detail::require_length(data_->coordinates_.size() < invalid_index, "too many vertices");
         data_->coordinates_.push_back(position);
         return static_cast<Index>(data_->coordinates_.size() - 1);
     }
 
     Index MeshBuilder::add_cell(CellType type, std::span<const Index> vertices)
     {
-        require(cell_dimension(type) == data_->dimension_, "cell dimension mismatch");
-        require(vertices.size() == cell_vertex_count(type), "incorrect cell arity");
+        detail::require_argument(cell_dimension(type) == data_->dimension_, "cell dimension mismatch");
+        detail::require_argument(vertices.size() == cell_vertex_count(type), "incorrect cell arity");
         std::array<Index, 8> sorted {};
         for (std::size_t i = 0; i < vertices.size(); ++i) {
-            require(vertices[i] < data_->coordinates_.size(), "invalid vertex index");
+            detail::require_argument(vertices[i] < data_->coordinates_.size(), "invalid vertex index");
             sorted[i] = vertices[i];
         }
         std::sort(sorted.begin(), sorted.begin() + vertices.size());
-        require(std::adjacent_find(sorted.begin(), sorted.begin() + vertices.size())
+        detail::require_argument(std::adjacent_find(sorted.begin(), sorted.begin() + vertices.size())
                 == sorted.begin() + vertices.size(),
             "duplicate cell vertex");
-        require(data_->types_.size() < invalid_index, "too many cells");
-        require(data_->cell_vertices_.size() + vertices.size() < invalid_index,
+        detail::require_length(data_->types_.size() < invalid_index, "too many cells");
+        detail::require_length(data_->cell_vertices_.size() < std::size_t(invalid_index) - vertices.size(),
             "cell connectivity overflow");
         data_->cell_vertices_.insert(data_->cell_vertices_.end(), vertices.begin(), vertices.end());
         data_->cell_offsets_.push_back(static_cast<Index>(data_->cell_vertices_.size()));
@@ -587,8 +582,8 @@ namespace idmesh {
     Index MeshBuilder::add_geometry_node(std::array<double, 3> position)
     {
         for (double coordinate : position)
-            require(std::isfinite(coordinate), "nonfinite geometry node coordinate");
-        require(data_->extra_geometry_nodes_.size() < invalid_index, "too many geometry nodes");
+            detail::require_argument(std::isfinite(coordinate), "nonfinite geometry node coordinate");
+        detail::require_length(data_->extra_geometry_nodes_.size() < invalid_index, "too many geometry nodes");
         data_->extra_geometry_nodes_.push_back(position);
         return static_cast<Index>(data_->extra_geometry_nodes_.size() - 1);
     }
@@ -622,11 +617,11 @@ namespace idmesh {
             valid = count == 13 || count == 14;
             break;
         }
-        require(valid && vertices.size() == cell_vertex_count(type),
+        detail::require_argument(valid && vertices.size() == cell_vertex_count(type),
             "unsupported quadratic geometry node count");
         for (Index index : extra_nodes)
-            require(index < data_->extra_geometry_nodes_.size(), "invalid extra geometry node");
-        require(data_->cell_extra_nodes_.size() + extra_nodes.size() < invalid_index,
+            detail::require_argument(index < data_->extra_geometry_nodes_.size(), "invalid extra geometry node");
+        detail::require_length(data_->cell_extra_nodes_.size() < std::size_t(invalid_index) - extra_nodes.size(),
             "geometry connectivity overflow");
         const Index cell = add_cell(type, vertices);
         data_->cell_orders_[cell] = 2;
@@ -638,28 +633,28 @@ namespace idmesh {
 
     void MeshBuilder::add_cell_label(Index cell, int value)
     {
-        require(cell < data_->types_.size(), "invalid cell for label");
+        detail::require_argument(cell < data_->types_.size(), "invalid cell for label");
         data_->cell_labels_.emplace_back(cell, value);
     }
 
     void MeshBuilder::add_label(
         Index dimension, std::span<const Index> vertices, int value)
     {
-        require(dimension < data_->dimension_, "use add_cell_label for top-dimensional labels");
+        detail::require_argument(dimension < data_->dimension_, "use add_cell_label for top-dimensional labels");
         const bool arity = dimension == 0 ? vertices.size() == 1
             : dimension == 1              ? vertices.size() == 2
                                           : vertices.size() == 3 || vertices.size() == 4;
-        require(arity, "invalid labeled entity arity");
+        detail::require_argument(arity, "invalid labeled entity arity");
         std::array<Index, 4> sorted {};
         for (std::size_t i = 0; i < vertices.size(); ++i) {
-            require(vertices[i] < data_->coordinates_.size(), "invalid labeled entity vertex");
+            detail::require_argument(vertices[i] < data_->coordinates_.size(), "invalid labeled entity vertex");
             sorted[i] = vertices[i];
         }
         std::sort(sorted.begin(), sorted.begin() + vertices.size());
-        require(std::adjacent_find(sorted.begin(), sorted.begin() + vertices.size())
+        detail::require_argument(std::adjacent_find(sorted.begin(), sorted.begin() + vertices.size())
                 == sorted.begin() + vertices.size(),
             "duplicate labeled entity vertex");
-        require(data_->label_assignment_vertices_.size() + vertices.size() < invalid_index,
+        detail::require_length(data_->label_assignment_vertices_.size() < std::size_t(invalid_index) - vertices.size(),
             "label connectivity overflow");
         const auto begin = static_cast<Index>(data_->label_assignment_vertices_.size());
         data_->label_assignment_vertices_.insert(
@@ -670,7 +665,7 @@ namespace idmesh {
 
     void MeshBuilder::set_label_name(Index dimension, int value, std::string name)
     {
-        require(dimension <= data_->dimension_, "label name dimension out of range");
+        detail::require_argument(dimension <= data_->dimension_, "label name dimension out of range");
         data_->label_names_[{dimension, value}] = std::move(name);
     }
 
@@ -718,10 +713,10 @@ namespace idmesh {
                     for (Index i = begin; i < finish; ++i) {
                         const auto node = static_cast<std::size_t>(data_->cell_extra_nodes_[i])
                             + data->coordinates.size();
-                        require(node < invalid_index, "geometry node index overflow");
+                        detail::require_length(node < invalid_index, "geometry node index overflow");
                         data->geometry_indices.push_back(static_cast<Index>(node));
                     }
-                    require(data->geometry_indices.size() < invalid_index,
+                    detail::require_length(data->geometry_indices.size() < invalid_index,
                         "geometry connectivity overflow");
                 }
                 data->geometry_offsets.push_back(
@@ -754,7 +749,7 @@ namespace idmesh {
             lookup[data_->dimension_ - 1].reserve(data->types.size() * 2);
         auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
             auto canon = canonicalize(local);
-            require(data->vertices[dim].size() < invalid_index, "too many topology entities");
+            detail::require_length(data->vertices[dim].size() < invalid_index, "too many topology entities");
             auto [it, inserted] = lookup[dim].try_emplace(canon.key,
                 static_cast<Index>(data->vertices[dim].size()));
             if (inserted)
@@ -795,7 +790,7 @@ namespace idmesh {
         if (data_->dimension_ >= 2 && want(1)) {
             for (Index e = 0; e < data->vertices[1].size(); ++e) {
                 const auto& vertices = data->vertices[1][e];
-                require(vertices.size() == 2, "edge must have two vertices");
+                IDMESH_ASSERT(vertices.size() == 2);
                 attach(1, 0, e, {vertices[0], -1, {}});
                 attach(1, 0, e, {vertices[1], 1, {}});
             }

@@ -1,5 +1,7 @@
 #include "idmesh/mpi.hpp"
 #include "mpi_internal.hpp"
+#include "contracts.hpp"
+#include "mpi_errors.hpp"
 
 #include <algorithm>
 #include <array>
@@ -19,21 +21,11 @@
 
 namespace idmesh::mpi {
     namespace {
-        void require(bool ok, const char* reason)
-        {
-            if (!ok)
-                throw std::runtime_error(reason);
-        }
-        void check_mpi(int result)
-        {
-            if (result != MPI_SUCCESS)
-                throw std::runtime_error("IDMesh MPI operation failed");
-        }
         void ensure_initialized()
         {
             int initialized = 0;
-            check_mpi(MPI_Initialized(&initialized));
-            require(initialized != 0, "MPI must be initialized by the application");
+            ::idmesh::mpi::detail::check_mpi(MPI_Initialized(&initialized), "MPI_Initialized");
+            ::idmesh::detail::require_state(initialized != 0, "MPI must be initialized by the application");
         }
         using GlobalId = std::uint64_t;
         std::vector<Index> canonical_key(std::span<const Index> vertices)
@@ -71,9 +63,11 @@ namespace idmesh::mpi {
     {
         ensure_initialized();
         auto data = std::make_shared<Data>();
-        check_mpi(MPI_Comm_dup(MPI_COMM_WORLD, &data->comm));
-        check_mpi(MPI_Comm_rank(data->comm, &data->rank));
-        check_mpi(MPI_Comm_size(data->comm, &data->size));
+        ::idmesh::mpi::detail::check_mpi(MPI_Comm_dup(MPI_COMM_WORLD, &data->comm), "MPI_Comm_dup");
+        ::idmesh::mpi::detail::check_mpi(
+            MPI_Comm_set_errhandler(data->comm, MPI_ERRORS_RETURN), "MPI_Comm_set_errhandler");
+        ::idmesh::mpi::detail::check_mpi(MPI_Comm_rank(data->comm, &data->rank), "MPI_Comm_rank");
+        ::idmesh::mpi::detail::check_mpi(MPI_Comm_size(data->comm, &data->size), "MPI_Comm_size");
         return Context(std::move(data));
     }
 
@@ -84,11 +78,13 @@ namespace idmesh::mpi {
             || handle > std::numeric_limits<MPI_Fint>::max())
             throw std::out_of_range("MPI Fortran communicator handle");
         const MPI_Comm source = MPI_Comm_f2c(static_cast<MPI_Fint>(handle));
-        require(source != MPI_COMM_NULL, "MPI communicator is null");
+        ::idmesh::detail::require_argument(source != MPI_COMM_NULL, "MPI communicator is null");
         auto data = std::make_shared<Data>();
-        check_mpi(MPI_Comm_dup(source, &data->comm));
-        check_mpi(MPI_Comm_rank(data->comm, &data->rank));
-        check_mpi(MPI_Comm_size(data->comm, &data->size));
+        ::idmesh::mpi::detail::check_mpi(MPI_Comm_dup(source, &data->comm), "MPI_Comm_dup");
+        ::idmesh::mpi::detail::check_mpi(
+            MPI_Comm_set_errhandler(data->comm, MPI_ERRORS_RETURN), "MPI_Comm_set_errhandler");
+        ::idmesh::mpi::detail::check_mpi(MPI_Comm_rank(data->comm, &data->rank), "MPI_Comm_rank");
+        ::idmesh::mpi::detail::check_mpi(MPI_Comm_size(data->comm, &data->size), "MPI_Comm_size");
         return Context(std::move(data));
     }
 
@@ -141,7 +137,7 @@ namespace idmesh::mpi {
         DeviceMemoryKind memory) const
     {
         ensure_initialized();
-        require(data_ != nullptr && components > 0, "invalid packed halo exchange");
+        ::idmesh::detail::require_argument(data_ != nullptr && components > 0, "invalid packed halo exchange");
         if (!direct_memory_supported(memory))
             throw std::runtime_error("MPI is not GPU aware for the requested memory space");
         const int peers = rank_count();
@@ -150,7 +146,7 @@ namespace idmesh::mpi {
         for (int peer = 0; peer < peers; ++peer) {
             const auto sending = data_->send[peer].size() * components;
             const auto receiving = data_->recv[peer].size() * components;
-            require(sending <= INT_MAX && receiving <= INT_MAX && send_size <= static_cast<std::size_t>(INT_MAX) - sending && receive_size <= static_cast<std::size_t>(INT_MAX) - receiving,
+            ::idmesh::detail::require_argument(sending <= INT_MAX && receiving <= INT_MAX && send_size <= static_cast<std::size_t>(INT_MAX) - sending && receive_size <= static_cast<std::size_t>(INT_MAX) - receiving,
                 "packed halo exchange exceeds MPI count/displacement limits");
             sc[peer] = static_cast<int>(sending);
             rc[peer] = static_cast<int>(receiving);
@@ -159,25 +155,25 @@ namespace idmesh::mpi {
             send_size += sending;
             receive_size += receiving;
         }
-        check_mpi(MPI_Alltoallv(send, sc.data(), sd.data(), MPI_DOUBLE,
-            receive, rc.data(), rd.data(), MPI_DOUBLE, data_->comm));
+        ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(send, sc.data(), sd.data(), MPI_DOUBLE,
+            receive, rc.data(), rd.data(), MPI_DOUBLE, data_->comm), "MPI_Alltoallv");
     }
 
     void ExchangePlan::exchange(std::span<double> values, Index components) const
     {
         ensure_initialized();
-        require(data_ != nullptr, "empty exchange plan");
-        require(components > 0 && values.size() == std::size_t(data_->local_cells) * components,
+        ::idmesh::detail::require_state(data_ != nullptr, "empty exchange plan");
+        ::idmesh::detail::require_argument(components > 0 && values.size() == std::size_t(data_->local_cells) * components,
             "exchange field must have one fixed-width record per local cell");
         const auto size = static_cast<int>(data_->send.size());
         std::vector<int> sc(size), rc(size), sd(size), rd(size);
         for (int peer = 0; peer < size; ++peer) {
-            require(data_->send[peer].size() <= INT_MAX / components && data_->recv[peer].size() <= INT_MAX / components,
+            ::idmesh::detail::require_argument(data_->send[peer].size() <= INT_MAX / components && data_->recv[peer].size() <= INT_MAX / components,
                 "exchange count exceeds MPI int range");
             sc[peer] = static_cast<int>(data_->send[peer].size() * components);
             rc[peer] = static_cast<int>(data_->recv[peer].size() * components);
             if (peer > 0) {
-                require(sd[peer - 1] <= INT_MAX - sc[peer - 1] && rd[peer - 1] <= INT_MAX - rc[peer - 1],
+                ::idmesh::detail::require_argument(sd[peer - 1] <= INT_MAX - sc[peer - 1] && rd[peer - 1] <= INT_MAX - rc[peer - 1],
                     "MPI exchange displacement overflow");
                 sd[peer] = sd[peer - 1] + sc[peer - 1];
                 rd[peer] = rd[peer - 1] + rc[peer - 1];
@@ -193,9 +189,9 @@ namespace idmesh::mpi {
                     sendBuffer[output++] = values[std::size_t(cell) * components + j];
             }
         }
-        check_mpi(MPI_Alltoallv(sendBuffer.data(), sc.data(), sd.data(), MPI_DOUBLE,
+        ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(sendBuffer.data(), sc.data(), sd.data(), MPI_DOUBLE,
             recvBuffer.data(), rc.data(), rd.data(), MPI_DOUBLE,
-            data_->comm));
+            data_->comm), "MPI_Alltoallv");
         for (int peer = 0; peer < size; ++peer) {
             std::size_t input = rd[peer];
             for (auto cell : data_->recv[peer]) {
@@ -239,9 +235,9 @@ namespace idmesh::mpi {
         const MPI_Comm comm = context.data_->comm;
         const Index d = global.dimension();
         const Index cells = global.entity_count(d);
-        require(cells > 0, "replicated partition source has no cells");
-        require(ghost_layers <= 8, "ghost depth exceeds safety limit");
-        require(global.has_relation(d, d - 1) && global.has_relation(d - 1, d),
+        ::idmesh::detail::require_argument(cells > 0, "replicated partition source has no cells");
+        ::idmesh::detail::require_argument(ghost_layers <= 8, "ghost depth exceeds safety limit");
+        ::idmesh::detail::require_argument(global.has_relation(d, d - 1) && global.has_relation(d - 1, d),
             "partition requires materialized cell-facet and facet-cell relations");
 
         // Detect obvious rank-dependent input mistakes before collective exchanges.
@@ -259,9 +255,9 @@ namespace idmesh::mpi {
                 mix(v);
         }
         unsigned long long local = fingerprint, low = 0, high = 0;
-        check_mpi(MPI_Allreduce(&local, &low, 1, MPI_UNSIGNED_LONG_LONG, MPI_MIN, comm));
-        check_mpi(MPI_Allreduce(&local, &high, 1, MPI_UNSIGNED_LONG_LONG, MPI_MAX, comm));
-        require(low == high, "replicated source mesh identities differ across ranks");
+        ::idmesh::mpi::detail::check_mpi(MPI_Allreduce(&local, &low, 1, MPI_UNSIGNED_LONG_LONG, MPI_MIN, comm), "MPI_Allreduce");
+        ::idmesh::mpi::detail::check_mpi(MPI_Allreduce(&local, &high, 1, MPI_UNSIGNED_LONG_LONG, MPI_MAX, comm), "MPI_Allreduce");
+        ::idmesh::detail::require_runtime(low == high, "replicated source mesh identities differ across ranks");
 
         const auto owner = [&](Index c) {
             return static_cast<int>(std::uint64_t(c) * size / cells);
@@ -404,7 +400,7 @@ namespace idmesh::mpi {
                         key.push_back(reverse_vertices[v]);
                     std::sort(key.begin(), key.end());
                     auto it = lookup[k].find(key);
-                    require(it != lookup[k].end(), "cross-rank shared entity identity mismatch");
+                    ::idmesh::detail::require_runtime(it != lookup[k].end(), "cross-rank shared entity identity mismatch");
                     global_id = it->second;
                 }
                 partition->global_ids[k].push_back(global_id);

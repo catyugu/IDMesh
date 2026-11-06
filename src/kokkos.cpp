@@ -1,4 +1,5 @@
 #include "idmesh/kokkos.hpp"
+#include "contracts.hpp"
 #include <Kokkos_Core.hpp>
 #include <cstdint>
 #include <span>
@@ -15,8 +16,8 @@ namespace idmesh::kokkos {
         using ExecutionSpace = Kokkos::DefaultExecutionSpace;
         void check_runtime()
         {
-            if (!Kokkos::is_initialized())
-                throw std::logic_error("initialize Kokkos before constructing a device mirror");
+            ::idmesh::detail::require_state(Kokkos::is_initialized(),
+                "initialize Kokkos before constructing a device mirror");
         }
     }
     struct DeviceRelation::Data {
@@ -206,9 +207,9 @@ namespace idmesh::kokkos {
         : data_(std::make_shared<Data>())
     {
         check_runtime();
-        if (components == 0
-            || static_cast<std::uint64_t>(entities) * components > invalid_index)
-            throw std::invalid_argument("invalid device field shape");
+        ::idmesh::detail::require_argument(components != 0
+            && static_cast<std::uint64_t>(entities) * components <= invalid_index,
+            "invalid device field shape");
         data_->entities = entities;
         data_->components = components;
         data_->values = Kokkos::View<double*, MemorySpace>(
@@ -225,8 +226,8 @@ namespace idmesh::kokkos {
     }
     void DeviceField::upload(std::span<const double> values)
     {
-        if (values.size() != data_->values.extent(0))
-            throw std::invalid_argument("device field upload size mismatch");
+        ::idmesh::detail::require_argument(values.size() == data_->values.extent(0),
+            "device field upload size mismatch");
         auto host = Kokkos::create_mirror_view(data_->values);
         for (std::size_t i = 0; i < values.size(); ++i)
             host(i) = values[i];

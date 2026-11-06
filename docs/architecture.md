@@ -19,6 +19,19 @@ IDMesh is a C++20, immutable mesh topology kernel for 1D–3D mixed-cell, unstru
 - Sparse integer labels are independent of topology materialization. Bound labels borrow entity connectivity; labels on omitted layers retain compact canonical vertex keys.
 - The base CMake target and installed public headers contain no third-party API types. A separate optional Kokkos backend owns Kokkos execution/runtime dependencies.
 
+## SDK and failure contracts
+
+The public headers under `include/idmesh/` expose no third-party types.
+Visibility definitions for the core and optional library adapters are
+centralized in `export.hpp`. Implementation helpers remain private to
+`src/`.
+
+Invalid API arguments, indices, object state and capacity limits raise
+typed standard C++ exceptions. Malformed mesh files and backend operations
+raise runtime errors with relevant context. The internal Release-active
+`IDMESH_ASSERT` is for programmer bugs, never for external data.
+IDMesh does not provide an internal logging subsystem.
+
 ## Standard reference cells
 
 Segment, triangle, quadrilateral, tetrahedron, hexahedron, prism and pyramid use Gmsh first-order vertex order. Their oriented boundary facets are defined in one compiled reference table and exposed through `cell_facet_count` and `reference_facet_vertices`; the builder uses the same table. A geometrically inverted cell still has a valid combinatorial complex, while geometric Jacobian checks belong to geometry validation.

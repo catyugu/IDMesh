@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <idmesh/mesh.hpp>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <type_traits>
@@ -147,6 +148,50 @@ namespace {
         }
     }
 
+    template <class Error, class Operation>
+    void expect_error(Operation&& operation, const char* message)
+    {
+        bool caught = false;
+        try {
+            operation();
+        }
+        catch (const Error&) {
+            caught = true;
+        }
+        check(caught, message);
+    }
+
+    void error_contracts()
+    {
+        expect_error<std::invalid_argument>(
+            [] { idmesh::MeshBuilder invalid(0, 0); }, "invalid topological dimension");
+        expect_error<std::invalid_argument>(
+            [] { idmesh::MeshBuilder invalid(2, 1); }, "invalid geometric dimension");
+        idmesh::MeshBuilder builder(2, 2);
+        expect_error<std::invalid_argument>(
+            [&] { builder.add_vertex({std::numeric_limits<double>::infinity(), 0, 0}); },
+            "nonfinite vertex coordinate");
+        builder.add_vertex({0, 0, 0});
+        builder.add_vertex({1, 0, 0});
+        builder.add_vertex({0, 1, 0});
+        const std::array<Index, 3> bad {0, 1, 3};
+        expect_error<std::invalid_argument>(
+            [&] { builder.add_cell(idmesh::CellType::triangle, bad); },
+            "invalid cell connectivity");
+        const std::array<Index, 3> valid {0, 1, 2};
+        builder.add_cell(idmesh::CellType::triangle, valid);
+        auto mesh = std::move(builder).finalize(
+            idmesh::BuildOptions {idmesh::TopologyLayout::cell_vertices,
+                idmesh::RelationDirection::downward});
+        expect_error<std::out_of_range>(
+            [&] { (void)mesh.entity_vertices(2, 1); }, "out-of-range entity");
+        expect_error<std::out_of_range>(
+            [&] { (void)mesh.entity_count(3); }, "out-of-range dimension");
+        expect_error<std::invalid_argument>(
+            [&] { (void)mesh.relation(2, 1); }, "unmaterialized relation");
+        mesh.validate();
+    }
+
     void permutation_invariants()
     {
         constexpr std::array types {
@@ -191,6 +236,7 @@ int main()
         mixed_hex_prism();
         layer_masks();
         permutation_invariants();
+        error_contracts();
         std::cout << "IDMesh contract tests passed\n";
     }
     catch (const std::exception& e) {
