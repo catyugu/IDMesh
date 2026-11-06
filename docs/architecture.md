@@ -14,8 +14,8 @@ IDMesh is a C++20, immutable mesh topology kernel for 1D–3D mixed-cell, unstru
 - Consecutive-dimension oriented boundary relations retain aligned `signs` and `orientations` arrays, including transposed support. Direct geometric Cell-to-Vertex and 3D Facet-to-Vertex relations (and their support) store only indices: `row_signs` and `row_orientations` return empty spans. Device mirrors follow the same optional metadata contract.
 - Orientation maps local[i] to canonical[i] by the documented rotation/reflection rule, including two-vertex edges.
 - The graded incidence DAG cannot skip a dimension: in 3D, requesting edges requires faces. Invalid layer configurations are rejected by finalize(). Direct Cell-to-Vertex and Facet-to-Vertex connectivity is retained as geometry connectivity, not a boundary operator.
-- The builder is mutable; a finalized Mesh is immutable and exposes zero-copy read-only views. No dynamic mesh edits, AMR, remeshing or repartitioning are supported in the first milestone.
-- Geometric coordinates are independent of entity topology. Only affine first-order geometry is in the initial milestone.
+- The builder is mutable; a finalized Mesh is immutable and exposes zero-copy read-only views. Dynamic mesh edits, AMR and remeshing are outside the current design.
+- Geometric coordinates are independent of entity topology. First- and supported second-order geometry are stored separately from topological corner entities.
 - Optional facet physical tags attach to materialized codimension-one entities by vertex identity, and are validated against actual mesh facets. Zero denotes untagged; the dense array is omitted when no tags are supplied.
 - The base CMake target and installed public headers contain no third-party API types. A separate optional Kokkos backend owns Kokkos execution/runtime dependencies.
 
@@ -29,7 +29,7 @@ The standard representation stores cell types, cell-to-vertex connectivity, vert
 
 ## Scope limits
 
-This milestone excludes runtime topology modification, arbitrary polyhedra, high-order geometry nodes, periodic entity equivalences, nonmatching interfaces, MPI distribution and user-authored arbitrary GPU kernels. The last three are future extensions and must not be represented as complete.
+The current core excludes runtime topology modification, arbitrary polyhedra, periodic entity equivalences, nonmatching interfaces and user-authored arbitrary GPU kernels. MPI distribution and supported second-order geometry are implemented as described below; dynamic repartitioning and general parallel mesh ingestion remain future work.
 
 ## Verification
 
@@ -117,12 +117,11 @@ ghost expansion; the source mesh must materialize Cell/Facet and Facet/Cell
 relations. `ExchangePlan::exchange_cells` exchanges one or more interleaved
 Host double components for cell-based fields.
 
-**Scaling limitation:** The current partition path requires every Rank to hold
-the identical source mesh, with matching original entity indices; it uses
-contiguous global cell blocks rather than graph partitioning. This verifies
-ownership/halo semantics, but large-scale distributed input and a true
-scalable partitioning pipeline remain outstanding. The MPI backend currently
-uses the world communicator and blocking host transfers.
+The replicated-input partition path remains available as a correctness baseline,
+but production-style rank-local loading is provided by the shard reader described
+below. The bundled graph partitioner is a dependency-free serial preprocessing
+baseline rather than a ParMETIS-quality distributed partitioner. The MPI backend
+currently uses the world communicator and blocking exchange semantics.
 
 `idmesh_fvm` assembles a 3D two-tetra diffusion operator using
 `TopologyOptions::finite_volume()` (no Edge layer), checking conservative
