@@ -6,6 +6,7 @@
 #include <map>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 
 namespace idmesh {
@@ -58,6 +59,24 @@ namespace idmesh {
         }
 
         using Loop = std::vector<Index>;
+
+        // Keys are compared in full: hash collisions never merge distinct entities.
+        // Entity IDs remain assigned in the order of first appearance.
+        struct LoopHash {
+            std::size_t operator()(const Loop& vertices) const noexcept
+            {
+                std::size_t hash = sizeof(std::size_t) == 8
+                    ? std::size_t {14695981039346656037ULL}
+                    : std::size_t {2166136261U};
+                for (Index vertex : vertices) {
+                    hash ^= vertex;
+                    hash *= sizeof(std::size_t) == 8
+                        ? std::size_t {1099511628211ULL}
+                        : std::size_t {16777619U};
+                }
+                return hash;
+            }
+        };
 
         std::vector<Loop> boundary_loops(CellType type, std::span<const Index> v)
         {
@@ -648,11 +667,9 @@ namespace idmesh {
                     static_cast<Index>(data->geometry_indices.size()));
             }
         }
-        data->vertices[0].reserve(data->coordinates.size());
-        for (Index v = 0; v < data->coordinates.size(); ++v)
-            data->vertices[0].push_back({v});
-
-        std::array<std::map<Loop, Index>, 4> lookup;
+        // Vertex entities have identity connectivity. Avoid constructing one
+        // separately allocated singleton vector per vertex during finalize.
+        std::array<std::unordered_map<Loop, Index, LoopHash>, 4> lookup;
         std::array<std::array<PendingRelation, 4>, 4> incidence;
         const auto want = [&](Index dim) {
             return dim == 0 || dim == dimension_ || (dim == dimension_ - 1 && options.facets)
@@ -660,6 +677,8 @@ namespace idmesh {
         };
         for (Index dim = 0; dim <= dimension_; ++dim)
             data->enabled[dim] = want(dim);
+        if (dimension_ > 1 && want(dimension_ - 1))
+            lookup[dimension_ - 1].reserve(data->types.size() * 2);
         auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
             auto canon = canonicalize(local);
             require(data->vertices[dim].size() < invalid_index, "too many topology entities");
@@ -768,16 +787,31 @@ namespace idmesh {
                 if (entries.empty())
                     continue;
                 auto relation = compress(entries, static_cast<Index>(data->vertices[from].size()));
-                if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1))
-                    data->relations[to][from] = transpose(relation, static_cast<Index>(data->vertices[to].size()));
+                if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1)) {
+                    const auto targets = to == 0
+                        ? data->coordinates.size() : data->vertices[to].size();
+                    data->relations[to][from] = transpose(relation, static_cast<Index>(targets));
+                }
                 data->relations[from][to] = std::move(relation);
             }
         }
         for (Index dim = 0; dim <= dimension_; ++dim) {
-            const auto& lists = data->vertices[dim];
-            data->counts[dim] = static_cast<Index>(lists.size());
             auto& offsets = data->vertex_offsets[dim];
             auto& indices = data->vertex_indices[dim];
+            if (dim == 0) {
+                const auto count = static_cast<Index>(data->coordinates.size());
+                data->counts[0] = count;
+                offsets.resize(static_cast<std::size_t>(count) + 1);
+                indices.resize(count);
+                for (Index v = 0; v < count; ++v) {
+                    offsets[v] = v;
+                    indices[v] = v;
+                }
+                offsets[count] = count;
+                continue;
+            }
+            const auto& lists = data->vertices[dim];
+            data->counts[dim] = static_cast<Index>(lists.size());
             offsets.reserve(lists.size() + 1);
             offsets.push_back(0);
             for (const auto& vertices : lists) {
