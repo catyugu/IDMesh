@@ -1,5 +1,5 @@
-#include "mesh_factory.hpp"
 #include "idmesh/kokkos.hpp"
+#include "mesh_factory.hpp"
 
 #include <Kokkos_Core.hpp>
 #include <algorithm>

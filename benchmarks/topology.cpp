@@ -1,5 +1,5 @@
-#include "mesh_factory.hpp"
 #include "idmesh/mesh.hpp"
+#include "mesh_factory.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -16,8 +16,8 @@
 #include <vector>
 
 #if defined(_WIN32)
-#include <windows.h>
 #include <psapi.h>
+#include <windows.h>
 #elif defined(__unix__) || defined(__APPLE__)
 #include <sys/resource.h>
 #if defined(__linux__)
@@ -283,12 +283,11 @@ namespace {
         const auto initialize_walks = [&](Index dim) {
             dimension = dim;
             walks = {
-            {"cell_vertex", dim, 0},
-            {"cell_facet", dim, dim - 1},
-            {"facet_cell", dim - 1, dim},
-            {"facet_vertex", dim - 1, 0},
-            {"cell_facet_oriented", dim, dim - 1, true}
-            };
+                {"cell_vertex", dim, 0},
+                {"cell_facet", dim, dim - 1},
+                {"facet_cell", dim - 1, dim},
+                {"facet_vertex", dim - 1, 0},
+                {"cell_facet_oriented", dim, dim - 1, true}};
             samples.resize(walks.size());
         };
         Index cell_count = 0, facet_count = 0, edge_count = 0;
