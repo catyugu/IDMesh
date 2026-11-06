@@ -32,7 +32,8 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md) and [develo
 ## Benchmarks
 
 `IDMESH_BUILD_BENCHMARKS` controls the standalone `idmesh_benchmark` executable
-(enabled for top-level development, disabled as a subproject). It is never installed.
+(disabled by default, including in CI). It is never installed or executed
+by CI; explicitly enable it for local performance measurements.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON

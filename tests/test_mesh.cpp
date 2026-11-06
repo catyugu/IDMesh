@@ -79,6 +79,30 @@ namespace {
         check(found, "shared face not found");
     }
 
+    void test_compacted_incidence_order()
+    {
+        idmesh::MeshBuilder builder(1, 1);
+        for (unsigned vertex = 0; vertex < 5; ++vertex)
+            builder.add_vertex({double(vertex), 0, 0});
+        builder.add_cell(idmesh::CellType::segment, std::array<idmesh::Index, 2> {0, 1});
+        builder.add_cell(idmesh::CellType::segment, std::array<idmesh::Index, 2> {2, 1});
+        builder.add_cell(idmesh::CellType::segment, std::array<idmesh::Index, 2> {1, 3});
+        const auto mesh = std::move(builder).finalize();
+        const auto forward = mesh.relation(1, 0);
+        const auto support = mesh.relation(0, 1);
+        check(forward.stride == 2 && forward.offsets.empty(), "cell-vertex relation lost fixed stride");
+        check(!support.offsets.empty(), "irregular vertex support must use CSR");
+        check(support.row(4).empty(), "isolated vertex should have empty support");
+        check(support.row(1).size() == 3, "shared vertex support count");
+        const std::array<idmesh::Index, 3> expected_cells {0, 1, 2};
+        const std::array<std::int8_t, 3> expected_signs {1, 1, -1};
+        check(std::equal(support.row(1).begin(), support.row(1).end(), expected_cells.begin()),
+            "transposed support changed incidence ordering");
+        check(std::equal(support.row_signs(1).begin(), support.row_signs(1).end(), expected_signs.begin()),
+            "transposed support lost incidence signs");
+        mesh.validate();
+    }
+
     void test_finite_volume()
     {
         idmesh::MeshBuilder builder(3, 3);
@@ -228,6 +252,7 @@ int main()
     try {
         test_reference_cells();
         test_shared_orientations();
+        test_compacted_incidence_order();
         test_finite_volume();
         test_gmsh();
         test_gmsh_v41();

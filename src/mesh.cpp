@@ -33,21 +33,27 @@ namespace idmesh {
                 result.orientation = {static_cast<std::uint16_t>(reversed ? 1 : 0), reversed};
                 return result;
             }
-            for (std::size_t r = 0; r < local.size(); ++r) {
-                for (int direction : {1, -1}) {
-                    std::vector<Index> candidate;
-                    for (std::size_t i = 0; i < local.size(); ++i) {
-                        auto j = (static_cast<std::ptrdiff_t>(r) + direction * static_cast<std::ptrdiff_t>(i)
-                                     + static_cast<std::ptrdiff_t>(local.size()) * 2)
-                            % static_cast<std::ptrdiff_t>(local.size());
-                        candidate.push_back(local[static_cast<std::size_t>(j)]);
-                    }
-                    if (result.vertices.empty() || candidate < result.vertices) {
-                        result.vertices = std::move(candidate);
-                        result.orientation = {static_cast<std::uint16_t>(r), direction < 0};
-                    }
+            // Entity vertices are unique. The smallest vertex fixes the cyclic
+            // starting point; only the two traversal directions need comparison.
+            const auto first = static_cast<std::size_t>(
+                std::min_element(local.begin(), local.end()) - local.begin());
+            bool reversed = false;
+            for (std::size_t i = 1; i < local.size(); ++i) {
+                const Index forward = local[(first + i) % local.size()];
+                const Index backward = local[(first + local.size() - i) % local.size()];
+                if (forward != backward) {
+                    reversed = backward < forward;
+                    break;
                 }
             }
+            result.vertices.reserve(local.size());
+            for (std::size_t i = 0; i < local.size(); ++i) {
+                const auto position = reversed
+                    ? (first + local.size() - i) % local.size()
+                    : (first + i) % local.size();
+                result.vertices.push_back(local[position]);
+            }
+            result.orientation = {static_cast<std::uint16_t>(first), reversed};
             return result;
         }
 
@@ -89,39 +95,99 @@ namespace idmesh {
             }
         };
 
-        using Rows = std::vector<std::vector<Incidence>>;
+        // Build-time incidences stay contiguous instead of allocating one
+        // vector per entity. Stable scattering preserves the original row order.
+        struct PendingIncidence {
+            Index row;
+            Incidence entry;
+        };
 
-        RelationData compress(const Rows& rows)
+        using PendingRelation = std::vector<PendingIncidence>;
+
+        RelationData allocate_relation(std::span<const Index> counts)
         {
-            RelationData relation;
-            relation.present = true;
-            relation.rows = static_cast<Index>(rows.size());
-            auto size = rows.empty() ? 0 : rows.front().size();
-            bool fixed = std::all_of(rows.begin(), rows.end(), [&](const auto& row) { return row.size() == size; });
-            if (fixed)
-                relation.stride = static_cast<Index>(size);
-            if (!fixed)
-                relation.offsets.reserve(rows.size() + 1);
-            if (!fixed)
-                relation.offsets.push_back(0);
-            for (const auto& row : rows) {
-                for (const auto& entry : row) {
-                    relation.indices.push_back(entry.entity);
-                    relation.signs.push_back(entry.sign);
-                    relation.orientations.push_back(entry.orientation);
-                }
-                if (!fixed)
-                    relation.offsets.push_back(static_cast<Index>(relation.indices.size()));
+            require(counts.size() < invalid_index, "too many relation rows");
+            RelationData result;
+            result.present = true;
+            result.rows = static_cast<Index>(counts.size());
+            std::size_t total = 0;
+            for (Index count : counts) {
+                total += count;
+                require(total < invalid_index, "too many relation entries");
             }
-            return relation;
+            const bool fixed = counts.empty()
+                || std::all_of(counts.begin(), counts.end(),
+                    [first = counts.front()](Index count) { return count == first; });
+            if (fixed) {
+                result.stride = counts.empty() ? 0 : counts.front();
+            }
+            else {
+                result.offsets.resize(counts.size() + 1);
+                for (std::size_t row = 0; row < counts.size(); ++row)
+                    result.offsets[row + 1] = result.offsets[row] + counts[row];
+            }
+            result.indices.resize(total);
+            result.signs.resize(total);
+            result.orientations.resize(total);
+            return result;
         }
 
-        Rows transpose(const Rows& rows, std::size_t count)
+        std::vector<Index> write_positions(const RelationData& relation)
         {
-            Rows result(count);
-            for (Index row = 0; row < rows.size(); ++row)
-                for (const auto& entry : rows[row])
-                    result[entry.entity].push_back({row, entry.sign, entry.orientation});
+            std::vector<Index> positions(relation.rows);
+            if (relation.offsets.empty()) {
+                for (Index row = 0; row < relation.rows; ++row)
+                    positions[row] = static_cast<Index>(static_cast<std::size_t>(row) * relation.stride);
+            }
+            else {
+                std::copy(relation.offsets.begin(), relation.offsets.end() - 1, positions.begin());
+            }
+            return positions;
+        }
+
+        RelationData compress(const PendingRelation& entries, Index row_count)
+        {
+            std::vector<Index> counts(row_count, 0);
+            for (const auto& pending : entries) {
+                require(pending.row < row_count, "invalid relation row");
+                require(counts[pending.row] < invalid_index, "relation row overflow");
+                ++counts[pending.row];
+            }
+            auto result = allocate_relation(counts);
+            auto positions = write_positions(result);
+            for (const auto& pending : entries) {
+                const Index slot = positions[pending.row]++;
+                result.indices[slot] = pending.entry.entity;
+                result.signs[slot] = pending.entry.sign;
+                result.orientations[slot] = pending.entry.orientation;
+            }
+            return result;
+        }
+
+        // Transpose the finalized forward arrays directly. Unlike a
+        // vector-of-vectors transpose, memory use is linear and predictable.
+        RelationData transpose(const RelationData& forward, Index row_count)
+        {
+            std::vector<Index> counts(row_count, 0);
+            for (Index target : forward.indices) {
+                require(target < row_count, "invalid transposed relation target");
+                require(counts[target] < invalid_index, "transposed relation row overflow");
+                ++counts[target];
+            }
+            auto result = allocate_relation(counts);
+            auto positions = write_positions(result);
+            const auto view = forward.view();
+            for (Index row = 0; row < forward.rows; ++row) {
+                const auto targets = view.row(row);
+                const auto signs = view.row_signs(row);
+                const auto orientations = view.row_orientations(row);
+                for (std::size_t i = 0; i < targets.size(); ++i) {
+                    const Index slot = positions[targets[i]]++;
+                    result.indices[slot] = row;
+                    result.signs[slot] = signs[i];
+                    result.orientations[slot] = orientations[i];
+                }
+            }
             return result;
         }
 
@@ -587,7 +653,7 @@ namespace idmesh {
             data->vertices[0].push_back({v});
 
         std::array<std::map<Loop, Index>, 4> lookup;
-        std::array<std::array<Rows, 4>, 4> incidence;
+        std::array<std::array<PendingRelation, 4>, 4> incidence;
         const auto want = [&](Index dim) {
             return dim == 0 || dim == dimension_ || (dim == dimension_ - 1 && options.facets)
                 || (dim == 1 && options.edges) || (dim == 2 && options.faces);
@@ -596,6 +662,7 @@ namespace idmesh {
             data->enabled[dim] = want(dim);
         auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
             auto canon = canonicalize(local);
+            require(data->vertices[dim].size() < invalid_index, "too many topology entities");
             auto [it, inserted] = lookup[dim].try_emplace(canon.vertices,
                 static_cast<Index>(data->vertices[dim].size()));
             if (inserted)
@@ -603,10 +670,7 @@ namespace idmesh {
             return {it->second, static_cast<std::int8_t>(canon.orientation.sign()), canon.orientation};
         };
         auto attach = [&](Index from, Index to, Index id, Incidence entry) {
-            auto& rows = incidence[from][to];
-            if (rows.size() < data->vertices[from].size())
-                rows.resize(data->vertices[from].size());
-            rows[id].push_back(entry);
+            incidence[from][to].push_back({id, entry});
         };
 
         // Cell-to-vertex is permanently available even with intermediate dimensions omitted.
@@ -700,13 +764,13 @@ namespace idmesh {
             labels.end());
         for (Index from = 1; from <= dimension_; ++from) {
             for (Index to = 0; to < from; ++to) {
-                auto& rows = incidence[from][to];
-                if (rows.empty())
+                const auto& entries = incidence[from][to];
+                if (entries.empty())
                     continue;
-                rows.resize(data->vertices[from].size());
-                data->relations[from][to] = compress(rows);
+                auto relation = compress(entries, static_cast<Index>(data->vertices[from].size()));
                 if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1))
-                    data->relations[to][from] = compress(transpose(rows, data->vertices[to].size()));
+                    data->relations[to][from] = transpose(relation, static_cast<Index>(data->vertices[to].size()));
+                data->relations[from][to] = std::move(relation);
             }
         }
         for (Index dim = 0; dim <= dimension_; ++dim) {
