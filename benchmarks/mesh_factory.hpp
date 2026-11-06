@@ -117,13 +117,13 @@ namespace idmesh_bench {
             if (args.dimension == 2) {
                 if (split) {
                     builder.add_cell(idmesh::CellType::triangle,
-                        std::array<Index, 3> {v0, v1, v2});
+                        std::array<Index, 3> {v0, v1, v2}, args.cell_labels ? 1 : 0);
                     builder.add_cell(idmesh::CellType::triangle,
-                        std::array<Index, 3> {v0, v2, v3});
+                        std::array<Index, 3> {v0, v2, v3}, args.cell_labels ? 1 : 0);
                 }
                 else {
                     builder.add_cell(idmesh::CellType::quadrilateral,
-                        std::array<Index, 4> {v0, v1, v2, v3});
+                        std::array<Index, 4> {v0, v1, v2, v3}, args.cell_labels ? 1 : 0);
                 }
                 continue;
             }
@@ -142,13 +142,13 @@ namespace idmesh_bench {
             }
             else if (split) {
                 builder.add_cell(idmesh::CellType::prism,
-                    std::array<Index, 6> {v0, v1, v2, v4, v5, v6});
+                    std::array<Index, 6> {v0, v1, v2, v4, v5, v6}, args.cell_labels ? 1 : 0);
                 builder.add_cell(idmesh::CellType::prism,
-                    std::array<Index, 6> {v0, v2, v3, v4, v6, v7});
+                    std::array<Index, 6> {v0, v2, v3, v4, v6, v7}, args.cell_labels ? 1 : 0);
             }
             else {
                 builder.add_cell(idmesh::CellType::hexahedron,
-                    std::array<Index, 8> {v0, v1, v2, v3, v4, v5, v6, v7});
+                    std::array<Index, 8> {v0, v1, v2, v3, v4, v5, v6, v7}, args.cell_labels ? 1 : 0);
             }
         }
         return builder;
