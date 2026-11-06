@@ -1,0 +1,121 @@
+name: Paired topology benchmarks
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    # Opt-in on main; do not use hosted-runner timings as a CI performance gate.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[bench-run]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout baseline
+        uses: actions/checkout@v4
+        with:
+          ref: b35754cb8c3b4b2a871b8094135f4265f0274f2c
+          path: baseline
+          persist-credentials: false
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          path: candidate
+          persist-credentials: false
+      - name: Record host and compiler
+        shell: bash
+        run: |
+          uname -a
+          lscpu | grep -E 'Model name|CPU\(s\)|Thread|MHz' || true
+          free -h
+          g++ --version | head -1
+          cmake --version | head -1
+          echo "BASELINE=$(git -C baseline rev-parse HEAD)"
+          echo "CANDIDATE=$(git -C candidate rev-parse HEAD)"
+      - name: Build baseline and candidate with identical flags
+        shell: bash
+        run: |
+          for revision in baseline candidate; do
+            cmake -S "$revision" -B "build-$revision" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DIDMESH_BUILD_TESTS=OFF \
+              -DIDMESH_BUILD_EXAMPLES=OFF \
+              -DIDMESH_BUILD_BENCHMARKS=ON
+            cmake --build "build-$revision" --target idmesh_benchmark --parallel 2
+          done
+      - name: Measure comparable CPU workloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          cases=(
+            "2d_mixed|192 8 --dim 2 --shape mixed --trials 5"
+            "3d_simplex|24 8 --dim 3 --shape simplex --trials 5"
+            "3d_tensor|28 8 --dim 3 --shape tensor --trials 5"
+            "3d_mixed|28 8 --dim 3 --shape mixed --trials 5"
+            "3d_scrambled|28 8 --dim 3 --shape mixed --scramble --seed 2026 --jitter 0.1 --trials 5"
+          )
+          for entry in "${cases[@]}"; do
+            IFS='|' read -r name options <<< "$entry"
+            read -r -a args <<< "$options"
+            for revision in baseline candidate; do
+              echo "::group::$name / $revision"
+              "./build-$revision/idmesh_benchmark" "${args[@]}" > "results/$revision-$name.csv"
+              cat "results/$revision-$name.csv"
+              echo "::endgroup::"
+            done
+          done
+      - name: Compare results and verify traversals
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv, glob, os
+          from pathlib import Path
+
+          lines = ["# IDMesh paired CPU benchmark", "",
+                   "Baseline: " + os.popen("git -C baseline rev-parse --short HEAD").read().strip(),
+                   "Candidate: " + os.popen("git -C candidate rev-parse --short HEAD").read().strip(),
+                   "", "| Workload | Config | Finalize base (ms) | Candidate (ms) | Speedup | Payload change |",
+                   "|---|---|---:|---:|---:|---:|"]
+          for base_name in sorted(glob.glob("results/baseline-*.csv")):
+              candidate_name = base_name.replace("/baseline-", "/candidate-")
+              base_rows = list(csv.DictReader(open(base_name, newline="")))
+              test_rows = list(csv.DictReader(open(candidate_name, newline="")))
+              key = lambda r: (r["configuration"], r["relation"])
+              a = {key(r): r for r in base_rows}
+              b = {key(r): r for r in test_rows}
+              if a.keys() != b.keys():
+                  raise RuntimeError(f"relation set changed: {base_name}: {set(a)^set(b)}")
+              for k in a:
+                  for column in ("cells", "facets", "edges", "checksum", "incidences_per_round"):
+                      if a[k][column] != b[k][column]:
+                          raise RuntimeError(f"{base_name} {k}: {column} changed")
+              workload = Path(base_name).stem.removeprefix("baseline-")
+              for config in ("minimal", "finite_volume", "full"):
+                  ar = next(r for r in base_rows if r["configuration"] == config)
+                  br = next(r for r in test_rows if r["configuration"] == config)
+                  old = float(ar["finalize_ms_p50"])
+                  new = float(br["finalize_ms_p50"])
+                  payload_a = int(ar["visible_payload_bytes"])
+                  payload_b = int(br["visible_payload_bytes"])
+                  ratio = (old / new) if new else 0.
+                  change = 100. * (payload_b / payload_a - 1) if payload_a else 0.
+                  lines.append(f"| {workload} | {config} | {old:.3f} | {new:.3f} | {ratio:.2f}x | {change:+.1f}% |")
+          lines += ["", "All relation cardinalities and deterministic traversal checksums match.",
+                    "Results are noisy hosted-runner measurements, not automated regression thresholds."]
+          report = "\n".join(lines)
+          print(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write(report + "\n")
+          PY
+      - name: Upload measurement CSV
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paired-topology-csv
+          path: results/*.csv
+          if-no-files-found: warn
