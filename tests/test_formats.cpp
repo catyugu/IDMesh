@@ -98,7 +98,7 @@ namespace {
         for (Index d = 0; d < 4; ++d)
             has_group(mesh, d, 101 + int(d), true);
         check(mesh.physical_name(2, 103) == "surface", "Gmsh physical name lost");
-        auto reduced = idmesh::read_gmsh(path.string(), idmesh::TopologyOptions::finite_volume());
+        auto reduced = idmesh::read_gmsh(path.string(), idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
         check(reduced.entity_count(1) == 0 && reduced.entity_count(2) == 4,
             "quadratic reduced topology");
         has_group(reduced, 1, 102, false);
@@ -221,7 +221,7 @@ void omitted_layer_labels()
         builder.add_cell(idmesh::CellType::triangle, triangle, 21);
         builder.add_physical_tag(1, edge, 42);
         builder.add_physical_tag(1, edge, 43);
-        return std::move(builder).finalize(idmesh::TopologyOptions::cells_and_vertices());
+        return std::move(builder).finalize(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward});
     };
     // Labels are borrowed from the Mesh: copying the Mesh must preserve
     // storage ownership, including keys on omitted dimensions.
@@ -261,7 +261,7 @@ void many_labels()
             builder.add_cell_physical_tag(c, 120);
         }
     }
-    const auto mesh = std::move(builder).finalize(idmesh::TopologyOptions::cells_and_vertices());
+    const auto mesh = std::move(builder).finalize(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward});
     check(mesh.physical_labels().size() == n + (n + 10) / 11,
         "physical group deduplication or entity count");
     for (const auto& label : mesh.physical_labels()) {

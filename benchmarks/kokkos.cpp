@@ -117,7 +117,7 @@ namespace {
                   << a.generated.scramble << ',' << a.generated.seed << '\n';
     }
 
-    void run_case(const Arguments& a, idmesh::TopologyOptions options, const char* name)
+    void run_case(const Arguments& a, idmesh::BuildOptions options, const char* name)
     {
         idmesh::Mesh mesh;
         if (a.gmsh.empty()) {
@@ -130,7 +130,7 @@ namespace {
         Timing geometry_upload, relation_upload, centroid, incidence, geometry_checksum;
         const auto dim = mesh.dimension();
         const bool has_relation = mesh.has_relation(dim, dim - 1);
-        const auto reference = has_relation ? mesh.relation(dim, dim - 1).indices.size() : 0;
+        const auto reference = has_relation ? mesh.relation(dim, dim - 1).targets.size() : 0;
         double checked_centroid = 0.0;
         std::uint64_t checked_geometry = 0;
         for (unsigned trial = 0; trial < a.trials; ++trial) {
@@ -202,9 +202,13 @@ int main(int argc, char** argv)
             std::cout << std::fixed << std::setprecision(3)
                       << "dimension,shape,side,configuration,phase,cells,trials,rounds,"
                          "ms_p50,ms_p95,result,source,scramble,seed\n";
-            run_case(args, idmesh::TopologyOptions::cells_and_vertices(), "minimal");
-            run_case(args, idmesh::TopologyOptions::finite_volume(), "finite_volume");
-            run_case(args, idmesh::TopologyOptions::full(), "full");
+            run_case(args,
+                idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward},
+                "minimal");
+            run_case(args,
+                idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets},
+                "finite_volume");
+            run_case(args, idmesh::BuildOptions {}, "full");
         }
         catch (const std::exception& error) {
             std::cerr << "Kokkos benchmark: " << error.what() << '\n';

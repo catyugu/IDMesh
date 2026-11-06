@@ -93,7 +93,7 @@ namespace idmesh {
 
     } // namespace
 
-    Mesh read_gmsh(const std::string& filename, TopologyOptions options)
+    Mesh read_gmsh(const std::string& filename, BuildOptions options)
     {
         std::ifstream in(filename);
         if (!in)

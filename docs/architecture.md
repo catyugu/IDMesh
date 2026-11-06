@@ -124,7 +124,7 @@ baseline rather than a ParMETIS-quality distributed partitioner. The MPI backend
 currently uses the world communicator and blocking exchange semantics.
 
 `idmesh_fvm` assembles a 3D two-tetra diffusion operator using
-`TopologyOptions::finite_volume()` (no Edge layer), checking conservative
+`BuildOptions{TopologyLayout::cell_facets, RelationDirection::bidirectional}` (no Edge layer), checking conservative
 internal flux and outward physical normals. `idmesh_fem` assembles G, C, D
 on a mixed Hex/Prism mesh and verifies `CG=0`, `DC=0`.
 

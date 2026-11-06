@@ -36,13 +36,13 @@ namespace {
             check(mesh.cell_tags().front() == 42, "cell tag lost");
             if (dim > 1) {
                 check(mesh.entity_count(dim - 1) == facets[k], "wrong facet count");
-                check(mesh.relation(dim, dim - 1).row(0).size() == facets[k], "wrong facet incidence");
+                check(mesh.relation(dim, dim - 1)[0].targets.size() == facets[k], "wrong facet incidence");
             }
             idmesh::MeshBuilder minimal(dim, dim);
             for (unsigned i = 0; i < vertices.size(); ++i)
                 minimal.add_vertex({double(i), 0, 0});
             minimal.add_cell(types[k], vertices);
-            auto reduced = std::move(minimal).finalize(idmesh::TopologyOptions::cells_and_vertices());
+            auto reduced = std::move(minimal).finalize(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward});
             check(reduced.has_relation(dim, 0), "missing cell-vertex relation");
             if (dim > 1)
                 check(!reduced.has_relation(dim, dim - 1), "extra materialization");
@@ -63,16 +63,15 @@ namespace {
         auto support = mesh.relation(2, 3);
         bool found = false;
         for (idmesh::Index f = 0; f < mesh.entity_count(2); ++f) {
-            if (support.row(f).size() != 2)
+            if (support[f].targets.size() != 2)
                 continue;
             found = true;
             int sign[2] {};
             for (idmesh::Index c = 0; c < 2; ++c) {
-                const auto row = faces.row(c);
-                const auto signs = faces.row_signs(c);
-                for (std::size_t i = 0; i < row.size(); ++i)
-                    if (row[i] == f)
-                        sign[c] = signs[i];
+                const auto row = faces[c];
+                for (std::size_t i = 0; i < row.targets.size(); ++i)
+                    if (row.targets[i] == f)
+                        sign[c] = row.coefficients[i];
             }
             check(sign[0] == -sign[1] && sign[0] != 0, "incorrect shared face orientation");
         }
@@ -92,13 +91,13 @@ namespace {
         const auto support = mesh.relation(0, 1);
         check(forward.stride == 2 && forward.offsets.empty(), "cell-vertex relation lost fixed stride");
         check(!support.offsets.empty(), "irregular vertex support must use CSR");
-        check(support.row(4).empty(), "isolated vertex should have empty support");
-        check(support.row(1).size() == 3, "shared vertex support count");
+        check(support[4].targets.empty(), "isolated vertex should have empty support");
+        check(support[1].targets.size() == 3, "shared vertex support count");
         const std::array<idmesh::Index, 3> expected_cells {0, 1, 2};
         const std::array<std::int8_t, 3> expected_signs {1, 1, -1};
-        check(std::equal(support.row(1).begin(), support.row(1).end(), expected_cells.begin()),
+        check(std::equal(support[1].targets.begin(), support[1].targets.end(), expected_cells.begin()),
             "transposed support changed incidence ordering");
-        check(std::equal(support.row_signs(1).begin(), support.row_signs(1).end(), expected_signs.begin()),
+        check(std::equal(support[1].coefficients.begin(), support[1].coefficients.end(), expected_signs.begin()),
             "transposed support lost incidence signs");
         mesh.validate();
     }
@@ -110,7 +109,7 @@ namespace {
             builder.add_vertex({double(i), 0, 0});
         const std::array<idmesh::Index, 4> tetra {0, 1, 2, 3};
         builder.add_cell(idmesh::CellType::tetrahedron, tetra);
-        auto mesh = std::move(builder).finalize(idmesh::TopologyOptions::finite_volume());
+        auto mesh = std::move(builder).finalize(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
         check(mesh.entity_count(2) == 4, "missing FV facets");
         check(mesh.entity_count(1) == 0, "FV unnecessarily materializes edges");
         check(mesh.has_relation(3, 2) && mesh.has_relation(2, 3), "missing FV adjacency");

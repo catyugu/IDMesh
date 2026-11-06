@@ -37,15 +37,20 @@ namespace idmesh {
         pyramid
     };
 
-    struct TopologyOptions {
-        bool edges = true;
-        bool faces = true;
-        bool facets = true;
-        bool support = true;
+    enum class TopologyLayout : std::uint8_t {
+        cell_vertices,
+        cell_facets,
+        complete
+    };
 
-        static TopologyOptions full() { return {}; }
-        static TopologyOptions finite_volume() { return {false, false, true, true}; }
-        static TopologyOptions cells_and_vertices() { return {false, false, false, false}; }
+    enum class RelationDirection : std::uint8_t {
+        downward,
+        bidirectional
+    };
+
+    struct BuildOptions {
+        TopologyLayout topology = TopologyLayout::complete;
+        RelationDirection relations = RelationDirection::bidirectional;
     };
 
     // The canonical sequence is local[(rotation + i * (reversed ? -1 : 1)) mod n].
@@ -54,12 +59,6 @@ namespace idmesh {
         std::uint16_t rotation = 0;
         bool reversed = false;
         constexpr int sign() const { return reversed ? -1 : 1; }
-    };
-
-    struct Incidence {
-        Index entity = invalid_index;
-        std::int8_t sign = 0;
-        Orientation orientation {};
     };
 
     // Physical group membership survives even when its entity dimension is omitted.
@@ -74,17 +73,25 @@ namespace idmesh {
         int tag = 0;
     };
 
+    struct RelationRow {
+        std::span<const Index> targets;
+        std::span<const std::int8_t> coefficients;
+        std::span<const Orientation> orientations;
+
+        bool oriented() const noexcept { return !coefficients.empty(); }
+    };
+
     struct RelationView {
         std::span<const Index> offsets;
-        std::span<const Index> indices;
-        std::span<const std::int8_t> signs;
+        std::span<const Index> targets;
+        std::span<const std::int8_t> coefficients;
         std::span<const Orientation> orientations;
         Index rows = 0;
         Index stride = 0;
 
-        std::span<const Index> row(Index index) const;
-        std::span<const std::int8_t> row_signs(Index index) const;
-        std::span<const Orientation> row_orientations(Index index) const;
+        Index size() const noexcept { return rows; }
+        bool oriented() const noexcept { return !coefficients.empty(); }
+        RelationRow operator[](Index row) const;
     };
 
     class IDMESH_API Mesh {
@@ -136,7 +143,7 @@ namespace idmesh {
         void add_physical_tag(Index dimension, std::span<const Index> vertices, int tag);
         void add_facet_tag(std::span<const Index> vertices, int tag);
         void set_physical_name(Index dimension, int tag, std::string name);
-        Mesh finalize(TopologyOptions options = TopologyOptions::full()) &&;
+        Mesh finalize(BuildOptions options = {}) &&;
 
     private:
         Index dimension_;
@@ -164,16 +171,16 @@ namespace idmesh {
 
     // Gmsh ASCII MSH 2.2 / 4.1: first- and second-order standard cells,
     // geometry-node connectivity, physical groups and names.
-    IDMESH_API Mesh read_gmsh(const std::string& filename, TopologyOptions options = TopologyOptions::full());
+    IDMESH_API Mesh read_gmsh(const std::string& filename, BuildOptions options = {});
     // ASCII legacy VTK UNSTRUCTURED_GRID with standard linear and supported
     // quadratic cell types; one physical_tag attribute per exported cell.
     IDMESH_API Mesh read_vtk_legacy(const std::string& filename,
-        TopologyOptions options = TopologyOptions::full());
+        BuildOptions options = {});
     IDMESH_API void write_vtk_legacy(const Mesh& mesh, const std::string& filename);
     // ASCII Medit .mesh, linear cells and native Edge/Triangle/Tetra P2;
     // one integer physical reference per exported cell.
     IDMESH_API Mesh read_medit(const std::string& filename,
-        TopologyOptions options = TopologyOptions::full());
+        BuildOptions options = {});
     IDMESH_API void write_medit(const Mesh& mesh, const std::string& filename);
     IDMESH_API Index cell_dimension(CellType type);
     IDMESH_API Index cell_vertex_count(CellType type);

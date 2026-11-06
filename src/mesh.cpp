@@ -139,6 +139,12 @@ namespace idmesh {
             }
         };
 
+        struct Incidence {
+            Index entity = invalid_index;
+            std::int8_t coefficient = 0;
+            Orientation orientation {};
+        };
+
         // Build-time incidences stay contiguous instead of allocating one
         // vector per entity. Stable scattering preserves the original row order.
         struct PendingIncidence {
@@ -205,7 +211,7 @@ namespace idmesh {
                 const Index slot = positions[pending.row]++;
                 result.indices[slot] = pending.entry.entity;
                 if (oriented) {
-                    result.signs[slot] = pending.entry.sign;
+                    result.signs[slot] = pending.entry.coefficient;
                     result.orientations[slot] = pending.entry.orientation;
                 }
             }
@@ -227,15 +233,13 @@ namespace idmesh {
             auto positions = write_positions(result);
             const auto view = forward.view();
             for (Index row = 0; row < forward.rows; ++row) {
-                const auto targets = view.row(row);
-                const auto signs = view.row_signs(row);
-                const auto orientations = view.row_orientations(row);
-                for (std::size_t i = 0; i < targets.size(); ++i) {
-                    const Index slot = positions[targets[i]]++;
+                const auto incidence = view[row];
+                for (std::size_t i = 0; i < incidence.targets.size(); ++i) {
+                    const Index slot = positions[incidence.targets[i]]++;
                     result.indices[slot] = row;
                     if (oriented) {
-                        result.signs[slot] = signs[i];
-                        result.orientations[slot] = orientations[i];
+                        result.signs[slot] = incidence.coefficients[i];
+                        result.orientations[slot] = incidence.orientations[i];
                     }
                 }
             }
@@ -358,35 +362,21 @@ namespace idmesh {
         throw std::invalid_argument("unknown cell type");
     }
 
-    std::span<const Index> RelationView::row(Index index) const
+    RelationRow RelationView::operator[](Index row) const
     {
-        if (index >= rows)
+        if (row >= rows)
             throw std::out_of_range("relation row");
-        auto begin = offsets.empty() ? static_cast<std::size_t>(index) * stride : offsets[index];
-        auto end = offsets.empty() ? begin + stride : offsets[index + 1];
-        return indices.subspan(begin, end - begin);
-    }
-
-    std::span<const std::int8_t> RelationView::row_signs(Index index) const
-    {
-        if (index >= rows)
-            throw std::out_of_range("relation row");
-        if (signs.empty())
-            return {};
-        auto begin = offsets.empty() ? static_cast<std::size_t>(index) * stride : offsets[index];
-        auto end = offsets.empty() ? begin + stride : offsets[index + 1];
-        return signs.subspan(begin, end - begin);
-    }
-
-    std::span<const Orientation> RelationView::row_orientations(Index index) const
-    {
-        if (index >= rows)
-            throw std::out_of_range("relation row");
-        if (orientations.empty())
-            return {};
-        auto begin = offsets.empty() ? static_cast<std::size_t>(index) * stride : offsets[index];
-        auto end = offsets.empty() ? begin + stride : offsets[index + 1];
-        return orientations.subspan(begin, end - begin);
+        const auto begin = offsets.empty()
+            ? static_cast<std::size_t>(row) * stride
+            : offsets[row];
+        const auto end = offsets.empty() ? begin + stride : offsets[row + 1];
+        const auto count = end - begin;
+        return {
+            targets.subspan(begin, count),
+            coefficients.empty() ? std::span<const std::int8_t> {}
+                                 : coefficients.subspan(begin, count),
+            orientations.empty() ? std::span<const Orientation> {}
+                                 : orientations.subspan(begin, count)};
     }
 
     Mesh::Mesh() = default;
@@ -687,12 +677,8 @@ namespace idmesh {
         physical_names_[{dimension, tag}] = std::move(name);
     }
 
-    Mesh MeshBuilder::finalize(TopologyOptions options) &&
+    Mesh MeshBuilder::finalize(BuildOptions options) &&
     {
-        // The oriented incidence DAG must remain graded. A 3D edge layer
-        // requires the intervening face layer; skipping it is invalid.
-        require(dimension_ != 3 || !options.edges || options.faces || options.facets,
-            "3D edges require faces: skipping an entity dimension is invalid");
         auto data = std::make_shared<Mesh::Data>();
         data->dimension = dimension_;
         data->geometric_dimension = geometric_dimension_;
@@ -754,8 +740,17 @@ namespace idmesh {
         std::array<std::unordered_map<Loop, Index, LoopHash>, 4> lookup;
         std::array<std::array<PendingRelation, 4>, 4> incidence;
         const auto want = [&](Index dim) {
-            return dim == 0 || dim == dimension_ || (dim == dimension_ - 1 && options.facets)
-                || (dim == 1 && options.edges) || (dim == 2 && options.faces);
+            if (dim == 0 || dim == dimension_)
+                return true;
+            switch (options.topology) {
+            case TopologyLayout::cell_vertices:
+                return false;
+            case TopologyLayout::cell_facets:
+                return dim == dimension_ - 1;
+            case TopologyLayout::complete:
+                return true;
+            }
+            return false;
         };
         for (Index dim = 0; dim <= dimension_; ++dim)
             data->enabled[dim] = want(dim);
@@ -792,7 +787,7 @@ namespace idmesh {
             }
         }
 
-        if (dimension_ == 3 && options.edges && want(2)) {
+        if (dimension_ == 3 && want(1) && want(2)) {
             for (Index f = 0; f < data->vertices[2].size(); ++f) {
                 const auto vertices = data->vertices[2][f].view();
                 for (std::size_t edge = 0; edge < vertices.size(); ++edge) {
@@ -800,9 +795,6 @@ namespace idmesh {
                     attach(2, 1, f, register_entity(1, endpoints.view()));
                 }
             }
-        }
-        if (dimension_ == 2 && options.edges) {
-            // Cell-to-edge was generated above; no extra construction is required.
         }
         if (dimension_ >= 2 && want(1)) {
             for (Index e = 0; e < data->vertices[1].size(); ++e) {
@@ -889,7 +881,7 @@ namespace idmesh {
                 // Direct geometric connectivity omits redundant sign/permutation arrays.
                 const bool oriented = from == to + 1;
                 auto relation = compress(entries, construction_count(from), oriented);
-                if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1)) {
+                if (options.relations == RelationDirection::bidirectional && !(from == dimension_ && to == 0 && dimension_ > 1)) {
                     const auto targets = to == 0
                         ? data->coordinates.size()
                         : construction_count(to);
@@ -997,22 +989,22 @@ namespace idmesh {
                 if (relation.rows != entity_count(from))
                     throw std::logic_error("relation row count");
                 const bool oriented = from == to + 1;
-                const auto payload = relation.indices.size();
-                if ((oriented && (relation.signs.size() != payload || relation.orientations.size() != payload))
-                    || (!oriented && (!relation.signs.empty() || !relation.orientations.empty())))
+                const auto payload = relation.targets.size();
+                if ((oriented && (relation.coefficients.size() != payload || relation.orientations.size() != payload))
+                    || (!oriented && (!relation.coefficients.empty() || !relation.orientations.empty())))
                     throw std::logic_error("relation metadata size mismatch");
                 if (relation.offsets.empty()) {
-                    if (static_cast<std::size_t>(relation.rows) * relation.stride != relation.indices.size())
+                    if (static_cast<std::size_t>(relation.rows) * relation.stride != relation.targets.size())
                         throw std::logic_error("invalid fixed-stride relation");
                 }
                 else {
                     if (relation.offsets.size() != static_cast<std::size_t>(relation.rows) + 1
-                        || relation.offsets.front() != 0 || relation.offsets.back() != relation.indices.size()
+                        || relation.offsets.front() != 0 || relation.offsets.back() != relation.targets.size()
                         || !std::is_sorted(relation.offsets.begin(), relation.offsets.end()))
                         throw std::logic_error("invalid CSR offsets");
                 }
                 for (Index i = 0; i < relation.rows; ++i)
-                    for (auto id : relation.row(i))
+                    for (auto id : relation[i].targets)
                         if (id >= entity_count(to))
                             throw std::logic_error("dangling incidence");
             }
@@ -1030,13 +1022,11 @@ namespace idmesh {
             auto low = relation(k - 1, k - 2);
             for (Index entity = 0; entity < entity_count(k); ++entity) {
                 std::map<Index, int> sum;
-                auto mids = high.row(entity);
-                auto outer_signs = high.row_signs(entity);
-                for (std::size_t j = 0; j < mids.size(); ++j) {
-                    auto bottoms = low.row(mids[j]);
-                    auto inner_signs = low.row_signs(mids[j]);
-                    for (std::size_t i = 0; i < bottoms.size(); ++i)
-                        sum[bottoms[i]] += outer_signs[j] * inner_signs[i];
+                const auto outer = high[entity];
+                for (std::size_t j = 0; j < outer.targets.size(); ++j) {
+                    const auto inner = low[outer.targets[j]];
+                    for (std::size_t i = 0; i < inner.targets.size(); ++i)
+                        sum[inner.targets[i]] += outer.coefficients[j] * inner.coefficients[i];
                 }
                 for (const auto& [id, coefficient] : sum) {
                     (void)id;

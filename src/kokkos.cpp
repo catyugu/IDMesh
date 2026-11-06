@@ -32,18 +32,18 @@ namespace idmesh::kokkos {
         const auto r = mesh.relation(from, to);
         data_->rows = r.rows;
         data_->offsets = Kokkos::View<Index*, MemorySpace>("idmesh_offset_mirror", r.rows + 1);
-        data_->indices = Kokkos::View<Index*, MemorySpace>("idmesh_incidence_mirror", r.indices.size());
-        data_->signs = Kokkos::View<std::int8_t*, MemorySpace>("idmesh_orientation_mirror", r.signs.size());
+        data_->indices = Kokkos::View<Index*, MemorySpace>("idmesh_incidence_mirror", r.targets.size());
+        data_->signs = Kokkos::View<std::int8_t*, MemorySpace>("idmesh_orientation_mirror", r.coefficients.size());
         auto off = Kokkos::create_mirror_view(data_->offsets);
         auto idx = Kokkos::create_mirror_view(data_->indices);
         auto sign = Kokkos::create_mirror_view(data_->signs);
         for (Index row = 0; row <= r.rows; ++row)
             off(row) = r.offsets.empty() ? row * r.stride : r.offsets[row];
-        for (std::size_t i = 0; i < r.indices.size(); ++i) {
-            idx(i) = r.indices[i];
+        for (std::size_t i = 0; i < r.targets.size(); ++i) {
+            idx(i) = r.targets[i];
         }
-        for (std::size_t i = 0; i < r.signs.size(); ++i)
-            sign(i) = r.signs[i];
+        for (std::size_t i = 0; i < r.coefficients.size(); ++i)
+            sign(i) = r.coefficients[i];
         Kokkos::deep_copy(data_->offsets, off);
         Kokkos::deep_copy(data_->indices, idx);
         Kokkos::deep_copy(data_->signs, sign);

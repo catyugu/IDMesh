@@ -27,7 +27,7 @@ namespace {
         builder.add_cell(idmesh::CellType::triangle, c, 43);
         const std::array<Index, 2> boundary {0, 1};
         builder.add_facet_tag(boundary, 71);
-        return std::move(builder).finalize(idmesh::TopologyOptions::finite_volume());
+        return std::move(builder).finalize(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
     }
     void run(const idmesh::Mesh& source, Index depth)
     {
@@ -98,21 +98,19 @@ namespace {
         const auto global_cf = source.relation(d, d - 1);
         for (Index local_cell = 0; local_cell < n; ++local_cell) {
             const Index global_cell = static_cast<Index>(part.global_ids[d][local_cell]);
-            auto local_faces = local_cf.row(local_cell);
-            auto local_orientations = local_cf.row_orientations(local_cell);
-            auto local_signs = local_cf.row_signs(local_cell);
-            auto source_faces = global_cf.row(global_cell);
-            for (std::size_t j = 0; j < local_faces.size(); ++j) {
-                const auto global_face = part.global_ids[d - 1][local_faces[j]];
+            const auto local_faces = local_cf[local_cell];
+            const auto source_faces = global_cf[global_cell];
+            for (std::size_t j = 0; j < local_faces.targets.size(); ++j) {
+                const auto global_face = part.global_ids[d - 1][local_faces.targets[j]];
                 bool matched = false;
-                for (std::size_t k = 0; k < source_faces.size(); ++k) {
-                    if (source_faces[k] != global_face)
+                for (std::size_t k = 0; k < source_faces.targets.size(); ++k) {
+                    if (source_faces.targets[k] != global_face)
                         continue;
                     matched = true;
-                    const auto a = local_orientations[j];
-                    const auto b = global_cf.row_orientations(global_cell)[k];
+                    const auto a = local_faces.orientations[j];
+                    const auto b = source_faces.orientations[k];
                     require(a.rotation == b.rotation && a.reversed == b.reversed
-                            && local_signs[j] == global_cf.row_signs(global_cell)[k],
+                            && local_faces.coefficients[j] == source_faces.coefficients[k],
                         "local-to-canonical facet orientation changed across ranks");
                 }
                 require(matched, "partition facet is absent from source cell");
@@ -122,7 +120,7 @@ namespace {
         // Verify that globally shared edge identities agree between partitions.
         auto globalSupport = source.relation(d - 1, d);
         for (Index facet = 0; facet < source.entity_count(d - 1); ++facet) {
-            if (globalSupport.row(facet).size() != 2)
+            if (globalSupport[facet].targets.size() != 2)
                 continue;
             int local_present = 0, all_present = 0;
             for (auto id : part.global_ids[d - 1])

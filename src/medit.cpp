@@ -108,7 +108,7 @@ namespace idmesh {
         }
     } // namespace
 
-    Mesh read_medit(const std::string& filename, TopologyOptions options)
+    Mesh read_medit(const std::string& filename, BuildOptions options)
     {
         auto in = sanitized_input(filename);
         std::string key;

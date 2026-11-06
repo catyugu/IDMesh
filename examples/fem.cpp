@@ -16,10 +16,9 @@ namespace {
             std::vector<int>(mesh.entity_count(to)));
         const auto incidence = mesh.relation(from, to);
         for (Index row = 0; row < mesh.entity_count(from); ++row) {
-            auto indices = incidence.row(row);
-            auto signs = incidence.row_signs(row);
-            for (std::size_t j = 0; j < indices.size(); ++j)
-                result[row][indices[j]] += signs[j];
+            const auto entries = incidence[row];
+            for (std::size_t j = 0; j < entries.targets.size(); ++j)
+                result[row][entries.targets[j]] += entries.coefficients[j];
         }
         return result;
     }
@@ -50,7 +49,7 @@ int main()
         builder.add_cell(idmesh::CellType::hexahedron, hex);
         builder.add_cell(idmesh::CellType::prism, prism);
         const auto mesh = std::move(builder).finalize(
-            idmesh::TopologyOptions::full());
+            idmesh::BuildOptions {});
         mesh.validate();
         const Matrix G = boundary_matrix(mesh, 1);
         const Matrix C = boundary_matrix(mesh, 2);
@@ -60,7 +59,7 @@ int main()
         const auto support = mesh.relation(2, 3);
         bool shared = false;
         for (Index f = 0; f < mesh.entity_count(2); ++f)
-            if (support.row(f).size() == 2)
+            if (support[f].targets.size() == 2)
                 shared = true;
         if (!shared)
             throw std::runtime_error("missing mixed-cell interface");

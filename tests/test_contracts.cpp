@@ -50,19 +50,19 @@ namespace {
             mesh.validate();
             if (dim == 1) {
                 auto cv = mesh.relation(1, 0);
-                check(cv.row_signs(0)[0] == -1 && cv.row_signs(0)[1] == 1,
+                check(cv[0].coefficients[0] == -1 && cv[0].coefficients[1] == 1,
                     "segment endpoints orientation");
                 continue;
             }
             auto relation = mesh.relation(dim, dim - 1);
-            auto facets = relation.row(0);
-            for (std::size_t f = 0; f < facets.size(); ++f) {
+            const auto facets = relation[0];
+            for (std::size_t f = 0; f < facets.targets.size(); ++f) {
                 std::vector<Index> local;
                 for (auto v : idmesh::reference_facet_vertices(type, static_cast<Index>(f)))
                     local.push_back(nodes[v]);
-                auto o = relation.row_orientations(0)[f];
-                verify_orientation(local, mesh.entity_vertices(dim - 1, facets[f]), o);
-                check(relation.row_signs(0)[f] == o.sign(), "facet boundary sign");
+                const auto o = facets.orientations[f];
+                verify_orientation(local, mesh.entity_vertices(dim - 1, facets.targets[f]), o);
+                check(facets.coefficients[f] == o.sign(), "facet boundary sign");
             }
             bool invalid = false;
             try {
@@ -91,23 +91,23 @@ namespace {
         auto downward = mesh.relation(3, 2);
         Index common = idmesh::invalid_index;
         for (Index f = 0; f < mesh.entity_count(2); ++f)
-            if (support.row(f).size() == 2) {
+            if (support[f].targets.size() == 2) {
                 check(common == idmesh::invalid_index, "more than one common face");
                 common = f;
             }
         check(common != idmesh::invalid_index, "mixed common quad missing");
         int signs[2] {};
         for (Index c = 0; c < 2; ++c)
-            for (std::size_t f = 0; f < downward.row(c).size(); ++f)
-                if (downward.row(c)[f] == common)
-                    signs[c] = downward.row_signs(c)[f];
+            for (std::size_t f = 0; f < downward[c].targets.size(); ++f)
+                if (downward[c].targets[f] == common)
+                    signs[c] = downward[c].coefficients[f];
         check(signs[0] != 0 && signs[0] == -signs[1], "mixed interface orientation");
     }
     void layer_masks()
     {
         for (auto type : {idmesh::CellType::tetrahedron, idmesh::CellType::hexahedron,
                  idmesh::CellType::prism, idmesh::CellType::pyramid}) {
-            auto build = [type](idmesh::TopologyOptions options) {
+            auto build = [type](idmesh::BuildOptions options) {
                 idmesh::MeshBuilder b(3, 3);
                 std::vector<Index> nodes;
                 for (Index i = 0; i < idmesh::cell_vertex_count(type); ++i)
@@ -115,36 +115,26 @@ namespace {
                 b.add_cell(type, nodes);
                 return std::move(b).finalize(options);
             };
-            auto invalid = idmesh::TopologyOptions::cells_and_vertices();
-            invalid.edges = true;
-            bool rejected = false;
-            try {
-                (void)build(invalid);
-            }
-            catch (const std::invalid_argument&) {
-                rejected = true;
-            }
-            check(rejected, "skipped face layer accepted");
-            auto full = build(idmesh::TopologyOptions::full());
+            auto full = build(idmesh::BuildOptions {});
             check(full.has_relation(3, 2) && full.has_relation(2, 1) && full.has_relation(1, 0),
                 "missing complete chain");
             check(!full.has_relation(3, 1), "unexpected skipped relation");
             for (const auto [from, to] : std::array<std::pair<Index, Index>, 2> {{{3, 0}, {2, 0}}}) {
                 const auto direct = full.relation(from, to);
-                check(!direct.indices.empty(), "missing direct geometric connectivity");
-                check(direct.signs.empty() && direct.orientations.empty(),
+                check(!direct.targets.empty(), "missing direct geometric connectivity");
+                check(direct.coefficients.empty() && direct.orientations.empty(),
                     "redundant metadata in geometric connectivity");
-                check(direct.row_signs(0).empty() && direct.row_orientations(0).empty(),
+                check(!direct[0].oriented(),
                     "signless relation row should have no metadata");
             }
             const auto facet_support = full.relation(0, 2);
-            check(facet_support.signs.empty() && facet_support.orientations.empty(),
+            check(facet_support.coefficients.empty() && facet_support.orientations.empty(),
                 "redundant metadata in transposed geometric connectivity");
             const auto boundary = full.relation(3, 2);
-            check(boundary.signs.size() == boundary.indices.size()
-                    && boundary.orientations.size() == boundary.indices.size(),
+            check(boundary.coefficients.size() == boundary.targets.size()
+                    && boundary.orientations.size() == boundary.targets.size(),
                 "oriented boundary metadata missing");
-            auto fv = build(idmesh::TopologyOptions::finite_volume());
+            auto fv = build(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
             check(fv.has_entities(2) && !fv.has_entities(1), "finite volume entity mask");
             check(fv.has_relation(3, 2) && fv.has_relation(2, 0), "finite volume connections");
             fv.validate();
@@ -178,8 +168,8 @@ namespace {
                         for (auto vertex : idmesh::reference_facet_vertices(type, facet))
                             local.push_back(order[vertex]);
                         verify_orientation(local,
-                            mesh.entity_vertices(dimension - 1, relation.row(0)[facet]),
-                            relation.row_orientations(0)[facet]);
+                            mesh.entity_vertices(dimension - 1, relation[0].targets[facet]),
+                            relation[0].orientations[facet]);
                     }
                 }
                 ++permutations;

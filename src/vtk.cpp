@@ -158,7 +158,7 @@ namespace idmesh {
         }
     } // namespace
 
-    Mesh read_vtk_legacy(const std::string& filename, TopologyOptions options)
+    Mesh read_vtk_legacy(const std::string& filename, BuildOptions options)
     {
         std::ifstream in(filename);
         require(bool(in), "cannot open VTK legacy file");

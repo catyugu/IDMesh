@@ -39,11 +39,10 @@ namespace {
     int cell_face_sign(const idmesh::Mesh& mesh, Index cell, Index facet)
     {
         auto relation = mesh.relation(3, 2);
-        const auto row = relation.row(cell);
-        const auto signs = relation.row_signs(cell);
-        for (std::size_t i = 0; i < row.size(); ++i)
-            if (row[i] == facet)
-                return signs[i];
+        const auto row = relation[cell];
+        for (std::size_t i = 0; i < row.targets.size(); ++i)
+            if (row.targets[i] == facet)
+                return row.coefficients[i];
         throw std::runtime_error("facet not incident to cell");
     }
     Point normal(const idmesh::Mesh& mesh, Index cell, Index face)
@@ -78,7 +77,7 @@ int main()
         const std::array<Index, 3> boundary {1, 2, 3};
         builder.add_facet_tag(boundary, 7);
         const auto mesh = std::move(builder).finalize(
-            idmesh::TopologyOptions::finite_volume());
+            idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
         require(mesh.entity_count(1) == 0, "FVM must omit the edge layer");
         require(mesh.has_relation(3, 2) && mesh.has_relation(2, 3),
             "FVM facet relations missing");
@@ -88,7 +87,7 @@ int main()
         std::array<std::array<double, 2>, 2> stiffness {};
         Index internal = 0, boundary_count = 0;
         for (Index face = 0; face < mesh.entity_count(2); ++face) {
-            const auto adjacency = support.row(face);
+            const auto adjacency = support[face].targets;
             require(adjacency.size() == 1 || adjacency.size() == 2, "nonmanifold test facet");
             if (adjacency.size() == 2) {
                 const Index c0 = adjacency[0], c1 = adjacency[1];

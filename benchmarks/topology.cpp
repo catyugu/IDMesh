@@ -205,8 +205,8 @@ namespace {
                 if (!mesh.has_relation(from, to))
                     continue;
                 const auto relation = mesh.relation(from, to);
-                bytes += relation.offsets.size_bytes() + relation.indices.size_bytes()
-                    + relation.signs.size_bytes() + relation.orientations.size_bytes();
+                bytes += relation.offsets.size_bytes() + relation.targets.size_bytes()
+                    + relation.coefficients.size_bytes() + relation.orientations.size_bytes();
             }
         }
         return bytes;
@@ -276,15 +276,15 @@ namespace {
         const auto begin = Clock::now();
         for (unsigned trial = 0; trial < rounds; ++trial) {
             for (Index row = 0; row < relation.rows; ++row) {
-                const auto indices = relation.row(row);
-                const auto signs = walk.oriented ? relation.row_signs(row) : std::span<const std::int8_t> {};
-                const auto orientations = walk.oriented ? relation.row_orientations(row) : std::span<const idmesh::Orientation> {};
-                for (std::size_t i = 0; i < indices.size(); ++i) {
-                    const std::uint64_t id = static_cast<std::uint64_t>(indices[i]) + 1;
+                const auto incidence = relation[row];
+                for (std::size_t i = 0; i < incidence.targets.size(); ++i) {
+                    const auto id = static_cast<std::uint64_t>(incidence.targets[i]) + 1;
                     if (walk.oriented) {
-                        checksum += id * (static_cast<std::uint64_t>(orientations[i].rotation) + 1)
-                            + (signs[i] < 0 ? 13u : 7u)
-                            + (orientations[i].reversed ? 17u : 0u);
+                        const auto rotation = static_cast<std::uint64_t>(
+                            incidence.orientations[i].rotation + 1);
+                        checksum += id * rotation
+                            + (incidence.coefficients[i] < 0 ? 13u : 7u)
+                            + (incidence.orientations[i].reversed ? 17u : 0u);
                     }
                     else {
                         checksum += id;
@@ -293,10 +293,10 @@ namespace {
             }
         }
         const auto end = Clock::now();
-        return {milliseconds(begin, end), checksum, relation.indices.size()};
+        return {milliseconds(begin, end), checksum, relation.targets.size()};
     }
 
-    void run(const Arguments& args, idmesh::TopologyOptions options, const char* configuration)
+    void run(const Arguments& args, idmesh::BuildOptions options, const char* configuration)
     {
         Timing input, finalize, validate, resident, rss_baseline, rss_after_input,
             rss_increase, peak_baseline, peak_after_input, peak_after_finalize,
@@ -431,21 +431,21 @@ int main(int argc, char** argv)
                      "rss_delta_bytes_per_cell_p50\n";
         // Gmsh input has a single combined read+finalize operation in finalize_ms.
         if (args.configuration == "all" || args.configuration == "minimal")
-            run(args, idmesh::TopologyOptions::cells_and_vertices(), "minimal");
+            run(args, idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward}, "minimal");
         if (args.configuration == "all" || args.configuration == "finite_volume_downward") {
-            auto options = idmesh::TopologyOptions::finite_volume();
-            options.support = false;
+            auto options = idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets};
+            options.relations = idmesh::RelationDirection::downward;
             run(args, options, "finite_volume_downward");
         }
         if (args.configuration == "all" || args.configuration == "finite_volume")
-            run(args, idmesh::TopologyOptions::finite_volume(), "finite_volume");
+            run(args, idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets}, "finite_volume");
         if (args.configuration == "all" || args.configuration == "full_downward") {
-            auto options = idmesh::TopologyOptions::full();
-            options.support = false;
+            auto options = idmesh::BuildOptions {};
+            options.relations = idmesh::RelationDirection::downward;
             run(args, options, "full_downward");
         }
         if (args.configuration == "all" || args.configuration == "full")
-            run(args, idmesh::TopologyOptions::full(), "full");
+            run(args, idmesh::BuildOptions {}, "full");
     }
     catch (const std::exception& error) {
         std::cerr << "benchmark error: " << error.what() << '\n';

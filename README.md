@@ -60,16 +60,16 @@ int main()
     builder.add_cell(idmesh::CellType::tetrahedron, cell);
 
     const auto mesh = std::move(builder).finalize(
-        idmesh::TopologyOptions::finite_volume());
+        idmesh::BuildOptions{idmesh::TopologyLayout::cell_facets, idmesh::RelationDirection::bidirectional});
 
     const auto cell_to_facet = mesh.relation(3, 2);
     return cell_to_facet.rows == 1 ? 0 : 1;
 }
 ```
 
-Use `TopologyOptions::cells_and_vertices()` for the smallest topology,
-`TopologyOptions::finite_volume()` for Cell/Facet-oriented workflows, and
-`TopologyOptions::full()` for the complete oriented complex.
+Use `BuildOptions{TopologyLayout::cell_vertices, RelationDirection::downward}` for the smallest topology,
+`BuildOptions{TopologyLayout::cell_facets, RelationDirection::bidirectional}` for Cell/Facet-oriented workflows, and
+`BuildOptions{}` for the complete oriented complex.
 
 ## Mesh I/O and geometry
 

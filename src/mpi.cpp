@@ -226,8 +226,8 @@ namespace idmesh::mpi {
             for (Index level = 0; level < ghost_layers; ++level) {
                 std::vector<Index> next;
                 for (auto c : frontier)
-                    for (auto f : facets.row(c))
-                        for (auto neighbor : support.row(f)) {
+                    for (auto f : facets[c].targets)
+                        for (auto neighbor : support[f].targets) {
                             if (!seen[neighbor]) {
                                 seen[neighbor] = true;
                                 next.push_back(neighbor);
@@ -297,11 +297,14 @@ namespace idmesh::mpi {
             if (auto name = global.physical_name(label.dimension, label.tag); !name.empty())
                 builder.set_physical_name(label.dimension, label.tag, std::move(name));
         }
-        TopologyOptions opts = TopologyOptions::cells_and_vertices();
-        opts.facets = global.has_entities(d - 1);
-        opts.edges = d >= 2 && global.has_entities(1);
-        opts.faces = d == 3 && global.has_entities(2);
-        opts.support = true;
+        BuildOptions opts;
+        opts.relations = RelationDirection::bidirectional;
+        if (d == 3 && global.has_entities(1) && global.has_entities(2))
+            opts.topology = TopologyLayout::complete;
+        else if (d > 1 && global.has_entities(d - 1))
+            opts.topology = TopologyLayout::cell_facets;
+        else
+            opts.topology = TopologyLayout::cell_vertices;
         PartitionedMesh partition;
         partition.mesh = std::move(builder).finalize(opts);
         partition.owned_cells = owned_count;
@@ -333,7 +336,7 @@ namespace idmesh::mpi {
                     continue;
                 auto rel = global.relation(from, to);
                 for (Index higher = 0; higher < global.entity_count(from); ++higher)
-                    for (auto lower : rel.row(higher))
+                    for (auto lower : rel[higher].targets)
                         global_owners[to][lower] = std::min(
                             global_owners[to][lower], global_owners[from][higher]);
             }

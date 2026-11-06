@@ -73,7 +73,7 @@ namespace {
         const auto support = mesh.relation(dim - 1, dim);
         int cuts = 0;
         for (Index f = 0; f < mesh.entity_count(dim - 1); ++f) {
-            const auto cells = support.row(f);
+            const auto cells = support[f].targets;
             if (cells.size() == 2 && partition[cells[0]] != partition[cells[1]])
                 ++cuts;
         }

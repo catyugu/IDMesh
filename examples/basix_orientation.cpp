@@ -19,28 +19,27 @@ int main()
         const auto support = mesh.relation(2, 3);
         bool shared = false;
         for (idmesh::Index f = 0; f < mesh.entity_count(2); ++f) {
-            if (support.row(f).size() != 2)
+            if (support[f].targets.size() != 2)
                 continue;
             shared = true;
             for (idmesh::Index cell = 0; cell < 2; ++cell) {
-                const auto row = faces.row(cell);
-                for (std::size_t j = 0; j < row.size(); ++j)
-                    if (row[j] == f) {
-                        auto o = faces.row_orientations(cell)[j];
+                const auto row = faces[cell];
+                for (std::size_t j = 0; j < row.targets.size(); ++j)
+                    if (row.targets[j] == f) {
+                        const auto o = row.orientations[j];
                         std::cout << "FACE " << cell << ' ' << f << ' ' << o.rotation
-                                  << ' ' << int(o.reversed) << ' ' << int(faces.row_signs(cell)[j])
-                                  << '\n';
+                                  << ' ' << int(o.reversed) << ' '
+                                  << int(row.coefficients[j]) << '\n';
                     }
             }
         }
         if (!shared)
             throw std::runtime_error("no shared tetra face");
         for (idmesh::Index f = 0; f < mesh.entity_count(2); ++f) {
-            auto row = edges.row(f);
-            auto transforms = edges.row_orientations(f);
-            for (std::size_t j = 0; j < row.size(); ++j)
-                std::cout << "EDGE " << f << ' ' << row[j] << ' '
-                          << int(transforms[j].reversed) << '\n';
+            const auto row = edges[f];
+            for (std::size_t j = 0; j < row.targets.size(); ++j)
+                std::cout << "EDGE " << f << ' ' << row.targets[j] << ' '
+                          << int(row.orientations[j].reversed) << '\n';
         }
         return 0;
     }

@@ -22,7 +22,7 @@ namespace {
         for (const auto& cell : cells)
             builder.add_cell(idmesh::CellType::quadrilateral, cell);
         return std::move(builder).finalize(
-            idmesh::TopologyOptions::finite_volume());
+            idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
     }
 
     void check_exchange(const idmesh::mpi::PartitionedMesh& partition,

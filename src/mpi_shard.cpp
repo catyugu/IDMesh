@@ -247,7 +247,7 @@ namespace idmesh::mpi {
 
     } // namespace
 
-    PartitionedMesh read_partition_shard(const std::string& path, TopologyOptions options)
+    PartitionedMesh read_partition_shard(const std::string& path, BuildOptions options)
     {
         int initialized = 0, rank = 0, size = 0;
         mpi_check(MPI_Initialized(&initialized));
@@ -337,7 +337,7 @@ namespace idmesh::mpi {
                     continue;
                 const auto relation = partition.mesh.relation(from, to);
                 for (Index e = 0; e < partition.mesh.entity_count(from); ++e)
-                    for (Index lower : relation.row(e))
+                    for (Index lower : relation[e].targets)
                         candidate[to][lower] = std::min(candidate[to][lower], candidate[from][e]);
             }
         }

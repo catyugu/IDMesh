@@ -35,7 +35,7 @@ namespace idmesh::mpi {
             std::vector<std::vector<Index>> graph(cells);
             const auto support = mesh.relation(dim - 1, dim);
             for (Index f = 0; f < mesh.entity_count(dim - 1); ++f) {
-                const auto adjacent = support.row(f);
+                const auto adjacent = support[f].targets;
                 for (std::size_t i = 0; i < adjacent.size(); ++i) {
                     for (std::size_t j = i + 1; j < adjacent.size(); ++j) {
                         if (adjacent[i] == adjacent[j])

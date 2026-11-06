@@ -62,7 +62,7 @@ namespace idmesh::mpi {
         explicit ExchangePlan(std::shared_ptr<Data> data);
         friend struct PartitionedMesh;
         friend PartitionedMesh partition_replicated(const Mesh&, Index);
-        friend PartitionedMesh read_partition_shard(const std::string&, TopologyOptions);
+        friend PartitionedMesh read_partition_shard(const std::string&, BuildOptions);
     };
 
     struct PartitionedMesh {
@@ -87,7 +87,7 @@ namespace idmesh::mpi {
     // Fully distributed read: one rank-local ASCII shard per MPI process.
     // Shared entity IDs and owners are negotiated via a distributed registry.
     IDMESH_MPI_API PartitionedMesh read_partition_shard(
-        const std::string& path, TopologyOptions options = TopologyOptions::full());
+        const std::string& path, BuildOptions options = {});
 
     // Source-side deterministic facet dual-graph partition and shard exporter.
     // The source-side preprocessing operation is not a distributed file reader.
