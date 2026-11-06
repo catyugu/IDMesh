@@ -18,7 +18,9 @@ namespace {
     using Clock = std::chrono::steady_clock;
     using Index = idmesh::Index;
 
-    enum class Shape { simplex, tensor, mixed };
+    enum class Shape { simplex,
+        tensor,
+        mixed };
 
     struct Arguments {
         unsigned side = 128;
@@ -148,8 +150,7 @@ namespace {
                     const Index v7 = vertex(x, y + 1, z + 1);
                     if (args.shape == Shape::simplex) {
                         // Consistent six-tetrahedron subdivision of each cube.
-                        for (const auto& tet : std::array<std::array<Index, 4>, 6> {{
-                                 {{v0, v1, v2, v6}}, {{v0, v2, v3, v6}},
+                        for (const auto& tet : std::array<std::array<Index, 4>, 6> {{{{v0, v1, v2, v6}}, {{v0, v2, v3, v6}},
                                  {{v0, v3, v7, v6}}, {{v0, v7, v4, v6}},
                                  {{v0, v4, v5, v6}}, {{v0, v5, v1, v6}}}}) {
                             builder.add_cell(idmesh::CellType::tetrahedron, tet);
@@ -245,8 +246,7 @@ namespace {
             input.samples.push_back(milliseconds(start, input_ready));
             finalize.samples.push_back(milliseconds(input_ready, finalized));
             const Index dim = mesh.dimension();
-            const std::array<std::pair<Index, Index>, 3> relations {{
-                {dim, 0}, {dim, dim - 1}, {dim - 1, dim}}};
+            const std::array<std::pair<Index, Index>, 3> relations {{{dim, 0}, {dim, dim - 1}, {dim - 1, dim}}};
             if (trial == 0) {
                 cell_count = mesh.entity_count(dim);
                 facet_count = mesh.has_entities(dim - 1) ? mesh.entity_count(dim - 1) : 0;
