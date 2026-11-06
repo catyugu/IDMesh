@@ -49,21 +49,23 @@ namespace {
                         std::array<Index, 5> extra {};
                         for (std::size_t j = 0; j < p.size(); ++j)
                             extra[j] = builder.add_geometry_node(p[j]);
-                        builder.add_quadratic_cell(
-                            idmesh::CellType::quadrilateral, corners, extra, 11);
+                        const auto cell = builder.add_quadratic_cell(
+                            idmesh::CellType::quadrilateral, corners, extra);
+                        builder.add_cell_label(cell, 11);
                     }
                     else {
-                        builder.add_cell(idmesh::CellType::quadrilateral, corners, 12);
+                        const auto cell = builder.add_cell(idmesh::CellType::quadrilateral, corners);
+                        builder.add_cell_label(cell, 12);
                     }
                 }
             }
         }
         const std::array<Index, 2> boundary {0, 1};
         const std::array<Index, 1> vertex {0};
-        builder.add_physical_tag(1, boundary, 30);
-        builder.add_physical_tag(0, vertex, 31);
-        builder.add_cell_physical_tag(0, 40);
-        builder.set_physical_name(1, 30, "bottom wall");
+        builder.add_label(1, boundary, 30);
+        builder.add_label(0, vertex, 31);
+        builder.add_cell_label(0, 40);
+        builder.set_label_name(1, 30, "bottom wall");
         return std::move(builder).finalize();
     }
 
@@ -88,8 +90,8 @@ namespace {
         int owner = -1;
     };
 
-    void test_shard(const std::string& prefix, int rank, int size,
-        Index ghost_depth)
+    void test_shard(const idmesh::mpi::Context& context,
+        const std::string& prefix, int rank, int size, Index ghost_depth)
     {
         std::optional<idmesh::Mesh> root;
         std::vector<int> assignments;
@@ -117,26 +119,27 @@ namespace {
         }
         MPI_Barrier(MPI_COMM_WORLD);
         const auto local_path = prefix + "." + std::to_string(rank) + ".idm";
-        auto partition = idmesh::mpi::read_partition_shard(local_path);
-        partition.mesh.validate();
-        const auto dim = partition.mesh.dimension();
-        require(dim == 2 && partition.global_ids.size() == 3,
+        auto partition = idmesh::mpi::read_partition_shard(context, local_path);
+        partition.mesh().validate();
+        const auto dim = partition.mesh().dimension();
+        require(dim == 2
+                && partition.global_ids(dim).size() == partition.mesh().entity_count(dim),
             "invalid distributed mesh dimensions");
-        require(partition.owned_cells > 0, "empty rank partition");
+        require(partition.owned_cell_count() > 0, "empty rank partition");
 
-        const Index cells = partition.mesh.entity_count(dim);
+        const Index cells = partition.mesh().entity_count(dim);
         std::vector<double> values(std::size_t(cells) * 2, -1);
-        for (Index i = 0; i < partition.owned_cells; ++i) {
-            const auto global = partition.global_ids[dim][i];
+        for (Index i = 0; i < partition.owned_cell_count(); ++i) {
+            const auto global = partition.global_ids(dim)[i];
             values[2 * i] = double(global + 100);
             values[2 * i + 1] = double(global * 2 + 7);
         }
-        partition.exchange.exchange_cells(values, 2);
+        partition.exchange_plan().exchange(values, 2);
         for (Index i = 0; i < cells; ++i) {
-            const auto global = partition.global_ids[dim][i];
+            const auto global = partition.global_ids(dim)[i];
             require(values[2 * i] == double(global + 100) && values[2 * i + 1] == double(global * 2 + 7),
                 "distributed shard halo exchange mismatch");
-            require((i < partition.owned_cells) == (partition.owner_ranks[dim][i] == rank),
+            require((i < partition.owned_cell_count()) == (partition.owner_ranks(dim)[i] == rank),
                 "shard cells not ordered owned then ghost");
         }
 
@@ -144,15 +147,15 @@ namespace {
         // by its global-key -> global-entity-ID mapping on all MPI ranks.
         std::vector<Identity> here;
         for (Index k = 0; k < dim; ++k) {
-            for (Index e = 0; e < partition.mesh.entity_count(k); ++e) {
+            for (Index e = 0; e < partition.mesh().entity_count(k); ++e) {
                 Identity record {};
                 record.dimension = k;
-                record.global = partition.global_ids[k][e];
-                record.owner = partition.owner_ranks[k][e];
-                const auto vertices = partition.mesh.entity_vertices(k, e);
+                record.global = partition.global_ids(k)[e];
+                record.owner = partition.owner_ranks(k)[e];
+                const auto vertices = partition.mesh().entity_vertices(k, e);
                 record.arity = static_cast<Index>(vertices.size());
                 for (std::size_t j = 0; j < vertices.size(); ++j)
-                    record.vertex[j] = partition.global_ids[0][vertices[j]];
+                    record.vertex[j] = partition.global_ids(0)[vertices[j]];
                 std::sort(record.vertex, record.vertex + record.arity);
                 here.push_back(record);
             }
@@ -183,14 +186,15 @@ namespace {
             auto [back, unique] = reverse.try_emplace(name, key);
             require(unique || back->second == key, "global entity-ID collision");
         }
-        const auto tags = partition.mesh.physical_labels();
-        if (std::any_of(partition.global_ids[dim].begin(),
-                partition.global_ids[dim].end(),
+        const auto labels = partition.mesh().labels();
+        (void)labels;
+        if (std::any_of(partition.global_ids(dim).begin(),
+                partition.global_ids(dim).end(),
                 [](std::uint64_t id) { return id == 0; })) {
-            require(partition.mesh.cell_order(
-                        static_cast<Index>(std::find(partition.global_ids[dim].begin(),
-                                               partition.global_ids[dim].end(), 0)
-                            - partition.global_ids[dim].begin()))
+            require(partition.mesh().cell_order(
+                        static_cast<Index>(std::find(partition.global_ids(dim).begin(),
+                                               partition.global_ids(dim).end(), 0)
+                            - partition.global_ids(dim).begin()))
                     == 2,
                 "quadratic geometry lost in rank-local shard");
         }
@@ -209,13 +213,14 @@ int main(int argc, char** argv)
 {
     MPI_Init(&argc, &argv);
     try {
-        int rank = 0, size = 0;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        const auto context = idmesh::mpi::Context::world();
+        const int rank = context.rank(), size = context.size();
         require(size >= 2 && size <= 3, "test requires two or three MPI ranks");
-        const auto base = (std::filesystem::temp_directory_path() / ("idmesh-parallel-" + std::to_string(size))).string();
-        test_shard(base, rank, size, 1);
-        test_shard(base, rank, size, 2);
+        const auto base = (std::filesystem::temp_directory_path()
+            / ("idmesh-parallel-" + std::to_string(size)))
+                              .string();
+        test_shard(context, base, rank, size, 1);
+        test_shard(context, base, rank, size, 2);
         if (rank == 0)
             std::cout << "MPI shard: graph cuts, independent loading, global "
                       << "identity, Ghost/Exchange and quadratic geometry OK\n";

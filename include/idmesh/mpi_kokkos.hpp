@@ -21,24 +21,24 @@
 
 namespace idmesh::mpi::kokkos {
 
-    // Auto chooses direct GPU-aware MPI when explicitly detected, otherwise
-    // Host Staging. RequireGpuAware fails rather than passing unsupported
-    // device pointers to an MPI implementation.
+    // automatic chooses direct GPU-aware MPI when explicitly detected,
+    // otherwise host staging. require_gpu_aware fails before unsupported
+    // device pointers reach the MPI implementation.
     enum class DeviceTransport : std::uint8_t {
-        Automatic,
-        HostStaging,
-        RequireGpuAware
+        automatic,
+        host_staging,
+        require_gpu_aware
     };
 
     class IDMESH_MPI_KOKKOS_API DeviceHaloPlan {
     public:
         DeviceHaloPlan(const ExchangePlan& plan, Index components = 1);
-        Index components() const noexcept;
-        bool gpu_aware_available() const;
+        Index component_count() const noexcept;
+        bool direct_device_transport_available() const;
         // Blocking collective. Device packing/unpacking use Kokkos kernels.
         // Call after MPI_Init and Kokkos::initialize and before finalization.
-        void exchange(idmesh::kokkos::DeviceCellField& field,
-            DeviceTransport mode = DeviceTransport::Automatic) const;
+        void exchange(idmesh::kokkos::DeviceField& field,
+            DeviceTransport mode = DeviceTransport::automatic) const;
 
     private:
         struct Data;

@@ -16,7 +16,7 @@ IDMesh is a C++20, immutable mesh topology kernel for 1D–3D mixed-cell, unstru
 - The graded incidence DAG cannot skip a dimension: in 3D, requesting edges requires faces. Invalid layer configurations are rejected by finalize(). Direct Cell-to-Vertex and Facet-to-Vertex connectivity is retained as geometry connectivity, not a boundary operator.
 - The builder is mutable; a finalized Mesh is immutable and exposes zero-copy read-only views. Finalization performs structural validation; the explicit `Mesh::validate()` API additionally checks exhaustive algebraic invariants such as boundary-of-boundary cancellation. Dynamic mesh edits, AMR and remeshing are outside the current design.
 - Geometric coordinates are independent of entity topology. First- and supported second-order geometry are stored separately from topological corner entities.
-- Optional facet physical tags attach to materialized codimension-one entities by vertex identity, and are validated against actual mesh facets. Zero denotes untagged; the dense array is omitted when no tags are supplied.
+- Sparse integer labels are independent of topology materialization. Bound labels borrow entity connectivity; labels on omitted layers retain compact canonical vertex keys.
 - The base CMake target and installed public headers contain no third-party API types. A separate optional Kokkos backend owns Kokkos execution/runtime dependencies.
 
 ## Standard reference cells
@@ -35,22 +35,19 @@ The current core excludes runtime topology modification, arbitrary polyhedra, pe
 
 Tests must cover all seven reference cells, rotated/reversed local facet orders, mixed adjacent cells, entity omission and explicit relation selection, boundary-of-boundary identities, imported Gmsh v2/v4 ASCII meshes, malformed inputs, installed-package consumption and CPU Kokkos execution.
 
-## Physical groups on every entity dimension
+## Labels on every entity dimension
 
-Physical labels are independent of the optional entity materialization mask.
-Each `PhysicalLabel` carries a dimension, membership tag, canonical corner
-vertex key and a linked local entity ID when available. If the entity dimension
-was omitted (or the labeled element does not occur in the top-dimensional
-complex), the link is `invalid_index` but the label survives. One entity can
-belong to multiple groups. `Mesh::physical_tags(d, id)` returns all memberships
-for an existing entity; `Mesh::physical_labels()` enumerates the complete
-record set. Gmsh 4.1 entity multi-membership and `$PhysicalNames` are preserved.
-`cell_tags()` and `facet_tag()` remain compatibility accessors for the first
-physical tag only. `PhysicalLabel::vertices` is a borrowed read-only span whose
-lifetime is tied to its owning `Mesh`. Labels attached to materialized entities
-reuse the packed entity-to-vertex connectivity, while labels on omitted layers
-borrow from a compact, private key buffer; copies of `Mesh` share the backing
-storage. Do not retain a copied `PhysicalLabel` beyond the lifetime of its Mesh.
+Labels are sparse integer metadata attached to entities and remain independent of
+the topology materialization mask. Each `Label` carries a dimension, value,
+canonical corner key and a linked local entity ID when that dimension exists.
+If the entity dimension is omitted, `entity == invalid_index` and the label
+retains its canonical vertex key. An entity may carry multiple values.
+
+`Mesh::labels(d, id)` returns the zero-copy labels of a materialized entity;
+`Mesh::labels()` enumerates all labels, including omitted topology layers.
+`label_name(d, value)` provides optional descriptive metadata. Materialized
+labels borrow packed entity connectivity; omitted-layer labels borrow a compact
+internal key buffer. Copies of `Mesh` share that backing storage.
 
 ## Second-order geometry
 
@@ -110,18 +107,17 @@ shape families are rejected, pending a standard-preserving adapter.
 
 `-DIDMESH_ENABLE_MPI=ON` builds the `IDMesh::MPI` adapter without exposing
 `mpi.h` from public SDK headers. The application initializes/finalizes MPI.
-`idmesh::mpi::partition_replicated(source, ghost_layers)` constructs owned-cell
+`idmesh::mpi::partition_replicated(context, source, ghost_layers)` constructs owned-cell
 then ghost-cell local meshes, carrying stable dimension-local global entity IDs,
 deterministic shared orientation and owner ranks. Facet adjacency defines the
 ghost expansion; the source mesh must materialize Cell/Facet and Facet/Cell
-relations. `ExchangePlan::exchange_cells` exchanges one or more interleaved
+relations. `ExchangePlan::exchange` exchanges one or more interleaved
 Host double components for cell-based fields.
 
 The replicated-input partition path remains available as a correctness baseline,
 but production-style rank-local loading is provided by the shard reader described
 below. The bundled graph partitioner is a dependency-free serial preprocessing
-baseline rather than a ParMETIS-quality distributed partitioner. The MPI backend
-currently uses the world communicator and blocking exchange semantics.
+baseline rather than a ParMETIS-quality distributed partitioner. The MPI backend duplicates and owns the communicator represented by `mpi::Context`; collective metadata and halo operations remain blocking.
 
 `idmesh_fvm` assembles a 3D two-tetra diffusion operator using
 `BuildOptions{TopologyLayout::cell_facets, RelationDirection::bidirectional}` (no Edge layer), checking conservative
@@ -129,11 +125,12 @@ internal flux and outward physical normals. `idmesh_fem` assembles G, C, D
 on a mixed Hex/Prism mesh and verifies `CG=0`, `DC=0`.
 
 The Kokkos adapter additionally offers a `DeviceRelation` owning a
-persistent mirror of CSR/fixed-stride offsets, indices and incidence signs
-in the default Kokkos memory space. Device-side parallel reductions can
-operate on its resident data without repeated uploads. CPU Kokkos Serial
-is exercised in CI; CUDA/HIP device execution requires separate backend
-builds and device CI to be certified.
+persistent CSR mirror in the default Kokkos memory space. Its offsets,
+targets and optional orientation metadata are exposed as typed device
+pointers, so application kernels operate directly on resident data without
+library-specific reduction helpers. CPU Kokkos Serial is exercised in CI;
+CUDA/HIP device execution requires separate backend builds and device CI
+to be certified.
 
 ## External high-order finite-element orientation validation
 
@@ -147,13 +144,13 @@ No finite-element-specific transformation matrices are stored in the mesh.
 
 ### Device-resident geometry
 
-`idmesh::kokkos::DeviceMesh` copies all geometry-node coordinates in SoA
-layout, plus cell-to-corner and cell-to-geometry CSR arrays, to Kokkos's
-`DefaultExecutionSpace::memory_space`. It owns these mirrors independently
-of the source mesh. Batched centroid and geometry-connectivity reductions
-exercise the device buffers without repeated upload. Future geometry kernels
-may reuse these buffers to evaluate quadrature-point maps in batches.
-Kokkos compilation remains strictly private to the optional adapter.
+`idmesh::kokkos::DeviceMesh` copies geometry-node coordinates in SoA
+layout, cell types/orders and cell-to-corner CSR to Kokkos's
+`DefaultExecutionSpace::memory_space`. Linear cells reuse corner
+connectivity. Only order-two cells occupy the separate
+`high_order_geometry_*` CSR, matching the compact Host representation.
+Typed raw device pointers let application kernels build their own traversal
+without exposing Kokkos template types in the SDK ABI.
 
 ### Cross-rank canonical orientation invariant
 
@@ -167,21 +164,21 @@ permutation/sign codes against the common source mesh on 2 and 3 ranks.
 
 ## Rank-local distributed mesh reading and graph partitioning
 
-The `IDMESH_SHARD 1` ASCII schema is:
+The `IDMESH_SHARD 2` ASCII schema is:
 
 ```text
-IDMESH_SHARD 1
+IDMESH_SHARD 2
 DIM <topology_dimension> <geometry_dimension>
 VERTICES <count>
 <global_vertex_id> <x> <y> <z>
 GEOMETRY_NODES <count>
 <global_geometry_id> <x> <y> <z>
 CELLS <count>
-<global_cell_id> <owner_rank> <cell_type_enum> <primary_tag> <num_geometry_nodes> <ids...>
+<global_cell_id> <owner_rank> <cell_type_enum> <num_geometry_nodes> <ids...>
 LABELS <count>
-<dimension> <tag> <count> <global_corner_ids... or single global_cell_id>
+<dimension> <value> <count> <global_corner_ids... or single global_cell_id>
 NAMES <count>
-<dimension> <tag> "<name>"
+<dimension> <value> "<name>"
 END
 ```
 
@@ -209,26 +206,27 @@ scalability are not claimed comparable to ParMETIS.
 
 Limitations: shards carry explicit first- or second-order Cell
 connectivity and supplied Ghost layers; the reader does not infer
-missing off-rank neighbors from geometry. MPI_WORLD is still the
-communicator, metadata use blocking MPI operations, and local shard
-files must be consistent. Extremely large individual messages remain
-subject to MPI_Alltoallv's integer-count limits.
+missing off-rank neighbors from geometry. All distributed operations use
+the communicator owned by the caller-supplied `mpi::Context`; metadata
+operations are still blocking and local shard files must be consistent.
+Extremely large individual messages remain subject to MPI_Alltoallv's
+integer-count limits.
 
 ## GPU fields and direct MPI transport
 
 The Kokkos backend owns `DeviceMesh`, `DeviceRelation` and
-`DeviceCellField` storage while keeping Kokkos types out of the installed
+`DeviceField` storage while keeping Kokkos types out of the installed
 ABI. Discretization-specific operators are intentionally outside the mesh
 SDK; applications can build them from mirrored topology/geometry and device
 fields. The combined MPI/Kokkos adapter packs owned Cell records and unpacks
 Ghost records using Kokkos kernels.
 
-`DeviceHaloPlan` stores the peer-index maps in device memory and
-supports `Automatic`, `HostStaging`, and `RequireGpuAware` transports.
+`DeviceHaloPlan` stores the rank-index maps in device memory and
+supports `automatic`, `host_staging`, and `require_gpu_aware` transports.
 When using Open MPI, capability is queried via
 `MPIX_Query_cuda_support` / `MPIX_Query_rocm_support`, when present.
 Direct transport fences the device pack kernel before entering MPI and
-the unpack kernel after MPI. Host Staging copies packed values through
+the unpack kernel after MPI. host staging copies packed values through
 mirror Views, preserving operation ordering even when the MPI runtime
 does not support direct GPU pointers.
 

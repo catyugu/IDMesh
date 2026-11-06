@@ -227,9 +227,7 @@ namespace {
         }
         bytes += mesh.coordinates().size_bytes();
         bytes += mesh.cell_types().size_bytes();
-        bytes += mesh.cell_tags().size_bytes();
-        bytes += mesh.facet_tags().size_bytes();
-        const auto labels = mesh.physical_labels();
+        const auto labels = mesh.labels();
         bytes += labels.size_bytes();
         for (const auto& label : labels)
             if (label.entity == idmesh::invalid_index)
@@ -321,21 +319,20 @@ namespace {
             const auto before_rss = resident_bytes();
             const auto before_peak = peak_resident_bytes();
             const auto start = Clock::now();
-            idmesh::Mesh mesh;
             Clock::time_point input_ready;
             std::uint64_t after_input_rss = before_rss;
             std::uint64_t after_input_peak = before_peak;
-            if (args.gmsh.empty()) {
-                auto builder = idmesh_bench::make_input(args.generated);
-                input_ready = Clock::now();
-                after_input_rss = resident_bytes();
-                after_input_peak = peak_resident_bytes();
-                mesh = std::move(builder).finalize(options);
-            }
-            else {
+            const auto mesh = [&] {
+                if (args.gmsh.empty()) {
+                    auto builder = idmesh_bench::make_input(args.generated);
+                    input_ready = Clock::now();
+                    after_input_rss = resident_bytes();
+                    after_input_peak = peak_resident_bytes();
+                    return std::move(builder).finalize(options);
+                }
                 input_ready = start;
-                mesh = idmesh::read_gmsh(args.gmsh, options);
-            }
+                return idmesh::read_gmsh(args.gmsh, options);
+            }();
             const auto finalized = Clock::now();
             mesh.validate();
             const auto validated = Clock::now();

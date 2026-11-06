@@ -1,5 +1,6 @@
 #include <idmesh/mesh.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -75,7 +76,7 @@ int main()
         builder.add_cell(idmesh::CellType::tetrahedron, a);
         builder.add_cell(idmesh::CellType::tetrahedron, b);
         const std::array<Index, 3> boundary {1, 2, 3};
-        builder.add_facet_tag(boundary, 7);
+        builder.add_label(2, boundary, 7);
         const auto mesh = std::move(builder).finalize(
             idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
         require(mesh.entity_count(1) == 0, "FVM must omit the edge layer");
@@ -112,7 +113,8 @@ int main()
                 const auto n = normal(mesh, cell, face);
                 require(dot(n, sub(center(mesh, 2, face), center(mesh, 3, cell))) > 0,
                     "physical boundary facet normal is not outward");
-                if (mesh.facet_tag(face) == 7)
+                if (std::any_of(mesh.labels(2, face).begin(), mesh.labels(2, face).end(),
+                        [](const idmesh::Label& label) { return label.value == 7; }))
                     require(cell == 0, "boundary facet label attached to wrong cell");
                 ++boundary_count;
             }

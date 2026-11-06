@@ -5,6 +5,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -23,36 +24,50 @@
 
 namespace idmesh::mpi {
 
-    // MPI must already be initialized by the application. No mpi.h dependency
-    // appears in public IDMesh headers. World communicator is the initial scope.
-    IDMESH_MPI_API int world_rank();
-    IDMESH_MPI_API int world_size();
-
     enum class DeviceMemoryKind : std::uint8_t {
-        Host,
-        CUDA,
-        HIP
+        host,
+        cuda,
+        hip
     };
-    IDMESH_MPI_API bool gpu_aware_support(DeviceMemoryKind memory);
 
-    struct PartitionedMesh;
+    class PartitionedMesh;
+
+    class IDMESH_MPI_API Context {
+    public:
+        static Context world();
+        // Pass the integer returned by MPI_Comm_c2f. The communicator is
+        // duplicated internally, so the caller may release its original handle.
+        static Context from_fortran_handle(std::int64_t handle);
+
+        int rank() const noexcept;
+        int size() const noexcept;
+
+    private:
+        struct Data;
+        std::shared_ptr<Data> data_;
+        explicit Context(std::shared_ptr<Data> data);
+
+        friend PartitionedMesh partition_replicated(
+            const Context&, const Mesh&, Index);
+        friend PartitionedMesh read_partition_shard(
+            const Context&, const std::string&, BuildOptions);
+    };
 
     class IDMESH_MPI_API ExchangePlan {
     public:
         ExchangePlan() = default;
-        // values: owned cells first, then ghosts. Fixed number of interleaved
-        // double components per cell. Blocking, thread-unsafe, host-buffer API.
-        void exchange_cells(std::span<double> values, Index components = 1) const;
+
+        void exchange(std::span<double> values, Index components = 1) const;
         bool empty() const noexcept;
-        int peer_count() const noexcept;
+        int rank_count() const noexcept;
         Index local_cell_count() const noexcept;
         std::span<const Index> send_indices(int peer) const;
         std::span<const Index> receive_indices(int peer) const;
+        bool direct_memory_supported(DeviceMemoryKind memory) const;
 
-        // Already-packed contiguous buffers, laid out peer-by-peer in
-        // exactly send_indices()/receive_indices() order. Device pointers are
-        // accepted only when the MPI implementation explicitly reports GPU
-        // awareness. The caller synchronizes device kernels around MPI calls.
+        // Buffers are packed peer-by-peer in exactly send_indices()/
+        // receive_indices() order. Non-host pointers require explicit support
+        // from the MPI implementation.
         void exchange_packed(const void* send, void* receive, Index components,
             DeviceMemoryKind memory) const;
 
@@ -60,34 +75,38 @@ namespace idmesh::mpi {
         struct Data;
         std::shared_ptr<Data> data_;
         explicit ExchangePlan(std::shared_ptr<Data> data);
-        friend struct PartitionedMesh;
-        friend PartitionedMesh partition_replicated(const Mesh&, Index);
-        friend PartitionedMesh read_partition_shard(const std::string&, BuildOptions);
+        friend class PartitionedMesh;
+        friend PartitionedMesh partition_replicated(
+            const Context&, const Mesh&, Index);
+        friend PartitionedMesh read_partition_shard(
+            const Context&, const std::string&, BuildOptions);
     };
 
-    struct PartitionedMesh {
-        Mesh mesh;
-        Index owned_cells = 0;
-        // A global ID is the dimension-specific local ID in the shared source mesh.
-        // Indices of each vector correspond to the finalized local mesh.
-        std::vector<std::vector<std::uint64_t>> global_ids;
-        std::vector<std::vector<int>> owner_ranks;
-        ExchangePlan exchange;
+    class IDMESH_MPI_API PartitionedMesh {
+    public:
+        const Mesh& mesh() const noexcept;
+        Index owned_cell_count() const noexcept;
+        std::span<const std::uint64_t> global_ids(Index dimension) const;
+        std::span<const int> owner_ranks(Index dimension) const;
+        const ExchangePlan& exchange_plan() const noexcept;
+
+    private:
+        struct Data;
+        std::shared_ptr<Data> data_;
+        explicit PartitionedMesh(std::shared_ptr<Data> data);
+
+        friend PartitionedMesh partition_replicated(
+            const Context&, const Mesh&, Index);
+        friend PartitionedMesh read_partition_shard(
+            const Context&, const std::string&, BuildOptions);
     };
 
-    // Initial correct-but-replicated distribution path: all MPI ranks must hold
-    // the same source mesh, with matching dimension-specific local IDs.
-    // Final local topology is owned-cells-then-facet-neighbor ghosts. Source
-    // faces (or edges in 2D) and facet support must be materialized.
-    // Use read_partition_shard for rank-local distributed data loading;
-    // partition_graph is a deterministic balanced region-growth baseline.
     IDMESH_MPI_API PartitionedMesh partition_replicated(
-        const Mesh& source, Index ghost_layers = 1);
+        const Context& context, const Mesh& source, Index ghost_layers = 1);
 
-    // Fully distributed read: one rank-local ASCII shard per MPI process.
-    // Shared entity IDs and owners are negotiated via a distributed registry.
     IDMESH_MPI_API PartitionedMesh read_partition_shard(
-        const std::string& path, BuildOptions options = {});
+        const Context& context, const std::string& path,
+        BuildOptions options = {});
 
     // Source-side deterministic facet dual-graph partition and shard exporter.
     // The source-side preprocessing operation is not a distributed file reader.

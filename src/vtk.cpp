@@ -274,10 +274,11 @@ namespace idmesh {
                     it->second = builder.add_geometry_node(points[gmsh[i]]);
                 extras.push_back(it->second);
             }
-            if (extras.empty())
-                builder.add_cell(cell.type, vertices, cell.tag);
-            else
-                builder.add_quadratic_cell(cell.type, vertices, extras, cell.tag);
+            const Index id = extras.empty()
+                ? builder.add_cell(cell.type, vertices)
+                : builder.add_quadratic_cell(cell.type, vertices, extras);
+            if (cell.tag != 0)
+                builder.add_cell_label(id, cell.tag);
         }
         for (auto& cell : cells) {
             if (cell.dimension >= dimension || cell.tag == 0)
@@ -285,7 +286,7 @@ namespace idmesh {
             std::vector<Index> vertices;
             for (Index i = 0; i < cell.nodes.size() && i < (cell.dimension == 0 ? 1u : cell_vertex_count(cell.type)); ++i)
                 vertices.push_back(corner_ids.at(cell.nodes[i]));
-            builder.add_physical_tag(cell.dimension, vertices, cell.tag);
+            builder.add_label(cell.dimension, vertices, cell.tag);
         }
         return std::move(builder).finalize(options);
     }
@@ -299,9 +300,12 @@ namespace idmesh {
         };
         std::vector<OutputCell> cells;
         const Index d = mesh.dimension();
+        for (const auto& label : mesh.labels())
+            require(label.value != 0,
+                "VTK legacy uses zero as the unlabeled sentinel");
         for (Index c = 0; c < mesh.entity_count(d); ++c) {
-            const auto groups = mesh.physical_tags(d, c);
-            require(groups.size() <= 1, "VTK legacy cannot store multiple cell physical groups");
+            const auto groups = mesh.labels(d, c);
+            require(groups.size() <= 1, "VTK legacy cannot store multiple labels on one cell");
             const auto ids = mesh.cell_geometry_nodes(c);
             const auto type = mesh.cell_types()[c];
             const int code = vtk_type(type, static_cast<Index>(ids.size()));
@@ -310,10 +314,10 @@ namespace idmesh {
             nodes.reserve(ids.size());
             for (Index i = 0; i < ids.size(); ++i)
                 nodes.push_back(ids[permutation.empty() ? i : permutation[i]]);
-            cells.push_back({code, std::move(nodes), groups.empty() ? 0 : groups.front()});
+            cells.push_back({code, std::move(nodes), groups.empty() ? 0 : groups.front().value});
         }
-        for (const auto& label : mesh.physical_labels()) {
-            if (label.dimension >= d || label.tag == 0)
+        for (const auto& label : mesh.labels()) {
+            if (label.dimension >= d)
                 continue;
             int code = 0;
             if (label.dimension == 0)
@@ -323,9 +327,9 @@ namespace idmesh {
             else if (label.dimension == 2)
                 code = label.vertices.size() == 3 ? 5 : 9;
             else
-                throw std::runtime_error("unsupported physical dimension");
+                throw std::runtime_error("unsupported labeled entity dimension");
             cells.push_back({code,
-                std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.tag});
+                std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.value});
         }
         std::ofstream out(filename);
         require(bool(out), "cannot open VTK output");

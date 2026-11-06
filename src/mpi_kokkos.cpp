@@ -17,11 +17,11 @@ namespace idmesh::mpi::kokkos {
         DeviceMemoryKind current_memory_kind()
         {
 #if defined(KOKKOS_ENABLE_CUDA)
-            return DeviceMemoryKind::CUDA;
+            return DeviceMemoryKind::cuda;
 #elif defined(KOKKOS_ENABLE_HIP)
-            return DeviceMemoryKind::HIP;
+            return DeviceMemoryKind::hip;
 #else
-            return DeviceMemoryKind::Host;
+            return DeviceMemoryKind::host;
 #endif
         }
 
@@ -55,13 +55,13 @@ namespace idmesh::mpi::kokkos {
     {
         if (!Kokkos::is_initialized())
             throw std::logic_error("initialize Kokkos before creating DeviceHaloPlan");
-        if (components == 0 || plan.peer_count() <= 0)
+        if (components == 0 || plan.rank_count() <= 0)
             throw std::invalid_argument("invalid device halo component or plan");
         data_->plan = plan;
         data_->cells = plan.local_cell_count();
         data_->components = components;
         std::vector<Index> send, recv;
-        for (int peer = 0; peer < plan.peer_count(); ++peer) {
+        for (int peer = 0; peer < plan.rank_count(); ++peer) {
             const auto s = plan.send_indices(peer);
             const auto r = plan.receive_indices(peer);
             send.insert(send.end(), s.begin(), s.end());
@@ -80,21 +80,21 @@ namespace idmesh::mpi::kokkos {
         Execution().fence();
     }
 
-    Index DeviceHaloPlan::components() const noexcept
+    Index DeviceHaloPlan::component_count() const noexcept
     {
         return data_->components;
     }
 
-    bool DeviceHaloPlan::gpu_aware_available() const
+    bool DeviceHaloPlan::direct_device_transport_available() const
     {
         const auto memory = current_memory_kind();
-        return memory != DeviceMemoryKind::Host && gpu_aware_support(memory);
+        return memory != DeviceMemoryKind::host && data_->plan.direct_memory_supported(memory);
     }
 
-    void DeviceHaloPlan::exchange(idmesh::kokkos::DeviceCellField& field,
+    void DeviceHaloPlan::exchange(idmesh::kokkos::DeviceField& field,
         DeviceTransport mode) const
     {
-        if (field.cells() != data_->cells || field.components() != data_->components)
+        if (field.entity_count() != data_->cells || field.component_count() != data_->components)
             throw std::invalid_argument("halo field shape does not match plan");
 
         const auto components = data_->components;
@@ -104,7 +104,7 @@ namespace idmesh::mpi::kokkos {
         auto recv_ids = data_->receive_cells;
         auto send_data = data_->send_buffer;
         auto recv_data = data_->receive_buffer;
-        auto* field_data = static_cast<double*>(field.device_data());
+        auto* field_data = field.data();
 
         Kokkos::parallel_for("idmesh_device_halo_pack", Kokkos::RangePolicy<Execution>(0, static_cast<Index>(nsend * components)), KOKKOS_LAMBDA(const Index i) {
             const Index cell = send_ids(i / components);
@@ -113,10 +113,11 @@ namespace idmesh::mpi::kokkos {
         Execution().fence();
 
         const auto memory = current_memory_kind();
-        const bool direct = memory == DeviceMemoryKind::Host || gpu_aware_support(memory);
-        if (mode == DeviceTransport::RequireGpuAware && (memory == DeviceMemoryKind::Host || !direct))
+        const bool direct = memory == DeviceMemoryKind::host
+            || data_->plan.direct_memory_supported(memory);
+        if (mode == DeviceTransport::require_gpu_aware && (memory == DeviceMemoryKind::host || !direct))
             throw std::runtime_error("no GPU-aware MPI available for device halo");
-        const bool use_direct = mode != DeviceTransport::HostStaging && direct;
+        const bool use_direct = mode != DeviceTransport::host_staging && direct;
 
         if (use_direct) {
             data_->plan.exchange_packed(send_data.data(), recv_data.data(),
@@ -128,7 +129,7 @@ namespace idmesh::mpi::kokkos {
             Kokkos::deep_copy(host_send, send_data);
             Execution().fence();
             data_->plan.exchange_packed(host_send.data(), host_receive.data(),
-                components, DeviceMemoryKind::Host);
+                components, DeviceMemoryKind::host);
             Kokkos::deep_copy(recv_data, host_receive);
             Execution().fence();
         }

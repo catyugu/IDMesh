@@ -1,6 +1,7 @@
 #pragma once
 
 #include "idmesh/mesh.hpp"
+#include <vector>
 
 namespace idmesh {
 

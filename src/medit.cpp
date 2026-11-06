@@ -192,10 +192,11 @@ namespace idmesh {
                     it->second = builder.add_geometry_node(positions[r.nodes[j]]);
                 extra.push_back(it->second);
             }
-            if (extra.empty())
-                builder.add_cell(r.type, v, r.tag);
-            else
-                builder.add_quadratic_cell(r.type, v, extra, r.tag);
+            const Index cell = extra.empty()
+                ? builder.add_cell(r.type, v)
+                : builder.add_quadratic_cell(r.type, v, extra);
+            if (r.tag != 0)
+                builder.add_cell_label(cell, r.tag);
         }
         for (auto& r : records) {
             if (r.dimension >= dimension || r.tag == 0)
@@ -203,13 +204,13 @@ namespace idmesh {
             std::vector<Index> v;
             for (Index j = 0; j < cell_vertex_count(r.type); ++j)
                 v.push_back(corners.at(r.nodes[j]));
-            builder.add_physical_tag(r.dimension, v, r.tag);
+            builder.add_label(r.dimension, v, r.tag);
         }
         for (Index i = 0; i < vertex_tags.size(); ++i)
             if (vertex_tags[i] != 0) {
                 const std::array<Index, 1> v {corners.at(i)};
                 if (dimension > 0)
-                    builder.add_physical_tag(0, v, vertex_tags[i]);
+                    builder.add_label(0, v, vertex_tags[i]);
             }
         return std::move(builder).finalize(options);
     }
@@ -223,23 +224,26 @@ namespace idmesh {
         };
         std::vector<OutputCell> cells;
         const Index d = mesh.dimension();
+        for (const auto& label : mesh.labels())
+            require(label.value != 0,
+                "Medit uses zero as the unlabeled reference");
         for (Index c = 0; c < mesh.entity_count(d); ++c) {
-            const auto tags = mesh.physical_tags(d, c);
-            require(tags.size() <= 1, "Medit cannot store multiple cell physical groups");
+            const auto tags = mesh.labels(d, c);
+            require(tags.size() <= 1, "Medit cannot store multiple labels on one cell");
             const auto ids = mesh.cell_geometry_nodes(c);
             // Reject before touching the output file.
             (void)keyword_name(mesh.cell_types()[c], static_cast<Index>(ids.size()));
             cells.push_back({mesh.cell_types()[c],
-                std::vector<Index>(ids.begin(), ids.end()), tags.empty() ? 0 : tags.front()});
+                std::vector<Index>(ids.begin(), ids.end()), tags.empty() ? 0 : tags.front().value});
         }
-        for (const auto& label : mesh.physical_labels()) {
-            if (label.dimension == 0 || label.dimension >= d || label.tag == 0)
+        for (const auto& label : mesh.labels()) {
+            if (label.dimension == 0 || label.dimension >= d)
                 continue;
             CellType type = CellType::segment;
             if (label.dimension == 2)
                 type = label.vertices.size() == 3 ? CellType::triangle : CellType::quadrilateral;
             cells.push_back({type,
-                std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.tag});
+                std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.value});
         }
         const Index embedding = std::max<Index>(2, mesh.geometric_dimension());
         std::ofstream out(filename);
@@ -253,9 +257,9 @@ namespace idmesh {
             for (Index j = 0; j < embedding; ++j)
                 out << p[j] << ' ';
             if (v < mesh.entity_count(0)) {
-                const auto tags = mesh.physical_tags(0, v);
-                require(tags.size() <= 1, "Medit cannot store multiple vertex physical groups");
-                out << (tags.empty() ? 0 : tags.front()) << '\n';
+                const auto tags = mesh.labels(0, v);
+                require(tags.size() <= 1, "Medit cannot store multiple labels on one vertex");
+                out << (tags.empty() ? 0 : tags.front().value) << '\n';
             }
             else
                 out << "0\n";

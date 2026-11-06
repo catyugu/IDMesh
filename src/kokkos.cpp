@@ -1,6 +1,5 @@
 #include "idmesh/kokkos.hpp"
 #include <Kokkos_Core.hpp>
-#include <array>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -9,6 +8,8 @@
 #include <vector>
 
 namespace idmesh::kokkos {
+    static_assert(std::is_trivially_copyable_v<Orientation>);
+
     namespace {
         using MemorySpace = Kokkos::DefaultExecutionSpace::memory_space;
         using ExecutionSpace = Kokkos::DefaultExecutionSpace;
@@ -20,64 +21,70 @@ namespace idmesh::kokkos {
     }
     struct DeviceRelation::Data {
         Index rows = 0;
+        std::size_t entries = 0;
+        bool oriented = false;
         Kokkos::View<Index*, MemorySpace> offsets;
-        Kokkos::View<Index*, MemorySpace> indices;
-        Kokkos::View<std::int8_t*, MemorySpace> signs;
+        Kokkos::View<Index*, MemorySpace> targets;
+        Kokkos::View<std::int8_t*, MemorySpace> coefficients;
+        Kokkos::View<Orientation*, MemorySpace> orientations;
     };
 
     DeviceRelation::DeviceRelation(const Mesh& mesh, Index from, Index to)
         : data_(std::make_shared<Data>())
     {
         check_runtime();
-        const auto r = mesh.relation(from, to);
-        data_->rows = r.rows;
-        data_->offsets = Kokkos::View<Index*, MemorySpace>("idmesh_offset_mirror", r.rows + 1);
-        data_->indices = Kokkos::View<Index*, MemorySpace>("idmesh_incidence_mirror", r.targets.size());
-        data_->signs = Kokkos::View<std::int8_t*, MemorySpace>("idmesh_orientation_mirror", r.coefficients.size());
-        auto off = Kokkos::create_mirror_view(data_->offsets);
-        auto idx = Kokkos::create_mirror_view(data_->indices);
-        auto sign = Kokkos::create_mirror_view(data_->signs);
-        for (Index row = 0; row <= r.rows; ++row)
-            off(row) = r.offsets.empty() ? row * r.stride : r.offsets[row];
-        for (std::size_t i = 0; i < r.targets.size(); ++i) {
-            idx(i) = r.targets[i];
-        }
-        for (std::size_t i = 0; i < r.coefficients.size(); ++i)
-            sign(i) = r.coefficients[i];
-        Kokkos::deep_copy(data_->offsets, off);
-        Kokkos::deep_copy(data_->indices, idx);
-        Kokkos::deep_copy(data_->signs, sign);
+        const auto relation = mesh.relation(from, to);
+        data_->rows = relation.rows;
+        data_->entries = relation.targets.size();
+        data_->oriented = relation.oriented();
+        data_->offsets = Kokkos::View<Index*, MemorySpace>("idmesh_relation_offsets", relation.rows + 1);
+        data_->targets = Kokkos::View<Index*, MemorySpace>("idmesh_relation_targets", relation.targets.size());
+        data_->coefficients = Kokkos::View<std::int8_t*, MemorySpace>(
+            "idmesh_relation_coefficients", relation.coefficients.size());
+        data_->orientations = Kokkos::View<Orientation*, MemorySpace>(
+            "idmesh_relation_orientations", relation.orientations.size());
+
+        auto offsets = Kokkos::create_mirror_view(data_->offsets);
+        auto targets = Kokkos::create_mirror_view(data_->targets);
+        auto coefficients = Kokkos::create_mirror_view(data_->coefficients);
+        auto orientations = Kokkos::create_mirror_view(data_->orientations);
+        for (Index row = 0; row <= relation.rows; ++row)
+            offsets(row) = relation.offsets.empty() ? row * relation.stride : relation.offsets[row];
+        for (std::size_t i = 0; i < relation.targets.size(); ++i)
+            targets(i) = relation.targets[i];
+        for (std::size_t i = 0; i < relation.coefficients.size(); ++i)
+            coefficients(i) = relation.coefficients[i];
+        for (std::size_t i = 0; i < relation.orientations.size(); ++i)
+            orientations(i) = relation.orientations[i];
+
+        Kokkos::deep_copy(data_->offsets, offsets);
+        Kokkos::deep_copy(data_->targets, targets);
+        Kokkos::deep_copy(data_->coefficients, coefficients);
+        Kokkos::deep_copy(data_->orientations, orientations);
         ExecutionSpace().fence();
     }
-    Index DeviceRelation::rows() const noexcept
+
+    Index DeviceRelation::row_count() const noexcept { return data_->rows; }
+    std::size_t DeviceRelation::entry_count() const noexcept { return data_->entries; }
+    bool DeviceRelation::oriented() const noexcept { return data_->oriented; }
+    const Index* DeviceRelation::offsets() const noexcept { return data_->offsets.data(); }
+    const Index* DeviceRelation::targets() const noexcept { return data_->targets.data(); }
+    const std::int8_t* DeviceRelation::coefficients() const noexcept
     {
-        return data_->rows;
+        return data_->coefficients.data();
     }
-    std::uint64_t DeviceRelation::incidence_count() const
+    const Orientation* DeviceRelation::orientations() const noexcept
     {
-        auto offsets = data_->offsets;
-        std::uint64_t result = 0;
-        Kokkos::parallel_reduce("idmesh_batch_count", Kokkos::RangePolicy<ExecutionSpace>(0, data_->rows), KOKKOS_LAMBDA(const Index c, std::uint64_t& sum) { sum += offsets(c + 1) - offsets(c); }, result);
-        return result;
-    }
-    std::uint64_t DeviceRelation::weighted_index_sum() const
-    {
-        auto ids = data_->indices;
-        std::uint64_t result = 0;
-        Kokkos::parallel_reduce("idmesh_batch_weighted_indices", Kokkos::RangePolicy<ExecutionSpace>(0, static_cast<Index>(ids.extent(0))), KOKKOS_LAMBDA(const Index i, std::uint64_t& sum) { sum += (std::uint64_t(i) + 1) * (std::uint64_t(ids(i)) + 1); }, result);
-        return result;
-    }
-    std::int64_t DeviceRelation::boundary_coefficient_sum() const
-    {
-        auto signs = data_->signs;
-        std::int64_t result = 0;
-        Kokkos::parallel_reduce("idmesh_batch_oriented_coefficients", Kokkos::RangePolicy<ExecutionSpace>(0, static_cast<Index>(signs.extent(0))), KOKKOS_LAMBDA(const Index i, std::int64_t& sum) { sum += signs(i); }, result);
-        return result;
+        return data_->orientations.data();
     }
 
     struct DeviceMesh::Data {
+        Index dimension = 0;
+        Index geometric_dimension = 0;
         Index cells = 0;
         Index nodes = 0;
+        Kokkos::View<CellType*, MemorySpace> cell_types;
+        Kokkos::View<std::uint8_t*, MemorySpace> cell_orders;
         Kokkos::View<Index*, MemorySpace> corner_offsets;
         Kokkos::View<Index*, MemorySpace> corner_indices;
         Kokkos::View<Index*, MemorySpace> geometry_offsets;
@@ -90,15 +97,29 @@ namespace idmesh::kokkos {
         check_runtime();
         const auto d = mesh.dimension();
         const auto nc = mesh.entity_count(d);
+        data_->dimension = d;
+        data_->geometric_dimension = mesh.geometric_dimension();
         data_->cells = nc;
         data_->nodes = mesh.geometry_node_count();
+        data_->cell_types = Kokkos::View<CellType*, MemorySpace>("idmesh_cell_types", nc);
+        data_->cell_orders = Kokkos::View<std::uint8_t*, MemorySpace>("idmesh_cell_orders", nc);
+        auto types = Kokkos::create_mirror_view(data_->cell_types);
+        auto orders = Kokkos::create_mirror_view(data_->cell_orders);
+        for (Index c = 0; c < nc; ++c) {
+            types(c) = mesh.cell_types()[c];
+            orders(c) = mesh.cell_order(c);
+        }
+        Kokkos::deep_copy(data_->cell_types, types);
+        Kokkos::deep_copy(data_->cell_orders, orders);
         std::vector<Index> co(nc + 1), ci, go(nc + 1), gi;
         for (Index c = 0; c < nc; ++c) {
             const auto vertices = mesh.entity_vertices(d, c);
             ci.insert(ci.end(), vertices.begin(), vertices.end());
             co[c + 1] = static_cast<Index>(ci.size());
-            const auto nodes = mesh.cell_geometry_nodes(c);
-            gi.insert(gi.end(), nodes.begin(), nodes.end());
+            if (mesh.cell_order(c) > 1) {
+                const auto nodes = mesh.cell_geometry_nodes(c);
+                gi.insert(gi.end(), nodes.begin(), nodes.end());
+            }
             go[c + 1] = static_cast<Index>(gi.size());
         }
         auto mirror_indices = [](auto& output, const auto& host,
@@ -132,62 +153,77 @@ namespace idmesh::kokkos {
         Kokkos::deep_copy(data_->z, z);
         ExecutionSpace().fence();
     }
-    Index DeviceMesh::cells() const noexcept { return data_->cells; }
-    Index DeviceMesh::geometry_nodes() const noexcept { return data_->nodes; }
-    std::array<double, 3> DeviceMesh::centroid_sum() const
+    Index DeviceMesh::dimension() const noexcept { return data_->dimension; }
+    Index DeviceMesh::geometric_dimension() const noexcept
     {
-        auto offsets = data_->corner_offsets, indices = data_->corner_indices;
-        auto x = data_->x, y = data_->y, z = data_->z;
-        std::array<double, 3> answer {};
-        for (int component = 0; component < 3; ++component) {
-            double sum = 0;
-            Kokkos::parallel_reduce("idmesh_batch_centroid", Kokkos::RangePolicy<ExecutionSpace>(0, data_->cells), KOKKOS_LAMBDA(const Index c, double& partial) {
-                const Index begin=offsets(c),end=offsets(c+1);
-                double value=0;
-                for(Index i=begin;i<end;++i) {
-                    const auto v=indices(i);
-                    value+=component==0?x(v):(component==1?y(v):z(v));
-                }
-                partial+=value/(end-begin); }, sum);
-            answer[component] = sum;
-        }
-        return answer;
+        return data_->geometric_dimension;
     }
-    std::uint64_t DeviceMesh::geometry_connectivity_checksum() const
+    Index DeviceMesh::cell_count() const noexcept { return data_->cells; }
+    Index DeviceMesh::geometry_node_count() const noexcept { return data_->nodes; }
+    std::size_t DeviceMesh::cell_vertex_entry_count() const noexcept
     {
-        auto ids = data_->geometry_indices;
-        std::uint64_t result = 0;
-        Kokkos::parallel_reduce("idmesh_batch_geometry_ids", Kokkos::RangePolicy<ExecutionSpace>(0, static_cast<Index>(ids.extent(0))), KOKKOS_LAMBDA(const Index i, std::uint64_t& sum) { sum += (std::uint64_t(i) + 1) * (std::uint64_t(ids(i)) + 1); }, result);
-        return result;
+        return data_->corner_indices.extent(0);
     }
+    std::size_t DeviceMesh::high_order_geometry_entry_count() const noexcept
+    {
+        return data_->geometry_indices.extent(0);
+    }
+    const CellType* DeviceMesh::cell_types() const noexcept
+    {
+        return data_->cell_types.data();
+    }
+    const std::uint8_t* DeviceMesh::cell_orders() const noexcept
+    {
+        return data_->cell_orders.data();
+    }
+    const Index* DeviceMesh::cell_vertex_offsets() const noexcept
+    {
+        return data_->corner_offsets.data();
+    }
+    const Index* DeviceMesh::cell_vertices() const noexcept
+    {
+        return data_->corner_indices.data();
+    }
+    const Index* DeviceMesh::high_order_geometry_offsets() const noexcept
+    {
+        return data_->geometry_offsets.data();
+    }
+    const Index* DeviceMesh::high_order_geometry_nodes() const noexcept
+    {
+        return data_->geometry_indices.data();
+    }
+    const double* DeviceMesh::geometry_x() const noexcept { return data_->x.data(); }
+    const double* DeviceMesh::geometry_y() const noexcept { return data_->y.data(); }
+    const double* DeviceMesh::geometry_z() const noexcept { return data_->z.data(); }
 
-    struct DeviceCellField::Data {
-        Index cells = 0;
+    struct DeviceField::Data {
+        Index entities = 0;
         Index components = 0;
         Kokkos::View<double*, MemorySpace> values;
     };
 
-    DeviceCellField::DeviceCellField(Index cells, Index components)
+    DeviceField::DeviceField(Index entities, Index components)
         : data_(std::make_shared<Data>())
     {
         check_runtime();
-        if (components == 0 || static_cast<std::uint64_t>(cells) * components > invalid_index)
+        if (components == 0
+            || static_cast<std::uint64_t>(entities) * components > invalid_index)
             throw std::invalid_argument("invalid device field shape");
-        data_->cells = cells;
+        data_->entities = entities;
         data_->components = components;
         data_->values = Kokkos::View<double*, MemorySpace>(
-            "idmesh_cell_field", static_cast<std::size_t>(cells) * components);
+            "idmesh_cell_field", static_cast<std::size_t>(entities) * components);
     }
 
-    Index DeviceCellField::cells() const noexcept
+    Index DeviceField::entity_count() const noexcept
     {
-        return data_->cells;
+        return data_->entities;
     }
-    Index DeviceCellField::components() const noexcept
+    Index DeviceField::component_count() const noexcept
     {
         return data_->components;
     }
-    void DeviceCellField::upload(std::span<const double> values)
+    void DeviceField::upload(std::span<const double> values)
     {
         if (values.size() != data_->values.extent(0))
             throw std::invalid_argument("device field upload size mismatch");
@@ -197,7 +233,7 @@ namespace idmesh::kokkos {
         Kokkos::deep_copy(data_->values, host);
         ExecutionSpace().fence();
     }
-    std::vector<double> DeviceCellField::download() const
+    std::vector<double> DeviceField::download() const
     {
         auto host = Kokkos::create_mirror_view(data_->values);
         Kokkos::deep_copy(host, data_->values);
@@ -207,17 +243,16 @@ namespace idmesh::kokkos {
             values[i] = host(i);
         return values;
     }
-    void* DeviceCellField::device_data() noexcept
+    std::size_t DeviceField::size() const noexcept
+    {
+        return data_->values.extent(0);
+    }
+    double* DeviceField::data() noexcept
     {
         return data_->values.data();
     }
-    const void* DeviceCellField::device_data() const noexcept
+    const double* DeviceField::data() const noexcept
     {
         return data_->values.data();
-    }
-
-    std::uint64_t incidence_count(const Mesh& mesh, Index from, Index to)
-    {
-        return DeviceRelation(mesh, from, to).incidence_count();
     }
 } // namespace idmesh::kokkos

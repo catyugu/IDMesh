@@ -21,13 +21,13 @@ namespace {
 
     void has_group(const idmesh::Mesh& mesh, Index dimension, int tag, bool bound)
     {
-        const auto labels = mesh.physical_labels();
-        const auto found = std::find_if(labels.begin(), labels.end(), [&](const idmesh::PhysicalLabel& label) {
-            return label.dimension == dimension && label.tag == tag;
+        const auto labels = mesh.labels();
+        const auto found = std::find_if(labels.begin(), labels.end(), [&](const idmesh::Label& label) {
+            return label.dimension == dimension && label.value == tag;
         });
-        check(found != labels.end(), "missing physical group membership");
+        check(found != labels.end(), "missing label membership");
         if (bound)
-            check(found->entity != idmesh::invalid_index, "unbound physical group");
+            check(found->entity != idmesh::invalid_index, "unbound label");
         else
             check(found->entity == idmesh::invalid_index, "unexpected materialized entity");
     }
@@ -59,7 +59,10 @@ namespace {
                 corners.push_back(builder.add_vertex({double(i), 0., 0.}));
             for (Index i = n; i < node_count; ++i)
                 extra.push_back(builder.add_geometry_node({double(i), 1., 0.}));
-            builder.add_quadratic_cell(type, corners, extra, 81);
+            {
+                const auto cell = builder.add_quadratic_cell(type, corners, extra);
+                builder.add_cell_label(cell, 81);
+            }
             auto mesh = std::move(builder).finalize();
             mesh.validate();
             check(mesh.cell_order(0) == 2, "wrong quadratic order");
@@ -97,7 +100,7 @@ namespace {
             "Gmsh quadratic geometry lost");
         for (Index d = 0; d < 4; ++d)
             has_group(mesh, d, 101 + int(d), true);
-        check(mesh.physical_name(2, 103) == "surface", "Gmsh physical name lost");
+        check(mesh.label_name(2, 103) == "surface", "Gmsh label name lost");
         auto reduced = idmesh::read_gmsh(path.string(), idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets});
         check(reduced.entity_count(1) == 0 && reduced.entity_count(2) == 4,
             "quadratic reduced topology");
@@ -144,10 +147,10 @@ namespace {
         has_group(mesh, 2, 213, true);
         has_group(mesh, 3, 204, true);
         has_group(mesh, 3, 214, true);
-        const auto groups = mesh.physical_tags(3, 0);
-        check(groups.size() == 2 && groups[0] == 204 && groups[1] == 214,
-            "Gmsh 4.1 multiple cell groups");
-        check(mesh.physical_name(3, 204) == "Volume Group", "Gmsh 4.1 group name");
+        const auto groups = mesh.labels(3, 0);
+        check(groups.size() == 2 && groups[0].value == 204 && groups[1].value == 214,
+            "Gmsh 4.1 multiple cell labels");
+        check(mesh.label_name(3, 204) == "Volume Group", "Gmsh 4.1 group name");
     }
 
     idmesh::Mesh labeled_linear()
@@ -156,12 +159,14 @@ namespace {
         for (auto position : std::array<std::array<double, 3>, 4> {{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}})
             builder.add_vertex(position);
         const std::array<Index, 3> a {0, 1, 2}, b {0, 2, 3};
-        builder.add_cell(idmesh::CellType::triangle, a, 31);
-        builder.add_cell(idmesh::CellType::triangle, b, 32);
+        const auto first = builder.add_cell(idmesh::CellType::triangle, a);
+        const auto second = builder.add_cell(idmesh::CellType::triangle, b);
+        builder.add_cell_label(first, 31);
+        builder.add_cell_label(second, 32);
         const std::array<Index, 2> edge {0, 1};
         const std::array<Index, 1> point {0};
-        builder.add_physical_tag(1, edge, 40);
-        builder.add_physical_tag(0, point, 41);
+        builder.add_label(1, edge, 40);
+        builder.add_label(0, point, 41);
         return std::move(builder).finalize();
     }
 
@@ -172,7 +177,8 @@ namespace {
         const auto mesh = idmesh::read_vtk_legacy(path.string());
         std::filesystem::remove(path);
         check(mesh.dimension() == 2 && mesh.entity_count(2) == 2, "VTK roundtrip cell count");
-        check(mesh.cell_tags()[0] == 31 && mesh.cell_tags()[1] == 32, "VTK physical cell tags");
+        check(mesh.labels(2, 0).front().value == 31 && mesh.labels(2, 1).front().value == 32,
+            "VTK cell labels");
         has_group(mesh, 0, 41, true);
         has_group(mesh, 1, 40, true);
         has_group(mesh, 2, 31, true);
@@ -190,6 +196,33 @@ namespace {
         has_group(mesh, 2, 31, true);
     }
 
+    void zero_label_io_rejected()
+    {
+        idmesh::MeshBuilder builder(1, 1);
+        builder.add_vertex({0, 0, 0});
+        builder.add_vertex({1, 0, 0});
+        const std::array<Index, 2> vertices {0, 1};
+        const auto cell = builder.add_cell(idmesh::CellType::segment, vertices);
+        builder.add_cell_label(cell, 0);
+        const auto mesh = std::move(builder).finalize();
+
+        for (const auto& path : {temporary("idmesh-zero-label.vtk"),
+                 temporary("idmesh-zero-label.mesh")}) {
+            bool rejected = false;
+            try {
+                if (path.extension() == ".vtk")
+                    idmesh::write_vtk_legacy(mesh, path.string());
+                else
+                    idmesh::write_medit(mesh, path.string());
+            }
+            catch (const std::runtime_error&) {
+                rejected = true;
+            }
+            std::filesystem::remove(path);
+            check(rejected, "zero label silently lost by legacy IO");
+        }
+    }
+
 } // namespace
 
 void mixed_geometry_orders()
@@ -198,11 +231,13 @@ void mixed_geometry_orders()
     for (auto p : std::array<std::array<double, 3>, 4> {{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}})
         builder.add_vertex(p);
     const std::array<Index, 3> lower {0, 1, 2}, upper {0, 2, 3};
-    builder.add_cell(idmesh::CellType::triangle, lower, 5);
+    const auto linear = builder.add_cell(idmesh::CellType::triangle, lower);
+    builder.add_cell_label(linear, 5);
     std::vector<Index> extra;
     for (unsigned i = 0; i < 3; ++i)
         extra.push_back(builder.add_geometry_node({double(i), 0.5, 0}));
-    builder.add_quadratic_cell(idmesh::CellType::triangle, upper, extra, 6);
+    const auto quadratic = builder.add_quadratic_cell(idmesh::CellType::triangle, upper, extra);
+    builder.add_cell_label(quadratic, 6);
     auto mesh = std::move(builder).finalize();
     mesh.validate();
     check(mesh.cell_order(0) == 1 && mesh.cell_order(1) == 2, "mixed geometry orders");
@@ -218,17 +253,18 @@ void omitted_layer_labels()
         builder.add_vertex({0, 1, 0});
         const std::array<Index, 3> triangle {0, 1, 2};
         const std::array<Index, 2> edge {0, 1};
-        builder.add_cell(idmesh::CellType::triangle, triangle, 21);
-        builder.add_physical_tag(1, edge, 42);
-        builder.add_physical_tag(1, edge, 43);
+        const auto cell = builder.add_cell(idmesh::CellType::triangle, triangle);
+        builder.add_cell_label(cell, 21);
+        builder.add_label(1, edge, 42);
+        builder.add_label(1, edge, 43);
         return std::move(builder).finalize(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward});
     };
     // Labels are borrowed from the Mesh: copying the Mesh must preserve
     // storage ownership, including keys on omitted dimensions.
     const auto mesh = make();
     const auto shared = mesh;
-    check(shared.physical_labels().size() == 3, "omitted label multiplicity");
-    for (const auto& label : shared.physical_labels()) {
+    check(shared.labels().size() == 3, "omitted label multiplicity");
+    for (const auto& label : shared.labels()) {
         if (label.dimension == 1) {
             check(label.entity == idmesh::invalid_index, "omitted edge materialized");
             check(label.vertices.size() == 2 && label.vertices[0] == 0
@@ -255,26 +291,27 @@ void many_labels()
         builder.add_vertex({double(i), 0, 0});
     for (Index i = 0; i < n; ++i) {
         const std::array<Index, 2> v {i, i + 1};
-        auto c = builder.add_cell(idmesh::CellType::segment, v, 100 + int(i % 5));
+        const auto cell = builder.add_cell(idmesh::CellType::segment, v);
+        builder.add_cell_label(cell, 100 + int(i % 5));
         if (i % 11 == 0) {
-            builder.add_cell_physical_tag(c, 120);
-            builder.add_cell_physical_tag(c, 120);
+            builder.add_cell_label(cell, 120);
+            builder.add_cell_label(cell, 120);
         }
     }
     const auto mesh = std::move(builder).finalize(idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward});
-    check(mesh.physical_labels().size() == n + (n + 10) / 11,
-        "physical group deduplication or entity count");
-    for (const auto& label : mesh.physical_labels()) {
+    check(mesh.labels().size() == n + (n + 10) / 11,
+        "label deduplication or entity count");
+    for (const auto& label : mesh.labels()) {
         const auto key = mesh.entity_vertices(label.dimension, label.entity);
         check(std::equal(key.begin(), key.end(), label.vertices.begin(), label.vertices.end()),
-            "materialized physical label did not reuse entity connectivity");
+            "materialized label did not reuse entity connectivity");
     }
     for (Index c = 0; c < n; ++c) {
-        auto tags = mesh.physical_tags(1, c);
-        check(tags.size() == (c % 11 == 0 ? 2u : 1u), "physical membership count");
-        check(tags.front() == 100 + int(c % 5), "incorrect physical group at cell");
+        const auto labels = mesh.labels(1, c);
+        check(labels.size() == (c % 11 == 0 ? 2u : 1u), "label membership count");
+        check(labels.front().value == 100 + int(c % 5), "incorrect label at cell");
         if (c % 11 == 0)
-            check(tags.back() == 120, "second membership lost");
+            check(labels.back().value == 120, "second membership lost");
     }
 }
 
@@ -286,6 +323,7 @@ int main()
         quadratic_gmsh41_multigroup();
         legacy_vtk_round_trip();
         medit_round_trip();
+        zero_label_io_rejected();
         mixed_geometry_orders();
         many_labels();
         omitted_layer_labels();

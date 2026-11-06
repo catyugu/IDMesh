@@ -11,7 +11,7 @@ The core SDK supports:
   oriented complex required by compatible finite elements;
 - first- and supported second-order geometry;
 - Gmsh MSH 2.2/4.1 ASCII, VTK legacy ASCII and Medit ASCII I/O;
-- physical labels independent of topology materialization;
+- labels independent of topology materialization;
 - optional distributed-memory and heterogeneous-compute adapters.
 
 Public core headers do not expose third-party library types.
@@ -81,7 +81,7 @@ auto vtk  = idmesh::read_vtk_legacy("model.vtk");
 auto medit = idmesh::read_medit("model.mesh");
 ```
 
-Gmsh import preserves supported physical groups and second-order geometry.
+Gmsh import preserves supported labels and second-order geometry.
 Reference-to-physical geometry evaluation is available through
 `idmesh/geometry.hpp`.
 
@@ -94,7 +94,7 @@ cmake -S . -B build-mpi -DIDMESH_ENABLE_MPI=ON
 ```
 
 Consumers can then link `IDMesh::MPI` and include `idmesh/mpi.hpp`.
-The public header does not expose `mpi.h` types.
+The public header does not expose `mpi.h` types. `Context::world()` is the simple case; application subcommunicators can be passed through `Context::from_fortran_handle()`.
 
 Enable Kokkos:
 
@@ -102,11 +102,12 @@ Enable Kokkos:
 cmake -S . -B build-kokkos -DIDMESH_ENABLE_KOKKOS=ON
 ```
 
-Consumers can link `IDMesh::Kokkos` and use device-resident mesh, relation
-and field storage without exposing Kokkos template types in the SDK ABI.
+Consumers can link `IDMesh::Kokkos` and use device-resident mesh, relation and field buffers exposed through typed raw device pointers without exposing Kokkos template types in the SDK ABI.
 
-When both backends are enabled, `IDMesh::MPIKokkos` provides device-aware
-halo transport with a host-staging fallback.
+When MPI is enabled, create an `idmesh::mpi::Context` from the world communicator
+or an application subcommunicator and pass it explicitly to distributed mesh operations.
+When both MPI and Kokkos are enabled, `IDMesh::MPIKokkos` provides device-aware halo
+transport with a host-staging fallback.
 
 ## Documentation
 

@@ -15,7 +15,8 @@
 - [x] Owned/ghost ranges, partitioning and halo exchange; MPI remains an optional backend.
 - [x] Rank-local shard input with a distributed shared-entity registry.
 - [x] Geometry/field mirrors and device-aware communication with host-staging fallback.
-- [ ] Communicator-scoped MPI contexts and nonblocking halo exchange.
+- [x] Communicator-scoped MPI contexts without exposing `mpi.h` in the SDK.
+- [ ] Nonblocking halo exchange.
 - [ ] Multi-node weak scaling and external partitioner integration.
 
 ## Milestone 3: advanced mesh coupling
@@ -37,10 +38,10 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 ## Milestone 2 incremental implementation
 - [x] Replicated-input MPI partition and deterministic global entity identity.
 - [x] Owner/ghost ranges, facet-based ghost expansion and cell-value ExchangePlan.
-- [x] Persistent Kokkos topology/geometry mirrors and parallel reductions (Serial CI).
+- [x] Persistent Kokkos topology/geometry mirrors with typed raw device descriptors (Serial CI).
 - [x] Standalone FVM conservation/normal and FEEC incidence examples.
 - [x] Scalable rank-local shard input and dependency-free graph-based partitioning baseline.
-- [x] GPU-backed field buffers and device-aware halo exchange with Host Staging fallback.
+- [x] GPU-backed field buffers and device-aware halo exchange with host staging fallback.
 - [ ] Nonblocking device-aware halo exchange and physical CUDA/HIP validation.
 - [x] Add executable Basix C++-backed Nedelec DOF-transformation integration tests and CI.
 
@@ -54,9 +55,9 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [ ] Fully distributed parallel generation of shard files from a global parallel mesh format.
 
 ## GPU transport and numerical execution
-- [x] DeviceCellField with explicit Host upload/download.
+- [x] DeviceField with explicit Host upload/download.
 - [x] Keep device field/topology transport in the mesh SDK; discretization-specific kernels live above it.
-- [x] Direct GPU-aware MPI capability query and safe failure on unsupported memory spaces.
-- [x] Packed Kokkos device Halo plan, including automatic Host Staging fallback.
+- [x] ExchangePlan-scoped direct device-memory capability query and safe failure on unsupported memory spaces.
+- [x] Packed Kokkos device Halo plan, including automatic host staging fallback.
 - [ ] Verify CUDA/HIP kernels on physical GPUs using the reusable GPU hardware workflow.
 - [ ] Verify direct CUDA/ROCm-aware MPI exchange on a capable multi-GPU MPI runtime.

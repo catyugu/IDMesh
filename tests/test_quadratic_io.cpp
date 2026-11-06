@@ -24,11 +24,11 @@ namespace {
             corners.push_back(b.add_vertex(points[i]));
         for (Index i = n; i < count; ++i)
             extras.push_back(b.add_geometry_node(points[i]));
-        if (extras.empty())
-            b.add_cell(type, corners, 11);
-        else
-            b.add_quadratic_cell(type, corners, extras, 11);
-        b.add_cell_physical_tag(0, 11); // duplicate must remain unique
+        const auto cell = extras.empty()
+            ? b.add_cell(type, corners)
+            : b.add_quadratic_cell(type, corners, extras);
+        b.add_cell_label(cell, 11);
+        b.add_cell_label(cell, 11); // duplicate must remain unique
         return std::move(b).finalize();
     }
     void compare(const idmesh::Mesh& original, const idmesh::Mesh& reread)
@@ -45,8 +45,9 @@ namespace {
                 check(std::abs(pa[j] - pb[j]) < 1e-12,
                     "geometry node permutation changed in IO");
         }
-        check(reread.physical_tags(reread.dimension(), 0) == std::vector<int> {11},
-            "physical group missing in IO");
+        const auto labels = reread.labels(reread.dimension(), 0);
+        check(labels.size() == 1 && labels.front().value == 11,
+            "label missing in IO");
     }
     void vtk_cases()
     {

@@ -49,11 +49,11 @@ namespace idmesh::mpi {
         };
 
         template <class T>
-        Received<T> exchange_records(const std::vector<std::vector<T>>& sends)
+        Received<T> exchange_records(MPI_Comm comm, const std::vector<std::vector<T>>& sends)
         {
             static_assert(std::is_trivially_copyable_v<T>);
             int size = 0;
-            mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &size));
+            mpi_check(MPI_Comm_size(comm, &size));
             require(sends.size() == static_cast<std::size_t>(size),
                 "MPI record destination count mismatch");
             std::vector<int> sc(size), rc(size), sd(size), rd(size);
@@ -63,7 +63,7 @@ namespace idmesh::mpi {
                 sc[peer] = static_cast<int>(sends[peer].size() * sizeof(T));
             }
             mpi_check(MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT,
-                MPI_COMM_WORLD));
+                comm));
             std::size_t ns = 0, nr = 0;
             for (int peer = 0; peer < size; ++peer) {
                 require(rc[peer] >= 0 && rc[peer] % sizeof(T) == 0,
@@ -82,7 +82,7 @@ namespace idmesh::mpi {
                 write += bucket.size();
             }
             mpi_check(MPI_Alltoallv(send_data.data(), sc.data(), sd.data(), MPI_BYTE,
-                recv_data.data(), rc.data(), rd.data(), MPI_BYTE, MPI_COMM_WORLD));
+                recv_data.data(), rc.data(), rd.data(), MPI_BYTE, comm));
             Received<T> result;
             result.values = std::move(recv_data);
             result.counts.resize(size);
@@ -98,13 +98,12 @@ namespace idmesh::mpi {
             std::uint64_t id = 0;
             int owner = -1;
             CellType type = CellType::segment;
-            int primary_tag = 0;
             std::vector<std::uint64_t> geometry;
         };
 
         struct Label {
             Index dimension = 0;
-            int tag = 0;
+            int value = 0;
             std::vector<std::uint64_t> entities;
         };
 
@@ -115,7 +114,7 @@ namespace idmesh::mpi {
             std::map<std::uint64_t, std::array<double, 3>> geometry_nodes;
             std::vector<Cell> cells;
             std::vector<Label> labels;
-            std::map<std::pair<Index, int>, std::string> physical_names;
+            std::map<std::pair<Index, int>, std::string> label_names;
         };
 
         Shard parse_shard(const std::string& path, int rank, int size)
@@ -125,7 +124,7 @@ namespace idmesh::mpi {
             Shard shard;
             std::string word;
             int version = 0;
-            require(static_cast<bool>(file >> word >> version) && word == "IDMESH_SHARD" && version == 1, "invalid IDMesh shard version");
+            require(static_cast<bool>(file >> word >> version) && word == "IDMESH_SHARD" && version == 2, "invalid IDMesh shard version");
             require(static_cast<bool>(file >> word >> shard.dimension >> shard.geometric_dimension) && word == "DIM" && shard.dimension >= 1 && shard.dimension <= 3 && shard.geometric_dimension >= shard.dimension && shard.geometric_dimension <= 3, "invalid shard dimensions");
             std::size_t count = 0;
             require(static_cast<bool>(file >> word >> count) && word == "VERTICES" && count < invalid_index, "invalid shard VERTICES section");
@@ -155,7 +154,7 @@ namespace idmesh::mpi {
                 Cell cell;
                 unsigned type = 0;
                 std::size_t nodes = 0;
-                require(static_cast<bool>(file >> cell.id >> cell.owner >> type >> cell.primary_tag >> nodes), "invalid shard cell header");
+                require(static_cast<bool>(file >> cell.id >> cell.owner >> type >> nodes), "invalid shard cell header");
                 require(cell.owner >= 0 && cell.owner < size && type >= static_cast<unsigned>(CellType::segment) && type <= static_cast<unsigned>(CellType::pyramid),
                     "invalid shard cell owner or type");
                 cell.type = static_cast<CellType>(type);
@@ -178,21 +177,23 @@ namespace idmesh::mpi {
             for (std::size_t i = 0; i < count; ++i) {
                 Label label;
                 std::size_t n = 0;
-                require(static_cast<bool>(file >> label.dimension >> label.tag >> n) && label.dimension <= shard.dimension && n >= 1 && n <= 4,
-                    "invalid shard physical label header");
+                require(static_cast<bool>(file >> label.dimension >> label.value >> n) && label.dimension <= shard.dimension && n >= 1 && n <= 4,
+                    "invalid shard label header");
                 label.entities.resize(n);
                 for (auto& id : label.entities)
-                    require(static_cast<bool>(file >> id), "truncated shard physical label");
+                    require(static_cast<bool>(file >> id), "truncated shard label");
                 shard.labels.push_back(std::move(label));
             }
             require(static_cast<bool>(file >> word >> count) && word == "NAMES",
                 "missing shard NAMES section");
             for (std::size_t i = 0; i < count; ++i) {
                 Index dimension = 0;
-                int tag = 0;
+                int value = 0;
                 std::string name;
-                require(static_cast<bool>(file >> dimension >> tag >> std::quoted(name)) && dimension <= shard.dimension, "invalid shard physical name");
-                shard.physical_names[{dimension, tag}] = std::move(name);
+                require(static_cast<bool>(file >> dimension >> value >> std::quoted(name))
+                        && dimension <= shard.dimension,
+                    "invalid shard label name");
+                shard.label_names[{dimension, value}] = std::move(name);
             }
             require(static_cast<bool>(file >> word) && word == "END",
                 "missing shard END marker");
@@ -247,19 +248,17 @@ namespace idmesh::mpi {
 
     } // namespace
 
-    PartitionedMesh read_partition_shard(const std::string& path, BuildOptions options)
+    PartitionedMesh read_partition_shard(
+        const Context& context, const std::string& path, BuildOptions options)
     {
-        int initialized = 0, rank = 0, size = 0;
-        mpi_check(MPI_Initialized(&initialized));
-        require(initialized != 0, "initialize MPI before reading partition shards");
-        mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
-        mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &size));
+        const int rank = context.rank(), size = context.size();
+        const MPI_Comm comm = context.data_->comm;
 
         const Shard input = parse_shard(path, rank, size);
         const Index dim = input.dimension;
         Index min_dim = 0, max_dim = 0;
-        mpi_check(MPI_Allreduce(&dim, &min_dim, 1, MPI_UNSIGNED, MPI_MIN, MPI_COMM_WORLD));
-        mpi_check(MPI_Allreduce(&dim, &max_dim, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD));
+        mpi_check(MPI_Allreduce(&dim, &min_dim, 1, MPI_UNSIGNED, MPI_MIN, comm));
+        mpi_check(MPI_Allreduce(&dim, &max_dim, 1, MPI_UNSIGNED, MPI_MAX, comm));
         require(min_dim == max_dim, "shards disagree on topological dimension");
 
         MeshBuilder builder(input.dimension, input.geometric_dimension);
@@ -284,8 +283,8 @@ namespace idmesh::mpi {
                 extras.push_back(it->second);
             }
             const Index local = extras.empty()
-                ? builder.add_cell(cell.type, corners, cell.primary_tag)
-                : builder.add_quadratic_cell(cell.type, corners, extras, cell.primary_tag);
+                ? builder.add_cell(cell.type, corners)
+                : builder.add_quadratic_cell(cell.type, corners, extras);
             require(local == cell_ids.size(), "unexpected shard builder cell ordering");
             cells[cell.id] = local;
             cell_ids.push_back(cell.id);
@@ -294,11 +293,9 @@ namespace idmesh::mpi {
                 ++owned;
         }
         for (const Label& label : input.labels) {
-            if (label.tag == 0)
-                continue;
             if (label.dimension == dim) {
                 require(label.entities.size() == 1 && cells.contains(label.entities[0]), "invalid top-cell label reference");
-                builder.add_cell_physical_tag(cells.at(label.entities[0]), label.tag);
+                builder.add_cell_label(cells.at(label.entities[0]), label.value);
             }
             else {
                 std::vector<Index> corners;
@@ -306,19 +303,19 @@ namespace idmesh::mpi {
                     require(vertices.contains(id), "label refers to missing shard vertex");
                     corners.push_back(vertices.at(id));
                 }
-                builder.add_physical_tag(label.dimension, corners, label.tag);
+                builder.add_label(label.dimension, corners, label.value);
             }
         }
-        for (const auto& [key, name] : input.physical_names)
-            builder.set_physical_name(key.first, key.second, name);
+        for (const auto& [key, name] : input.label_names)
+            builder.set_label_name(key.first, key.second, name);
 
-        PartitionedMesh partition;
-        partition.mesh = std::move(builder).finalize(options);
-        partition.owned_cells = owned;
-        partition.global_ids.resize(dim + 1);
-        partition.owner_ranks.resize(dim + 1);
-        partition.global_ids[dim] = std::move(cell_ids);
-        partition.owner_ranks[dim] = std::move(cell_owners);
+        auto partition = std::make_shared<PartitionedMesh::Data>(
+            std::move(builder).finalize(options));
+        partition->owned_cells = owned;
+        partition->global_ids.resize(dim + 1);
+        partition->owner_ranks.resize(dim + 1);
+        partition->global_ids[dim] = std::move(cell_ids);
+        partition->owner_ranks[dim] = std::move(cell_owners);
 
         std::vector<std::uint64_t> local_to_global_vertex(vertices.size());
         for (const auto& [global, local] : vertices)
@@ -329,14 +326,14 @@ namespace idmesh::mpi {
         // vertices shared by multiple ranks with no common facet ghost.
         std::vector<std::vector<int>> candidate(dim + 1);
         for (Index k = 0; k <= dim; ++k)
-            candidate[k].assign(partition.mesh.entity_count(k), size);
-        candidate[dim] = partition.owner_ranks[dim];
+            candidate[k].assign(partition->mesh.entity_count(k), size);
+        candidate[dim] = partition->owner_ranks[dim];
         for (int from = static_cast<int>(dim); from > 0; --from) {
             for (int to = from - 1; to >= 0; --to) {
-                if (!partition.mesh.has_relation(from, to))
+                if (!partition->mesh.has_relation(from, to))
                     continue;
-                const auto relation = partition.mesh.relation(from, to);
-                for (Index e = 0; e < partition.mesh.entity_count(from); ++e)
+                const auto relation = partition->mesh.relation(from, to);
+                for (Index e = 0; e < partition->mesh.entity_count(from); ++e)
                     for (Index lower : relation[e].targets)
                         candidate[to][lower] = std::min(candidate[to][lower], candidate[from][e]);
             }
@@ -344,10 +341,10 @@ namespace idmesh::mpi {
 
         std::vector<std::vector<RegistryMessage>> requests(size);
         for (Index k = 0; k < dim; ++k) {
-            partition.global_ids[k].resize(partition.mesh.entity_count(k));
-            partition.owner_ranks[k].resize(partition.mesh.entity_count(k));
-            for (Index e = 0; e < partition.mesh.entity_count(k); ++e) {
-                const auto local = partition.mesh.entity_vertices(k, e);
+            partition->global_ids[k].resize(partition->mesh.entity_count(k));
+            partition->owner_ranks[k].resize(partition->mesh.entity_count(k));
+            for (Index e = 0; e < partition->mesh.entity_count(k); ++e) {
+                const auto local = partition->mesh.entity_vertices(k, e);
                 Key key;
                 key.dim = static_cast<std::uint8_t>(k);
                 key.arity = static_cast<std::uint8_t>(local.size());
@@ -361,7 +358,7 @@ namespace idmesh::mpi {
             }
         }
 
-        const auto received = exchange_records(requests);
+        const auto received = exchange_records(comm, requests);
         std::map<Key, std::vector<RegistryMessage>> groups;
         for (const auto& item : received.values)
             groups[item.key].push_back(item);
@@ -373,7 +370,7 @@ namespace idmesh::mpi {
         }
         for (Index k = 1; k < dim; ++k) {
             mpi_check(MPI_Exscan(&local_unique[k], &prefix[k], 1,
-                MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD));
+                MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm));
             if (rank == 0)
                 prefix[k] = 0;
         }
@@ -393,17 +390,17 @@ namespace idmesh::mpi {
                 replies[item.requester].push_back(item);
             }
         }
-        const auto answers = exchange_records(replies);
+        const auto answers = exchange_records(comm, replies);
         std::vector<std::vector<bool>> assigned(dim);
         for (Index k = 0; k < dim; ++k)
-            assigned[k].resize(partition.global_ids[k].size());
+            assigned[k].resize(partition->global_ids[k].size());
         for (const auto& answer : answers.values) {
             const auto k = answer.key.dim;
             const auto e = answer.local_entity;
-            require(k < dim && e < partition.global_ids[k].size() && !assigned[k][e], "duplicate or invalid distributed entity response");
+            require(k < dim && e < partition->global_ids[k].size() && !assigned[k][e], "duplicate or invalid distributed entity response");
             assigned[k][e] = true;
-            partition.global_ids[k][e] = answer.global_id;
-            partition.owner_ranks[k][e] = answer.proposed_owner;
+            partition->global_ids[k][e] = answer.global_id;
+            partition->owner_ranks[k][e] = answer.proposed_owner;
         }
         for (Index k = 0; k < dim; ++k)
             require(std::all_of(assigned[k].begin(), assigned[k].end(),
@@ -412,19 +409,21 @@ namespace idmesh::mpi {
 
         std::map<std::uint64_t, Index> owned_cells;
         for (Index c = 0; c < owned; ++c)
-            require(owned_cells.emplace(partition.global_ids[dim][c], c).second,
+            require(owned_cells.emplace(partition->global_ids[dim][c], c).second,
                 "duplicate owned global cell ID");
         std::vector<std::vector<Request>> ghost_requests(size);
-        for (Index c = owned; c < partition.mesh.entity_count(dim); ++c) {
-            const int owner = partition.owner_ranks[dim][c];
+        for (Index c = owned; c < partition->mesh.entity_count(dim); ++c) {
+            const int owner = partition->owner_ranks[dim][c];
             require(owner != rank, "ghost cell wrongly owned by local rank");
-            ghost_requests[owner].push_back({partition.global_ids[dim][c], c});
+            ghost_requests[owner].push_back({partition->global_ids[dim][c], c});
         }
-        const auto incoming_ghosts = exchange_records(ghost_requests);
+        const auto incoming_ghosts = exchange_records(comm, ghost_requests);
         auto exchange = std::make_shared<ExchangePlan::Data>();
+        exchange->comm = comm;
+        exchange->context_owner = context.data_;
         exchange->send.resize(size);
         exchange->recv.resize(size);
-        exchange->local_cells = partition.mesh.entity_count(dim);
+        exchange->local_cells = partition->mesh.entity_count(dim);
         for (int peer = 0; peer < size; ++peer) {
             for (const auto& request : ghost_requests[peer])
                 exchange->recv[peer].push_back(request.local_ghost);
@@ -437,9 +436,9 @@ namespace idmesh::mpi {
                 exchange->send[peer].push_back(found->second);
             }
         }
-        partition.exchange = ExchangePlan(std::move(exchange));
-        partition.mesh.validate();
-        return partition;
+        partition->exchange = ExchangePlan(std::move(exchange));
+        partition->mesh.validate();
+        return PartitionedMesh(std::move(partition));
     }
 
 } // namespace idmesh::mpi

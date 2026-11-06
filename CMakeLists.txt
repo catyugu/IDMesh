@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.26)
 if(TARGET IDMesh::IDMesh)
     return()
 endif()
-project(IDMesh VERSION 0.1.0 LANGUAGES CXX)
+project(IDMesh VERSION 0.2.0 LANGUAGES CXX)
+set(IDMESH_ABI_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 set(CMAKE_CXX_STANDARD 20)
@@ -28,7 +29,7 @@ target_include_directories(idmesh PUBLIC
 set_target_properties(idmesh PROPERTIES
     EXPORT_NAME IDMesh POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
-    VERSION ${PROJECT_VERSION} SOVERSION 0)
+    VERSION ${PROJECT_VERSION} SOVERSION ${IDMESH_ABI_VERSION})
 if(BUILD_SHARED_LIBS)
     target_compile_definitions(idmesh PRIVATE IDMESH_EXPORTS PUBLIC IDMESH_SHARED)
 endif()
@@ -68,7 +69,10 @@ if(IDMESH_ENABLE_KOKKOS)
     target_include_directories(idmesh_kokkos PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-    set_target_properties(idmesh_kokkos PROPERTIES EXPORT_NAME Kokkos)
+    set_target_properties(idmesh_kokkos PROPERTIES
+        EXPORT_NAME Kokkos
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${IDMESH_ABI_VERSION})
 endif()
 
 if(IDMESH_ENABLE_MPI)
@@ -81,7 +85,10 @@ if(IDMESH_ENABLE_MPI)
     target_include_directories(idmesh_mpi PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-    set_target_properties(idmesh_mpi PROPERTIES EXPORT_NAME MPI)
+    set_target_properties(idmesh_mpi PROPERTIES
+        EXPORT_NAME MPI
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${IDMESH_ABI_VERSION})
 endif()
 
 if(IDMESH_ENABLE_MPI AND IDMESH_ENABLE_KOKKOS)
@@ -95,7 +102,10 @@ if(IDMESH_ENABLE_MPI AND IDMESH_ENABLE_KOKKOS)
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
     target_link_libraries(idmesh_mpi_kokkos PUBLIC idmesh_mpi idmesh_kokkos
         PRIVATE Kokkos::kokkos MPI::MPI_CXX)
-    set_target_properties(idmesh_mpi_kokkos PROPERTIES EXPORT_NAME MPIKokkos)
+    set_target_properties(idmesh_mpi_kokkos PROPERTIES
+            EXPORT_NAME MPIKokkos
+            VERSION ${PROJECT_VERSION}
+            SOVERSION ${IDMESH_ABI_VERSION})
 endif()
 
 if(IDMESH_BUILD_TESTS)

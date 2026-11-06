@@ -213,12 +213,10 @@ namespace idmesh::mpi {
                     j < g.size(); ++j)
                     geometry.insert(g[j]);
             }
-            std::vector<const PhysicalLabel*> labels;
+            std::vector<const Label*> labels;
             std::map<std::pair<Index, int>, std::string> names;
             std::set<Index> local_cells(local.begin(), local.end());
-            for (const auto& label : source.physical_labels()) {
-                if (label.tag == 0)
-                    continue;
+            for (const auto& label : source.labels()) {
                 if (label.dimension == d) {
                     if (label.entity == invalid_index || !local_cells.contains(label.entity))
                         continue;
@@ -231,14 +229,14 @@ namespace idmesh::mpi {
                         continue;
                 }
                 labels.push_back(&label);
-                auto name = source.physical_name(label.dimension, label.tag);
+                auto name = source.label_name(label.dimension, label.value);
                 if (!name.empty())
-                    names[{label.dimension, label.tag}] = std::move(name);
+                    names[{label.dimension, label.value}] = std::string(name);
             }
 
             std::ofstream out(prefix + "." + std::to_string(rank) + ".idm");
             require(static_cast<bool>(out), "cannot create partition shard file");
-            out << "IDMESH_SHARD 1\nDIM " << d << ' ' << source.geometric_dimension() << '\n';
+            out << "IDMESH_SHARD 2\nDIM " << d << ' ' << source.geometric_dimension() << '\n';
             out << std::setprecision(17);
             out << "VERTICES " << corners.size() << '\n';
             for (Index id : corners) {
@@ -253,7 +251,8 @@ namespace idmesh::mpi {
             out << "CELLS " << local.size() << '\n';
             for (Index cell : local) {
                 const auto g = source.cell_geometry_nodes(cell);
-                out << cell << ' ' << owners[cell] << ' ' << static_cast<int>(source.cell_types()[cell]) << ' ' << source.cell_tags()[cell] << ' ' << g.size();
+                out << cell << ' ' << owners[cell] << ' '
+                    << static_cast<int>(source.cell_types()[cell]) << ' ' << g.size();
                 for (Index id : g)
                     out << ' ' << id;
                 out << '\n';
@@ -261,10 +260,10 @@ namespace idmesh::mpi {
             out << "LABELS " << labels.size() << '\n';
             for (const auto* label : labels) {
                 if (label->dimension == d) {
-                    out << d << ' ' << label->tag << " 1 " << label->entity << '\n';
+                    out << d << ' ' << label->value << " 1 " << label->entity << '\n';
                 }
                 else {
-                    out << label->dimension << ' ' << label->tag << ' ' << label->vertices.size();
+                    out << label->dimension << ' ' << label->value << ' ' << label->vertices.size();
                     for (Index vertex : label->vertices)
                         out << ' ' << vertex;
                     out << '\n';

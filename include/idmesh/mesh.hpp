@@ -3,12 +3,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <span>
 #include <string>
-#include <utility>
-#include <vector>
+#include <string_view>
 
 #if defined(_WIN32) && defined(IDMESH_SHARED)
 #if defined(IDMESH_EXPORTS)
@@ -61,16 +59,13 @@ namespace idmesh {
         constexpr int sign() const { return reversed ? -1 : 1; }
     };
 
-    // Physical group membership survives even when its entity dimension is omitted.
-    // An invalid entity ID identifies a vertex-keyed, unmaterialized physical element.
-    struct PhysicalLabel {
+    // Generic integer metadata attached to mesh entities. If a topology layer is
+    // omitted, entity is invalid_index and vertices keep the canonical entity key.
+    struct Label {
         Index dimension = 0;
         Index entity = invalid_index;
-        // Borrowed, immutable vertex sequence. Valid while the owning Mesh lives.
-        // Materialized entities reuse the mesh connectivity; omitted layers use
-        // a compact internal backing array.
         std::span<const Index> vertices;
-        int tag = 0;
+        int value = 0;
     };
 
     struct RelationRow {
@@ -96,7 +91,6 @@ namespace idmesh {
 
     class IDMESH_API Mesh {
     public:
-        Mesh();
         Index dimension() const;
         Index geometric_dimension() const;
         Index entity_count(Index dimension) const;
@@ -106,13 +100,9 @@ namespace idmesh {
         std::span<const Index> entity_vertices(Index dimension, Index id) const;
         std::span<const std::array<double, 3>> coordinates() const;
         std::span<const CellType> cell_types() const;
-        std::span<const int> cell_tags() const;
-        // Sparse optional physical tags, indexed by facet ID; empty if untagged.
-        std::span<const int> facet_tags() const;
-        int facet_tag(Index facet) const;
-        std::span<const PhysicalLabel> physical_labels() const;
-        std::vector<int> physical_tags(Index dimension, Index entity) const;
-        std::string physical_name(Index dimension, int tag) const;
+        std::span<const Label> labels() const;
+        std::span<const Label> labels(Index dimension, Index entity) const;
+        std::string_view label_name(Index dimension, int value) const;
 
         // Geometry node IDs are separate from topological vertex IDs:
         // 0..num_vertices-1 are corners, following IDs are higher-order nodes.
@@ -133,52 +123,38 @@ namespace idmesh {
     class IDMESH_API MeshBuilder {
     public:
         MeshBuilder(Index dimension, Index geometric_dimension);
+        ~MeshBuilder();
+        MeshBuilder(MeshBuilder&&) noexcept;
+        MeshBuilder& operator=(MeshBuilder&&) noexcept;
+        MeshBuilder(const MeshBuilder&) = delete;
+        MeshBuilder& operator=(const MeshBuilder&) = delete;
+
         Index add_vertex(std::array<double, 3> position);
-        Index add_cell(CellType type, std::span<const Index> vertices, int tag = 0);
-        // Returns an index in the *extra* geometry-node pool, not a vertex ID.
+        Index add_cell(CellType type, std::span<const Index> vertices);
+        // Returns an index in the extra geometry-node pool, not a vertex ID.
         Index add_geometry_node(std::array<double, 3> position);
         Index add_quadratic_cell(CellType type, std::span<const Index> vertices,
-            std::span<const Index> extra_nodes, int tag = 0);
-        void add_cell_physical_tag(Index cell, int tag);
-        void add_physical_tag(Index dimension, std::span<const Index> vertices, int tag);
-        void add_facet_tag(std::span<const Index> vertices, int tag);
-        void set_physical_name(Index dimension, int tag, std::string name);
+            std::span<const Index> extra_nodes);
+        void add_cell_label(Index cell, int value);
+        void add_label(Index dimension, std::span<const Index> vertices, int value);
+        void set_label_name(Index dimension, int value, std::string name);
         Mesh finalize(BuildOptions options = {}) &&;
 
     private:
-        Index dimension_;
-        Index geometric_dimension_;
-        std::vector<std::array<double, 3>> coordinates_;
-        std::vector<CellType> types_;
-        std::vector<Index> cell_offsets_;
-        std::vector<Index> cell_vertices_;
-        std::vector<int> tags_;
-        std::vector<std::array<double, 3>> extra_geometry_nodes_;
-        std::vector<Index> cell_extra_offsets_;
-        std::vector<Index> cell_extra_nodes_;
-        std::vector<std::uint8_t> cell_orders_;
-        struct PhysicalAssignment {
-            Index dimension;
-            Index begin;
-            Index end;
-            int tag;
-        };
-        std::vector<Index> physical_assignment_vertices_;
-        std::vector<PhysicalAssignment> physical_assignments_;
-        std::vector<std::pair<Index, int>> cell_physical_tags_;
-        std::map<std::pair<Index, int>, std::string> physical_names_;
+        struct Data;
+        std::unique_ptr<Data> data_;
     };
 
     // Gmsh ASCII MSH 2.2 / 4.1: first- and second-order standard cells,
     // geometry-node connectivity, physical groups and names.
     IDMESH_API Mesh read_gmsh(const std::string& filename, BuildOptions options = {});
     // ASCII legacy VTK UNSTRUCTURED_GRID with standard linear and supported
-    // quadratic cell types; one physical_tag attribute per exported cell.
+    // quadratic cell types; at most one nonzero integer label is exported per cell.
     IDMESH_API Mesh read_vtk_legacy(const std::string& filename,
         BuildOptions options = {});
     IDMESH_API void write_vtk_legacy(const Mesh& mesh, const std::string& filename);
     // ASCII Medit .mesh, linear cells and native Edge/Triangle/Tetra P2;
-    // one integer physical reference per exported cell.
+    // one nonzero integer label/reference per exported entity.
     IDMESH_API Mesh read_medit(const std::string& filename,
         BuildOptions options = {});
     IDMESH_API void write_medit(const Mesh& mesh, const std::string& filename);

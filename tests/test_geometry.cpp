@@ -61,10 +61,10 @@ namespace {
                 p[1] += .24;
             extra.push_back(b.add_geometry_node(p));
         }
-        if (extra.empty())
-            b.add_cell(type, corner, 5);
-        else
-            b.add_quadratic_cell(type, corner, extra, 5);
+        const auto cell = extra.empty()
+            ? b.add_cell(type, corner)
+            : b.add_quadratic_cell(type, corner, extra);
+        b.add_cell_label(cell, 5);
         return std::move(b).finalize();
     }
 

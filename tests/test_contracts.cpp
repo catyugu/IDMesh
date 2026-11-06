@@ -5,8 +5,14 @@
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
+
+static_assert(!std::is_default_constructible_v<idmesh::Mesh>);
+static_assert(std::is_copy_constructible_v<idmesh::Mesh>);
+static_assert(!std::is_copy_constructible_v<idmesh::MeshBuilder>);
+static_assert(std::is_move_constructible_v<idmesh::MeshBuilder>);
 
 namespace {
     using idmesh::Index;
@@ -177,19 +183,6 @@ namespace {
         }
     }
 
-    void default_mesh()
-    {
-        idmesh::Mesh mesh;
-        check(!mesh.has_entities(0), "invalid default mesh");
-        bool rejected = false;
-        try {
-            (void)mesh.coordinates();
-        }
-        catch (const std::logic_error&) {
-            rejected = true;
-        }
-        check(rejected, "default mesh must reject coordinate access");
-    }
 }
 int main()
 {
@@ -198,7 +191,6 @@ int main()
         mixed_hex_prism();
         layer_masks();
         permutation_invariants();
-        default_mesh();
         std::cout << "IDMesh contract tests passed\n";
     }
     catch (const std::exception& e) {

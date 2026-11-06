@@ -1,6 +1,6 @@
 #pragma once
 #include "idmesh/mesh.hpp"
-#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -21,40 +21,49 @@
 #endif
 
 namespace idmesh::kokkos {
-    // A simple device-ready topology traversal. No Kokkos types escape the SDK ABI.
-    IDMESH_KOKKOS_API std::uint64_t incidence_count(const Mesh& mesh, Index from, Index to);
-
-    // Persistent mirror of one materialized topology relation in the default
-    // Kokkos memory space. No Kokkos header or template is exposed in this ABI.
-    // Construct only after Kokkos::initialize(), destroy before finalize().
-    // Persistent mirror of topological cell corners plus all geometry nodes.
-    // Device storage uses SoA coordinates and CSR cell connectivity.
-    // Batched numerical reductions run on the default Kokkos execution space.
+    // Persistent mirrors own memory in Kokkos::DefaultExecutionSpace::memory_space
+    // without exposing Kokkos types in the installed SDK ABI. Returned pointers are
+    // device-space addresses and may only be dereferenced when that memory space is
+    // host-accessible or wrapped by a backend-aware view.
     class IDMESH_KOKKOS_API DeviceMesh {
     public:
         explicit DeviceMesh(const Mesh& mesh);
-        Index cells() const noexcept;
-        Index geometry_nodes() const noexcept;
-        std::array<double, 3> centroid_sum() const;
-        std::uint64_t geometry_connectivity_checksum() const;
+
+        Index dimension() const noexcept;
+        Index geometric_dimension() const noexcept;
+        Index cell_count() const noexcept;
+        Index geometry_node_count() const noexcept;
+        std::size_t cell_vertex_entry_count() const noexcept;
+        std::size_t high_order_geometry_entry_count() const noexcept;
+
+        const CellType* cell_types() const noexcept;
+        const std::uint8_t* cell_orders() const noexcept;
+        const Index* cell_vertex_offsets() const noexcept;
+        const Index* cell_vertices() const noexcept;
+        // Rows are empty for linear cells; order-two rows store the full
+        // geometry-node sequence, including corners.
+        const Index* high_order_geometry_offsets() const noexcept;
+        const Index* high_order_geometry_nodes() const noexcept;
+        const double* geometry_x() const noexcept;
+        const double* geometry_y() const noexcept;
+        const double* geometry_z() const noexcept;
 
     private:
         struct Data;
         std::shared_ptr<Data> data_;
     };
 
-    // Kokkos-owned device field storage. Pointers are device-space addresses:
-    // never dereference them on Host unless that memory space is host accessible.
-    // All fields and kernels require an initialized Kokkos runtime.
-    class IDMESH_KOKKOS_API DeviceCellField {
+    class IDMESH_KOKKOS_API DeviceField {
     public:
-        explicit DeviceCellField(Index cells, Index components = 1);
-        Index cells() const noexcept;
-        Index components() const noexcept;
+        explicit DeviceField(Index entities, Index components = 1);
+
+        Index entity_count() const noexcept;
+        Index component_count() const noexcept;
+        std::size_t size() const noexcept;
         void upload(std::span<const double> values);
         std::vector<double> download() const;
-        void* device_data() noexcept;
-        const void* device_data() const noexcept;
+        double* data() noexcept;
+        const double* data() const noexcept;
 
     private:
         struct Data;
@@ -64,10 +73,14 @@ namespace idmesh::kokkos {
     class IDMESH_KOKKOS_API DeviceRelation {
     public:
         DeviceRelation(const Mesh& mesh, Index from, Index to);
-        Index rows() const noexcept;
-        std::uint64_t incidence_count() const;
-        std::uint64_t weighted_index_sum() const;
-        std::int64_t boundary_coefficient_sum() const;
+
+        Index row_count() const noexcept;
+        std::size_t entry_count() const noexcept;
+        bool oriented() const noexcept;
+        const Index* offsets() const noexcept;
+        const Index* targets() const noexcept;
+        const std::int8_t* coefficients() const noexcept;
+        const Orientation* orientations() const noexcept;
 
     private:
         struct Data;

@@ -15,6 +15,14 @@ namespace {
             throw std::runtime_error(message);
     }
 
+    bool has_label(const idmesh::Mesh& mesh, idmesh::Index dimension,
+        idmesh::Index entity, int value)
+    {
+        const auto labels = mesh.labels(dimension, entity);
+        return std::any_of(labels.begin(), labels.end(),
+            [&](const idmesh::Label& label) { return label.value == value; });
+    }
+
     void test_reference_cells()
     {
         constexpr std::array types {
@@ -29,11 +37,12 @@ namespace {
             std::vector<idmesh::Index> vertices;
             for (unsigned i = 0; i < idmesh::cell_vertex_count(types[k]); ++i)
                 vertices.push_back(builder.add_vertex({double(i), double(i % 3), double(i % 2)}));
-            builder.add_cell(types[k], vertices, 42);
+            const auto cell = builder.add_cell(types[k], vertices);
+            builder.add_cell_label(cell, 42);
             auto mesh = std::move(builder).finalize();
             mesh.validate();
             check(mesh.entity_count(dim) == 1, "missing reference cell");
-            check(mesh.cell_tags().front() == 42, "cell tag lost");
+            check(has_label(mesh, dim, 0, 42), "cell label lost");
             if (dim > 1) {
                 check(mesh.entity_count(dim - 1) == facets[k], "wrong facet count");
                 check(mesh.relation(dim, dim - 1)[0].targets.size() == facets[k], "wrong facet incidence");
@@ -126,7 +135,7 @@ namespace {
         }
         auto mesh = idmesh::read_gmsh(path.string());
         check(mesh.dimension() == 2 && mesh.entity_count(2) == 1, "Gmsh v2 load failed");
-        check(mesh.cell_tags()[0] == 17, "Gmsh v2 tag lost");
+        check(has_label(mesh, 2, 0, 17), "Gmsh v2 label lost");
         std::filesystem::remove(path);
     }
 
@@ -143,7 +152,7 @@ namespace {
         }
         auto mesh = idmesh::read_gmsh(path.string());
         check(mesh.dimension() == 2 && mesh.entity_count(2) == 1, "Gmsh v4 load failed");
-        check(mesh.cell_tags()[0] == 23, "Gmsh v4 physical tag lost");
+        check(has_label(mesh, 2, 0, 23), "Gmsh v4 label lost");
         std::filesystem::remove(path);
     }
 
@@ -164,23 +173,23 @@ namespace {
     }
 }
 
-void test_facet_physical_tags()
+void test_labels()
 {
     idmesh::MeshBuilder builder(2, 2);
     for (const auto& p : std::array<std::array<double, 3>, 3> {{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}})
         builder.add_vertex(p);
     const std::array<idmesh::Index, 3> triangle {0, 1, 2};
     const std::array<idmesh::Index, 2> edge {0, 1};
-    builder.add_cell(idmesh::CellType::triangle, triangle, 41);
-    builder.add_facet_tag(edge, 23);
+    const auto cell = builder.add_cell(idmesh::CellType::triangle, triangle);
+    builder.add_cell_label(cell, 41);
+    builder.add_label(1, edge, 23);
     auto mesh = std::move(builder).finalize();
-    check(mesh.cell_tags()[0] == 41, "cell material tag lost");
-    check(mesh.facet_tags().size() == 3, "facet physical tags not materialized");
+    check(has_label(mesh, 2, 0, 41), "cell label lost");
     bool found = false;
     for (idmesh::Index f = 0; f < mesh.entity_count(1); ++f) {
         if (std::equal(mesh.entity_vertices(1, f).begin(), mesh.entity_vertices(1, f).end(),
                 edge.begin(), edge.end())) {
-            check(mesh.facet_tag(f) == 23, "boundary facet tag lost");
+            check(has_label(mesh, 1, f, 23), "boundary facet label lost");
             found = true;
         }
     }
@@ -199,10 +208,10 @@ void test_gmsh_boundary_v22()
     }
     auto mesh = idmesh::read_gmsh(path.string());
     std::filesystem::remove(path);
-    check(mesh.cell_tags()[0] == 17, "Gmsh 2.2 cell tag lost");
+    check(has_label(mesh, 2, 0, 17), "Gmsh 2.2 cell label lost");
     bool found = false;
     for (idmesh::Index f = 0; f < mesh.entity_count(1); ++f)
-        if (mesh.facet_tag(f) == 29)
+        if (has_label(mesh, 1, f, 29))
             found = true;
     check(found, "Gmsh 2.2 facet physical group lost");
 }
@@ -223,10 +232,10 @@ void test_gmsh_boundary_v41()
     }
     auto mesh = idmesh::read_gmsh(path.string());
     std::filesystem::remove(path);
-    check(mesh.cell_tags()[0] == 21, "Gmsh 4.1 cell physical group lost");
+    check(has_label(mesh, 2, 0, 21), "Gmsh 4.1 cell label lost");
     bool found = false;
     for (idmesh::Index f = 0; f < mesh.entity_count(1); ++f)
-        if (mesh.facet_tag(f) == 33)
+        if (has_label(mesh, 1, f, 33))
             found = true;
     check(found, "Gmsh 4.1 facet physical group lost");
 }
@@ -242,8 +251,8 @@ void test_gmsh_endpoint_v22()
     }
     auto mesh = idmesh::read_gmsh(path.string());
     std::filesystem::remove(path);
-    check(mesh.dimension() == 1 && mesh.cell_tags()[0] == 11, "1D Gmsh cell data");
-    check(mesh.facet_tag(0) == 37, "Gmsh 1D endpoint physical group lost");
+    check(mesh.dimension() == 1 && has_label(mesh, 1, 0, 11), "1D Gmsh cell label");
+    check(has_label(mesh, 0, 0, 37), "Gmsh 1D endpoint label lost");
 }
 
 int main()
@@ -256,7 +265,7 @@ int main()
         test_gmsh();
         test_gmsh_v41();
         test_invalid();
-        test_facet_physical_tags();
+        test_labels();
         test_gmsh_boundary_v22();
         test_gmsh_boundary_v41();
         test_gmsh_endpoint_v22();

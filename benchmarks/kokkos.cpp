@@ -3,6 +3,7 @@
 
 #include <Kokkos_Core.hpp>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -119,14 +120,13 @@ namespace {
 
     void run_case(const Arguments& a, idmesh::BuildOptions options, const char* name)
     {
-        idmesh::Mesh mesh;
-        if (a.gmsh.empty()) {
-            auto builder = idmesh_bench::make_input(a.generated);
-            mesh = std::move(builder).finalize(options);
-        }
-        else {
-            mesh = idmesh::read_gmsh(a.gmsh, options);
-        }
+        const auto mesh = [&] {
+            if (a.gmsh.empty()) {
+                auto builder = idmesh_bench::make_input(a.generated);
+                return std::move(builder).finalize(options);
+            }
+            return idmesh::read_gmsh(a.gmsh, options);
+        }();
         Timing geometry_upload, relation_upload, centroid, incidence, geometry_checksum;
         const auto dim = mesh.dimension();
         const bool has_relation = mesh.has_relation(dim, dim - 1);
@@ -149,8 +149,27 @@ namespace {
 
             start = Clock::now();
             std::array<double, 3> center {};
-            for (unsigned round = 0; round < a.rounds; ++round)
-                center = device->centroid_sum();
+            for (unsigned round = 0; round < a.rounds; ++round) {
+                const auto* offsets = device->cell_vertex_offsets();
+                const auto* vertices = device->cell_vertices();
+                const auto* x = device->geometry_x();
+                const auto* y = device->geometry_y();
+                const auto* z = device->geometry_z();
+                for (int component = 0; component < 3; ++component) {
+                    double sum = 0;
+                    Kokkos::parallel_reduce("idmesh_bench_centroid", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0, device->cell_count()), KOKKOS_LAMBDA(const idmesh::Index cell, double& partial) {
+                                const auto begin = offsets[cell];
+                                const auto end = offsets[cell + 1];
+                                double value = 0;
+                                for (idmesh::Index i = begin; i < end; ++i) {
+                                    const auto vertex = vertices[i];
+                                    value += component == 0 ? x[vertex]
+                                        : component == 1 ? y[vertex] : z[vertex];
+                                }
+                                partial += value / double(end - begin); }, sum);
+                    center[component] = sum;
+                }
+            }
             Kokkos::fence();
             centroid.samples.push_back(elapsed(start));
             const double scalar = center[0] + center[1] + center[2];
@@ -160,8 +179,24 @@ namespace {
 
             start = Clock::now();
             std::uint64_t geometry_value = 0;
-            for (unsigned round = 0; round < a.rounds; ++round)
-                geometry_value = device->geometry_connectivity_checksum();
+            for (unsigned round = 0; round < a.rounds; ++round) {
+                const auto* orders = device->cell_orders();
+                const auto* vertex_offsets = device->cell_vertex_offsets();
+                const auto* vertices = device->cell_vertices();
+                const auto* geometry_offsets = device->high_order_geometry_offsets();
+                const auto* geometry = device->high_order_geometry_nodes();
+                Kokkos::parallel_reduce("idmesh_bench_geometry_ids", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0, device->cell_count()), KOKKOS_LAMBDA(const idmesh::Index cell, std::uint64_t& sum) {
+                            if (orders[cell] == 1) {
+                                for (idmesh::Index i = vertex_offsets[cell];
+                                     i < vertex_offsets[cell + 1]; ++i)
+                                    sum += std::uint64_t(vertices[i]) + 1;
+                            }
+                            else {
+                                for (idmesh::Index i = geometry_offsets[cell];
+                                     i < geometry_offsets[cell + 1]; ++i)
+                                    sum += std::uint64_t(geometry[i]) + 1;
+                            } }, geometry_value);
+            }
             Kokkos::fence();
             geometry_checksum.samples.push_back(elapsed(start));
             if (trial && geometry_value != checked_geometry)
@@ -170,13 +205,16 @@ namespace {
 
             if (has_relation) {
                 start = Clock::now();
-                std::uint64_t count = 0;
-                for (unsigned round = 0; round < a.rounds; ++round)
-                    count = relation->incidence_count();
+                std::uint64_t relation_value = 0;
+                for (unsigned round = 0; round < a.rounds; ++round) {
+                    const auto* targets = relation->targets();
+                    const auto entries = relation->entry_count();
+                    Kokkos::parallel_reduce("idmesh_bench_relation_targets", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>(0, static_cast<idmesh::Index>(entries)), KOKKOS_LAMBDA(const idmesh::Index i, std::uint64_t& sum) { sum += std::uint64_t(targets[i]) + 1; }, relation_value);
+                }
                 Kokkos::fence();
                 incidence.samples.push_back(elapsed(start));
-                if (count != reference)
-                    throw std::runtime_error("device incidence count mismatch");
+                if (relation->entry_count() != reference)
+                    throw std::runtime_error("device relation entry count mismatch");
             }
         }
         emit(a, mesh, name, "device_geometry_upload", geometry_upload, checked_centroid);

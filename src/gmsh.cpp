@@ -299,10 +299,9 @@ namespace idmesh {
             std::vector<Index> vertices;
             for (Index i = 0; i < element.info.corners; ++i)
                 vertices.push_back(corners.at(element.nodes[i]));
-            const int first = element.physical.empty() ? 0 : element.physical.front();
             Index cell = invalid_index;
             if (element.info.nodes == element.info.corners) {
-                cell = builder.add_cell(element.info.type, vertices, first);
+                cell = builder.add_cell(element.info.type, vertices);
             }
             else {
                 std::vector<Index> extras;
@@ -313,10 +312,10 @@ namespace idmesh {
                         found->second = builder.add_geometry_node(nodes.at(tag));
                     extras.push_back(found->second);
                 }
-                cell = builder.add_quadratic_cell(element.info.type, vertices, extras, first);
+                cell = builder.add_quadratic_cell(element.info.type, vertices, extras);
             }
-            for (std::size_t i = 1; i < element.physical.size(); ++i)
-                builder.add_cell_physical_tag(cell, element.physical[i]);
+            for (const int physical : element.physical)
+                builder.add_cell_label(cell, physical);
         }
         for (const auto& element : elements) {
             if (element.info.dimension >= dimension)
@@ -327,11 +326,11 @@ namespace idmesh {
             for (Index i = 0; i < element.info.corners; ++i)
                 vertices.push_back(corners.at(element.nodes[i]));
             for (const int physical : element.physical)
-                builder.add_physical_tag(element.info.dimension, vertices, physical);
+                builder.add_label(element.info.dimension, vertices, physical);
         }
         for (auto& [key, name] : physical_names)
             if (key.first <= dimension)
-                builder.set_physical_name(key.first, key.second, std::move(name));
+                builder.set_label_name(key.first, key.second, std::move(name));
         return std::move(builder).finalize(options);
     }
 

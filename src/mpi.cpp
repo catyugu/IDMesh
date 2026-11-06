@@ -5,6 +5,7 @@
 #include <array>
 #include <climits>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <mpi.h>
 #if defined(OPEN_MPI) && __has_include(<mpi-ext.h>)
@@ -43,21 +44,56 @@ namespace idmesh::mpi {
         }
     } // namespace
 
-    int world_rank()
+    namespace {
+        bool query_direct_device_memory(DeviceMemoryKind memory)
+        {
+            if (memory == DeviceMemoryKind::host)
+                return true;
+#if defined(OMPI_HAVE_MPI_EXT_CUDA) && OMPI_HAVE_MPI_EXT_CUDA
+            if (memory == DeviceMemoryKind::cuda)
+                return MPIX_Query_cuda_support() == 1;
+#endif
+#if defined(OMPI_HAVE_MPI_EXT_ROCM) && OMPI_HAVE_MPI_EXT_ROCM
+            if (memory == DeviceMemoryKind::hip)
+                return MPIX_Query_rocm_support() == 1;
+#endif
+            return false;
+        }
+
+    } // namespace
+
+    Context::Context(std::shared_ptr<Data> data)
+        : data_(std::move(data))
     {
-        ensure_initialized();
-        int rank = 0;
-        check_mpi(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
-        return rank;
-    }
-    int world_size()
-    {
-        ensure_initialized();
-        int size = 0;
-        check_mpi(MPI_Comm_size(MPI_COMM_WORLD, &size));
-        return size;
     }
 
+    Context Context::world()
+    {
+        ensure_initialized();
+        auto data = std::make_shared<Data>();
+        check_mpi(MPI_Comm_dup(MPI_COMM_WORLD, &data->comm));
+        check_mpi(MPI_Comm_rank(data->comm, &data->rank));
+        check_mpi(MPI_Comm_size(data->comm, &data->size));
+        return Context(std::move(data));
+    }
+
+    Context Context::from_fortran_handle(std::int64_t handle)
+    {
+        ensure_initialized();
+        if (handle < std::numeric_limits<MPI_Fint>::min()
+            || handle > std::numeric_limits<MPI_Fint>::max())
+            throw std::out_of_range("MPI Fortran communicator handle");
+        const MPI_Comm source = MPI_Comm_f2c(static_cast<MPI_Fint>(handle));
+        require(source != MPI_COMM_NULL, "MPI communicator is null");
+        auto data = std::make_shared<Data>();
+        check_mpi(MPI_Comm_dup(source, &data->comm));
+        check_mpi(MPI_Comm_rank(data->comm, &data->rank));
+        check_mpi(MPI_Comm_size(data->comm, &data->size));
+        return Context(std::move(data));
+    }
+
+    int Context::rank() const noexcept { return data_->rank; }
+    int Context::size() const noexcept { return data_->size; }
     ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
         : data_(std::move(data))
     {
@@ -74,23 +110,7 @@ namespace idmesh::mpi {
                 return false;
         return true;
     }
-    bool gpu_aware_support(DeviceMemoryKind memory)
-    {
-        ensure_initialized();
-        if (memory == DeviceMemoryKind::Host)
-            return true;
-#if defined(OMPI_HAVE_MPI_EXT_CUDA) && OMPI_HAVE_MPI_EXT_CUDA
-        if (memory == DeviceMemoryKind::CUDA)
-            return MPIX_Query_cuda_support() == 1;
-#endif
-#if defined(OMPI_HAVE_MPI_EXT_ROCM) && OMPI_HAVE_MPI_EXT_ROCM
-        if (memory == DeviceMemoryKind::HIP)
-            return MPIX_Query_rocm_support() == 1;
-#endif
-        return false;
-    }
-
-    int ExchangePlan::peer_count() const noexcept
+    int ExchangePlan::rank_count() const noexcept
     {
         return data_ ? static_cast<int>(data_->send.size()) : 0;
     }
@@ -100,15 +120,20 @@ namespace idmesh::mpi {
     }
     std::span<const Index> ExchangePlan::send_indices(int peer) const
     {
-        if (!data_ || peer < 0 || peer >= peer_count())
+        if (!data_ || peer < 0 || peer >= rank_count())
             throw std::out_of_range("invalid halo send peer");
         return data_->send[peer];
     }
     std::span<const Index> ExchangePlan::receive_indices(int peer) const
     {
-        if (!data_ || peer < 0 || peer >= peer_count())
+        if (!data_ || peer < 0 || peer >= rank_count())
             throw std::out_of_range("invalid halo receive peer");
         return data_->recv[peer];
+    }
+
+    bool ExchangePlan::direct_memory_supported(DeviceMemoryKind memory) const
+    {
+        return data_ != nullptr && query_direct_device_memory(memory);
     }
 
     void ExchangePlan::exchange_packed(
@@ -117,9 +142,9 @@ namespace idmesh::mpi {
     {
         ensure_initialized();
         require(data_ != nullptr && components > 0, "invalid packed halo exchange");
-        if (!gpu_aware_support(memory))
+        if (!direct_memory_supported(memory))
             throw std::runtime_error("MPI is not GPU aware for the requested memory space");
-        const int peers = peer_count();
+        const int peers = rank_count();
         std::vector<int> sc(peers), rc(peers), sd(peers), rd(peers);
         std::size_t send_size = 0, receive_size = 0;
         for (int peer = 0; peer < peers; ++peer) {
@@ -135,10 +160,10 @@ namespace idmesh::mpi {
             receive_size += receiving;
         }
         check_mpi(MPI_Alltoallv(send, sc.data(), sd.data(), MPI_DOUBLE,
-            receive, rc.data(), rd.data(), MPI_DOUBLE, MPI_COMM_WORLD));
+            receive, rc.data(), rd.data(), MPI_DOUBLE, data_->comm));
     }
 
-    void ExchangePlan::exchange_cells(std::span<double> values, Index components) const
+    void ExchangePlan::exchange(std::span<double> values, Index components) const
     {
         ensure_initialized();
         require(data_ != nullptr, "empty exchange plan");
@@ -170,7 +195,7 @@ namespace idmesh::mpi {
         }
         check_mpi(MPI_Alltoallv(sendBuffer.data(), sc.data(), sd.data(), MPI_DOUBLE,
             recvBuffer.data(), rc.data(), rd.data(), MPI_DOUBLE,
-            MPI_COMM_WORLD));
+            data_->comm));
         for (int peer = 0; peer < size; ++peer) {
             std::size_t input = rd[peer];
             for (auto cell : data_->recv[peer]) {
@@ -180,10 +205,38 @@ namespace idmesh::mpi {
         }
     }
 
-    PartitionedMesh partition_replicated(const Mesh& global, Index ghost_layers)
+    PartitionedMesh::PartitionedMesh(std::shared_ptr<Data> data)
+        : data_(std::move(data))
     {
-        ensure_initialized();
-        const int rank = world_rank(), size = world_size();
+    }
+
+    const Mesh& PartitionedMesh::mesh() const noexcept { return data_->mesh; }
+    Index PartitionedMesh::owned_cell_count() const noexcept { return data_->owned_cells; }
+
+    std::span<const std::uint64_t> PartitionedMesh::global_ids(Index dimension) const
+    {
+        if (dimension >= data_->global_ids.size())
+            throw std::out_of_range("global ID dimension");
+        return data_->global_ids[dimension];
+    }
+
+    std::span<const int> PartitionedMesh::owner_ranks(Index dimension) const
+    {
+        if (dimension >= data_->owner_ranks.size())
+            throw std::out_of_range("owner-rank dimension");
+        return data_->owner_ranks[dimension];
+    }
+
+    const ExchangePlan& PartitionedMesh::exchange_plan() const noexcept
+    {
+        return data_->exchange;
+    }
+
+    PartitionedMesh partition_replicated(
+        const Context& context, const Mesh& global, Index ghost_layers)
+    {
+        const int rank = context.rank(), size = context.size();
+        const MPI_Comm comm = context.data_->comm;
         const Index d = global.dimension();
         const Index cells = global.entity_count(d);
         require(cells > 0, "replicated partition source has no cells");
@@ -206,8 +259,8 @@ namespace idmesh::mpi {
                 mix(v);
         }
         unsigned long long local = fingerprint, low = 0, high = 0;
-        check_mpi(MPI_Allreduce(&local, &low, 1, MPI_UNSIGNED_LONG_LONG, MPI_MIN, MPI_COMM_WORLD));
-        check_mpi(MPI_Allreduce(&local, &high, 1, MPI_UNSIGNED_LONG_LONG, MPI_MAX, MPI_COMM_WORLD));
+        check_mpi(MPI_Allreduce(&local, &low, 1, MPI_UNSIGNED_LONG_LONG, MPI_MIN, comm));
+        check_mpi(MPI_Allreduce(&local, &high, 1, MPI_UNSIGNED_LONG_LONG, MPI_MAX, comm));
         require(low == high, "replicated source mesh identities differ across ranks");
 
         const auto owner = [&](Index c) {
@@ -271,18 +324,17 @@ namespace idmesh::mpi {
                     it->second = builder.add_geometry_node(global.geometry_node_position(id));
                 extras.push_back(it->second);
             }
-            const auto tag = global.cell_tags()[global_cell];
             Index local_cell = invalid_index;
             if (global.cell_order(global_cell) == 1)
-                local_cell = builder.add_cell(global.cell_types()[global_cell], vertices, tag);
+                local_cell = builder.add_cell(global.cell_types()[global_cell], vertices);
             else
-                local_cell = builder.add_quadratic_cell(global.cell_types()[global_cell],
-                    vertices, extras, tag);
+                local_cell = builder.add_quadratic_cell(
+                    global.cell_types()[global_cell], vertices, extras);
             local_cells[global_cell] = local_cell;
-            for (int extra_tag : global.physical_tags(d, global_cell))
-                builder.add_cell_physical_tag(local_cell, extra_tag);
+            for (const auto& label : global.labels(d, global_cell))
+                builder.add_cell_label(local_cell, label.value);
         }
-        for (const auto& label : global.physical_labels()) {
+        for (const auto& label : global.labels()) {
             if (label.dimension == d)
                 continue;
             std::vector<Index> vertices;
@@ -293,9 +345,9 @@ namespace idmesh::mpi {
                 vertices.push_back(found->second);
             }
             if (vertices.size() == label.vertices.size())
-                builder.add_physical_tag(label.dimension, vertices, label.tag);
-            if (auto name = global.physical_name(label.dimension, label.tag); !name.empty())
-                builder.set_physical_name(label.dimension, label.tag, std::move(name));
+                builder.add_label(label.dimension, vertices, label.value);
+            if (auto name = global.label_name(label.dimension, label.value); !name.empty())
+                builder.set_label_name(label.dimension, label.value, std::string(name));
         }
         BuildOptions opts;
         opts.relations = RelationDirection::bidirectional;
@@ -305,14 +357,14 @@ namespace idmesh::mpi {
             opts.topology = TopologyLayout::cell_facets;
         else
             opts.topology = TopologyLayout::cell_vertices;
-        PartitionedMesh partition;
-        partition.mesh = std::move(builder).finalize(opts);
-        partition.owned_cells = owned_count;
-        partition.global_ids.resize(d + 1);
-        partition.owner_ranks.resize(d + 1);
-        partition.global_ids[d].assign(order.begin(), order.end());
+        auto partition = std::make_shared<PartitionedMesh::Data>(
+            std::move(builder).finalize(opts));
+        partition->owned_cells = owned_count;
+        partition->global_ids.resize(d + 1);
+        partition->owner_ranks.resize(d + 1);
+        partition->global_ids[d].assign(order.begin(), order.end());
         for (auto id : order)
-            partition.owner_ranks[d].push_back(owner(id));
+            partition->owner_ranks[d].push_back(owner(id));
 
         // Stable dimension-local shared identity from canonical *global* corners.
         // Vertex and cell IDs are the original replicated source indices.
@@ -320,7 +372,7 @@ namespace idmesh::mpi {
         for (Index k = 1; k < d; ++k)
             for (Index e = 0; e < global.entity_count(k); ++e)
                 lookup[k].emplace(canonical_key(global.entity_vertices(k, e)), e);
-        std::vector<Index> reverse_vertices(partition.mesh.entity_count(0));
+        std::vector<Index> reverse_vertices(partition->mesh.entity_count(0));
         for (const auto& [g, l] : local_vertices)
             reverse_vertices[l] = g;
 
@@ -342,24 +394,26 @@ namespace idmesh::mpi {
             }
         }
         for (Index k = 0; k < d; ++k) {
-            for (Index e = 0; e < partition.mesh.entity_count(k); ++e) {
+            for (Index e = 0; e < partition->mesh.entity_count(k); ++e) {
                 Index global_id = invalid_index;
                 if (k == 0)
                     global_id = reverse_vertices[e];
                 else {
                     std::vector<Index> key;
-                    for (auto v : partition.mesh.entity_vertices(k, e))
+                    for (auto v : partition->mesh.entity_vertices(k, e))
                         key.push_back(reverse_vertices[v]);
                     std::sort(key.begin(), key.end());
                     auto it = lookup[k].find(key);
                     require(it != lookup[k].end(), "cross-rank shared entity identity mismatch");
                     global_id = it->second;
                 }
-                partition.global_ids[k].push_back(global_id);
-                partition.owner_ranks[k].push_back(global_owners[k][global_id]);
+                partition->global_ids[k].push_back(global_id);
+                partition->owner_ranks[k].push_back(global_owners[k][global_id]);
             }
         }
         auto exchange = std::make_shared<ExchangePlan::Data>();
+        exchange->comm = comm;
+        exchange->context_owner = context.data_;
         exchange->send.resize(size);
         exchange->recv.resize(size);
         exchange->local_cells = static_cast<Index>(order.size());
@@ -373,8 +427,8 @@ namespace idmesh::mpi {
                 if (owner(id) == peer)
                     exchange->recv[peer].push_back(local_cells.at(id));
         }
-        partition.exchange = ExchangePlan(std::move(exchange));
-        return partition;
+        partition->exchange = ExchangePlan(std::move(exchange));
+        return PartitionedMesh(std::move(partition));
     }
 
 } // namespace idmesh::mpi

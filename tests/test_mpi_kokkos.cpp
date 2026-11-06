@@ -28,20 +28,20 @@ namespace {
     void check_exchange(const idmesh::mpi::PartitionedMesh& partition,
         idmesh::mpi::kokkos::DeviceTransport mode)
     {
-        const auto count = partition.mesh.entity_count(partition.mesh.dimension());
-        idmesh::kokkos::DeviceCellField field(count, 2);
+        const auto count = partition.mesh().entity_count(partition.mesh().dimension());
+        idmesh::kokkos::DeviceField field(count, 2);
         std::vector<double> initial(std::size_t(count) * 2, -19);
-        for (idmesh::Index i = 0; i < partition.owned_cells; ++i) {
-            const auto id = partition.global_ids[partition.mesh.dimension()][i];
+        for (idmesh::Index i = 0; i < partition.owned_cell_count(); ++i) {
+            const auto id = partition.global_ids(partition.mesh().dimension())[i];
             initial[i * 2] = double(2 * id + 1);
             initial[i * 2 + 1] = double(3 * id + 7);
         }
         field.upload(initial);
-        idmesh::mpi::kokkos::DeviceHaloPlan plan(partition.exchange, 2);
+        idmesh::mpi::kokkos::DeviceHaloPlan plan(partition.exchange_plan(), 2);
         plan.exchange(field, mode);
         const auto values = field.download();
         for (idmesh::Index i = 0; i < count; ++i) {
-            const auto id = partition.global_ids[partition.mesh.dimension()][i];
+            const auto id = partition.global_ids(partition.mesh().dimension())[i];
             if (values[i * 2] != double(2 * id + 1) || values[i * 2 + 1] != double(3 * id + 7))
                 throw std::runtime_error("Kokkos device halo exchange mismatch");
         }
@@ -55,22 +55,23 @@ int main(int argc, char** argv)
     Kokkos::initialize(argc, argv);
     int rc = 0;
     try {
+        const auto context = idmesh::mpi::Context::world();
         const auto source = create_source();
-        const auto partition = idmesh::mpi::partition_replicated(source, 1);
-        check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::HostStaging);
-        check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::Automatic);
-        idmesh::mpi::kokkos::DeviceHaloPlan probe(partition.exchange, 2);
-        if (probe.gpu_aware_available()) {
+        const auto partition = idmesh::mpi::partition_replicated(context, source, 1);
+        check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+        check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::automatic);
+        idmesh::mpi::kokkos::DeviceHaloPlan probe(partition.exchange_plan(), 2);
+        if (probe.direct_device_transport_available()) {
             // On a GPU-aware MPI runner this exercises direct device buffers.
-            check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::RequireGpuAware);
+            check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::require_gpu_aware);
         }
         else {
-            idmesh::kokkos::DeviceCellField field(partition.mesh.entity_count(
-                                                      partition.mesh.dimension()),
+            idmesh::kokkos::DeviceField field(partition.mesh().entity_count(
+                                                  partition.mesh().dimension()),
                 2);
             bool rejected = false;
             try {
-                probe.exchange(field, idmesh::mpi::kokkos::DeviceTransport::RequireGpuAware);
+                probe.exchange(field, idmesh::mpi::kokkos::DeviceTransport::require_gpu_aware);
             }
             catch (const std::runtime_error&) {
                 rejected = true;
@@ -78,7 +79,7 @@ int main(int argc, char** argv)
             if (!rejected)
                 throw std::runtime_error("unsupported direct GPU-aware MPI was accepted");
         }
-        if (idmesh::mpi::world_rank() == 0)
+        if (context.rank() == 0)
             std::cout << "MPI+Kokkos: packed device field halo (staging/auto) OK\n";
     }
     catch (const std::exception& e) {

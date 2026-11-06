@@ -60,6 +60,11 @@ namespace idmesh_bench {
         const Index plane = width * width;
         const Index vertex_count = args.dimension == 3 ? plane * width : plane;
         idmesh::MeshBuilder builder(args.dimension, args.dimension);
+        const auto add_cell = [&](idmesh::CellType type, const auto& vertices) {
+            const Index cell = builder.add_cell(type, vertices);
+            if (args.cell_labels)
+                builder.add_cell_label(cell, 1);
+        };
 
         // Scrambling changes both local entity IDs and cell insertion order;
         // it preserves the combinatorial mesh and supports reproducible trials.
@@ -116,14 +121,14 @@ namespace idmesh_bench {
 
             if (args.dimension == 2) {
                 if (split) {
-                    builder.add_cell(idmesh::CellType::triangle,
-                        std::array<Index, 3> {v0, v1, v2}, args.cell_labels ? 1 : 0);
-                    builder.add_cell(idmesh::CellType::triangle,
-                        std::array<Index, 3> {v0, v2, v3}, args.cell_labels ? 1 : 0);
+                    add_cell(idmesh::CellType::triangle,
+                        std::array<Index, 3> {v0, v1, v2});
+                    add_cell(idmesh::CellType::triangle,
+                        std::array<Index, 3> {v0, v2, v3});
                 }
                 else {
-                    builder.add_cell(idmesh::CellType::quadrilateral,
-                        std::array<Index, 4> {v0, v1, v2, v3}, args.cell_labels ? 1 : 0);
+                    add_cell(idmesh::CellType::quadrilateral,
+                        std::array<Index, 4> {v0, v1, v2, v3});
                 }
                 continue;
             }
@@ -137,18 +142,18 @@ namespace idmesh_bench {
                 for (const auto& tet : std::array<std::array<Index, 4>, 6> {{{{v0, v1, v2, v6}}, {{v0, v2, v3, v6}},
                          {{v0, v3, v7, v6}}, {{v0, v7, v4, v6}},
                          {{v0, v4, v5, v6}}, {{v0, v5, v1, v6}}}}) {
-                    builder.add_cell(idmesh::CellType::tetrahedron, tet, args.cell_labels ? 1 : 0);
+                    add_cell(idmesh::CellType::tetrahedron, tet);
                 }
             }
             else if (split) {
-                builder.add_cell(idmesh::CellType::prism,
-                    std::array<Index, 6> {v0, v1, v2, v4, v5, v6}, args.cell_labels ? 1 : 0);
-                builder.add_cell(idmesh::CellType::prism,
-                    std::array<Index, 6> {v0, v2, v3, v4, v6, v7}, args.cell_labels ? 1 : 0);
+                add_cell(idmesh::CellType::prism,
+                    std::array<Index, 6> {v0, v1, v2, v4, v5, v6});
+                add_cell(idmesh::CellType::prism,
+                    std::array<Index, 6> {v0, v2, v3, v4, v6, v7});
             }
             else {
-                builder.add_cell(idmesh::CellType::hexahedron,
-                    std::array<Index, 8> {v0, v1, v2, v3, v4, v5, v6, v7}, args.cell_labels ? 1 : 0);
+                add_cell(idmesh::CellType::hexahedron,
+                    std::array<Index, 8> {v0, v1, v2, v3, v4, v5, v6, v7});
             }
         }
         return builder;
