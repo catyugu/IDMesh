@@ -64,45 +64,68 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+
   linux-backends:
-    name: backend / ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: kokkos-serial
-            build_dir: build-kokkos
-            install_dir: install-kokkos
-            cmake_args: -DIDMESH_ENABLE_KOKKOS=ON
-            needs_mpi: false
-          - name: mpi
-            build_dir: build-mpi
-            install_dir: install-mpi
-            cmake_args: -DIDMESH_ENABLE_MPI=ON
-            needs_mpi: true
-          - name: mpi-kokkos-serial
-            build_dir: build-joint
-            install_dir: install-joint
-            cmake_args: -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
-            needs_mpi: true
+    name: backend / kokkos-serial
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install OpenMPI
-        if: matrix.needs_mpi
-        run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
       - name: Configure
-        run: cmake -S . -B ${{ matrix.build_dir }} -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON ${{ matrix.cmake_args }}
+        run: cmake -S . -B build-kokkos -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_ENABLE_KOKKOS=ON
       - name: Build
-        run: cmake --build ${{ matrix.build_dir }} --parallel 2
+        run: cmake --build build-kokkos --parallel 2
       - name: Test
-        env:
-          OMPI_MCA_rmaps_base_oversubscribe: "1"
-        run: ctest --test-dir ${{ matrix.build_dir }} --output-on-failure
+        run: ctest --test-dir build-kokkos --output-on-failure
       - name: Install SDK
-        run: cmake --install ${{ matrix.build_dir }} --prefix ${{ matrix.install_dir }}
+        run: cmake --install build-kokkos --prefix install-kokkos
       - name: Verify external consumer
-        run: cmake -S tests/consumer -B consumer-${{ matrix.name }} -DCMAKE_PREFIX_PATH=$PWD/${{ matrix.install_dir }} && cmake --build consumer-${{ matrix.name }} --parallel 2
+        run: cmake -S tests/consumer -B consumer-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-kokkos" && cmake --build consumer-kokkos --parallel 2
+
+  mpi-backends:
+    name: backend / MPI-only + MPI-Kokkos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    # Prebuilt by mpi-image.yml; no apt operations in ordinary CI runs.
+    # Update this digest after intentionally rebuilding the image.
+    container:
+      image: ghcr.io/catyugu/idmesh-ci-mpi@sha256:8b7239500b857f196f6a40e51841f461dd14c76fffffbe3c447d173e52eecdc9
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      OMPI_MCA_rmaps_base_oversubscribe: "1"
+      OMPI_ALLOW_RUN_AS_ROOT: "1"
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check MPI toolchain
+        run: cmake --version && mpicxx --version && mpirun --version
+
+      - name: Configure MPI-only
+        run: cmake -S . -B build-mpi -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_ENABLE_MPI=ON
+      - name: Build MPI-only
+        run: cmake --build build-mpi --parallel 2
+      - name: Test MPI-only
+        run: ctest --test-dir build-mpi --output-on-failure
+      - name: Install and verify MPI-only SDK
+        run: |
+          cmake --install build-mpi --prefix install-mpi
+          cmake -S tests/consumer -B consumer-mpi -DCMAKE_PREFIX_PATH="$PWD/install-mpi"
+          cmake --build consumer-mpi --parallel 2
+
+      - name: Configure MPI + Kokkos (Serial)
+        run: cmake -S . -B build-mpi-kokkos -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
+      - name: Build MPI + Kokkos
+        run: cmake --build build-mpi-kokkos --parallel 2
+      - name: Test MPI + Kokkos
+        run: ctest --test-dir build-mpi-kokkos --output-on-failure
+      - name: Install and verify MPI + Kokkos SDK
+        run: |
+          cmake --install build-mpi-kokkos --prefix install-mpi-kokkos
+          cmake -S tests/consumer -B consumer-mpi-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-mpi-kokkos"
+          cmake --build consumer-mpi-kokkos --parallel 2
 
   examples:
     name: examples / basix

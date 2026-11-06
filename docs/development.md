@@ -30,6 +30,26 @@ names remain stable. Test and example executables stage their required
 runtime DLLs on Windows because they now build in subdirectories.
 
 
+## MPI CI environment
+
+The MPI-only and MPI+Kokkos build/test/install/consumer checks run sequentially
+inside a single GitHub Actions job. The job uses a GHCR image containing the
+Ubuntu 24.04 C++ toolchain and OpenMPI, pinned by digest in
+`.github/workflows/ci.yml`. Ordinary CI never runs `apt-get` to install MPI.
+
+The build definition lives at `.github/docker/mpi/Dockerfile`.
+Editing it or `.github/workflows/mpi-image.yml` triggers a separate image
+publishing workflow; it can also be started manually. After an intentional
+image rebuild, copy the resulting `sha256:` digest from the publishing run
+summary into the CI job's container image reference, then verify both MPI
+build configurations. The publish workflow needs `packages: write`, while
+the consumer job only needs `packages: read`.
+
+The container is CI-only. Local SDK builds and installed-package consumers
+use native MPI via `find_package(MPI)` and do not require Docker.
+
+
+
 ## Formatting
 
 The checked-in `.clang-format` uses **clang-format 19.1.7**.
