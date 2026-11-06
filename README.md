@@ -16,7 +16,9 @@ labels and `facet_tag(f)` returns the codimension-one physical label (or zero).
 Gmsh 2.2 and 4.1 ASCII line/face boundary elements are matched to mesh facets;
 Gmsh 1D point elements are matched to endpoints. When a reduced topology configuration omits a dimension, its physical labels
 remain available through `physical_labels()` with a vertex key and an
-unmaterialized entity ID.
+unmaterialized entity ID. Label vertex sequences are borrowed, read-only spans
+valid while their owning `Mesh` exists; materialized labels reuse packed
+connectivity instead of duplicating per-label vertex vectors.
 
 Enable the optional Kokkos CPU adapter using `-DIDMESH_ENABLE_KOKKOS=ON`. Core public headers require no third-party dependencies.
 

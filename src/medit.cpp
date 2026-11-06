@@ -238,7 +238,8 @@ namespace idmesh {
             CellType type = CellType::segment;
             if (label.dimension == 2)
                 type = label.vertices.size() == 3 ? CellType::triangle : CellType::quadrilateral;
-            cells.push_back({type, label.vertices, label.tag});
+            cells.push_back({type,
+                std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.tag});
         }
         const Index embedding = std::max<Index>(2, mesh.geometric_dimension());
         std::ofstream out(filename);

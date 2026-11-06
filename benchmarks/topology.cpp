@@ -222,7 +222,8 @@ namespace {
         const auto labels = mesh.physical_labels();
         bytes += labels.size_bytes();
         for (const auto& label : labels)
-            bytes += label.vertices.size() * sizeof(Index);
+            if (label.entity == idmesh::invalid_index)
+                bytes += label.vertices.size_bytes();
 
         const auto extra_nodes = mesh.geometry_node_count() - mesh.coordinates().size();
         bytes += static_cast<std::size_t>(extra_nodes) * sizeof(std::array<double, 3>);

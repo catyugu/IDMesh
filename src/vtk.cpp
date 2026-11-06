@@ -324,7 +324,8 @@ namespace idmesh {
                 code = label.vertices.size() == 3 ? 5 : 9;
             else
                 throw std::runtime_error("unsupported physical dimension");
-            cells.push_back({code, label.vertices, label.tag});
+            cells.push_back({code,
+                std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.tag});
         }
         std::ofstream out(filename);
         require(bool(out), "cannot open VTK output");

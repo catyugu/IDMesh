@@ -234,6 +234,7 @@ namespace idmesh {
         std::vector<int> tags;
         std::vector<int> facet_tags;
         std::vector<PhysicalLabel> physical_labels;
+        std::vector<Index> unbound_label_vertices;
         std::map<std::pair<Index, int>, std::string> physical_names;
         std::vector<std::array<double, 3>> extra_geometry_nodes;
         std::vector<Index> geometry_offsets;
@@ -747,14 +748,19 @@ namespace idmesh {
             }
         }
 
-        // Sparse physical group membership is independent of optional topology
-        // materialization. Labels for an omitted dimension retain their vertex key
-        // with an invalid entity index.
+        // Resolve and deduplicate labels before replacing their temporary owned
+        // vertex keys with borrowed spans into the compact finalized mesh.
+        struct PendingPhysicalLabel {
+            Index dimension;
+            Index entity;
+            std::vector<Index> vertices;
+            int tag;
+        };
+        std::vector<PendingPhysicalLabel> labels;
         auto append_label = [&](Index dim, Index entity, std::span<const Index> vertices, int tag) {
             if (tag == 0)
                 return;
-            data->physical_labels.push_back({dim, entity,
-                std::vector<Index>(vertices.begin(), vertices.end()), tag});
+            labels.push_back({dim, entity, std::vector<Index>(vertices.begin(), vertices.end()), tag});
         };
         for (Index cell = 0; cell < data->types.size(); ++cell)
             append_label(dimension_, cell, data->vertices[dimension_][cell], data->tags[cell]);
@@ -785,13 +791,14 @@ namespace idmesh {
 
         // Build-time sort/unique is O(L log L) rather than repeated O(L) label
         // lookups, where L can scale with the number of mesh cells.
-        auto& labels = data->physical_labels;
-        std::sort(labels.begin(), labels.end(), [](const PhysicalLabel& a, const PhysicalLabel& b) {
-            return std::tie(a.dimension, a.entity, a.tag, a.vertices) < std::tie(b.dimension, b.entity, b.tag, b.vertices);
+        std::sort(labels.begin(), labels.end(), [](const PendingPhysicalLabel& a, const PendingPhysicalLabel& b) {
+            return std::tie(a.dimension, a.entity, a.tag, a.vertices)
+                < std::tie(b.dimension, b.entity, b.tag, b.vertices);
         });
         labels.erase(std::unique(labels.begin(), labels.end(),
-                         [](const PhysicalLabel& a, const PhysicalLabel& b) {
-                             return a.dimension == b.dimension && a.entity == b.entity && a.tag == b.tag && a.vertices == b.vertices;
+                         [](const PendingPhysicalLabel& a, const PendingPhysicalLabel& b) {
+                             return a.dimension == b.dimension && a.entity == b.entity
+                                 && a.tag == b.tag && a.vertices == b.vertices;
                          }),
             labels.end());
         for (Index from = 1; from <= dimension_; ++from) {
@@ -837,6 +844,30 @@ namespace idmesh {
             }
             std::vector<Loop>().swap(data->vertices[dim]);
         }
+        // Materialized entities borrow their already-packed connectivity.
+        // Only labels on absent topology layers keep private vertex keys.
+        std::size_t unbound_entries = 0;
+        for (const auto& label : labels)
+            if (label.entity == invalid_index)
+                unbound_entries += label.vertices.size();
+        data->unbound_label_vertices.reserve(unbound_entries);
+        data->physical_labels.reserve(labels.size());
+        for (const auto& label : labels) {
+            std::span<const Index> vertices;
+            if (label.entity != invalid_index) {
+                const auto& offsets = data->vertex_offsets[label.dimension];
+                const auto& indices = data->vertex_indices[label.dimension];
+                const auto begin = offsets[label.entity];
+                vertices = {indices.data() + begin, offsets[label.entity + 1] - begin};
+            }
+            else {
+                const auto begin = data->unbound_label_vertices.size();
+                data->unbound_label_vertices.insert(data->unbound_label_vertices.end(),
+                    label.vertices.begin(), label.vertices.end());
+                vertices = {data->unbound_label_vertices.data() + begin, label.vertices.size()};
+            }
+            data->physical_labels.push_back({label.dimension, label.entity, vertices, label.tag});
+        }
         Mesh mesh(std::move(data));
         mesh.validate();
         return mesh;
@@ -866,9 +897,16 @@ namespace idmesh {
         for (Index node : data_->geometry_indices)
             if (node >= geometry_node_count())
                 throw std::logic_error("invalid geometry node ID");
-        for (const auto& label : data_->physical_labels)
-            if (label.dimension > data_->dimension || (label.entity != invalid_index && label.entity >= data_->counts[label.dimension]))
+        for (const auto& label : data_->physical_labels) {
+            if (label.dimension > data_->dimension
+                || (label.entity != invalid_index && label.entity >= data_->counts[label.dimension]))
                 throw std::logic_error("invalid physical label entity");
+            if (label.entity != invalid_index) {
+                const auto key = entity_vertices(label.dimension, label.entity);
+                if (!std::equal(key.begin(), key.end(), label.vertices.begin(), label.vertices.end()))
+                    throw std::logic_error("physical label connectivity mismatch");
+            }
+        }
         for (Index from = 1; from <= data_->dimension; ++from) {
             for (Index to = 0; to < from; ++to) {
                 if (!has_relation(from, to))

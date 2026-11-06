@@ -67,7 +67,10 @@ namespace idmesh {
     struct PhysicalLabel {
         Index dimension = 0;
         Index entity = invalid_index;
-        std::vector<Index> vertices;
+        // Borrowed, immutable vertex sequence. Valid while the owning Mesh lives.
+        // Materialized entities reuse the mesh connectivity; omitted layers use
+        // a compact internal backing array.
+        std::span<const Index> vertices;
         int tag = 0;
     };
 

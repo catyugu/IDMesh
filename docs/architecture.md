@@ -46,7 +46,11 @@ belong to multiple groups. `Mesh::physical_tags(d, id)` returns all memberships
 for an existing entity; `Mesh::physical_labels()` enumerates the complete
 record set. Gmsh 4.1 entity multi-membership and `$PhysicalNames` are preserved.
 `cell_tags()` and `facet_tag()` remain compatibility accessors for the first
-physical tag only.
+physical tag only. `PhysicalLabel::vertices` is a borrowed read-only span whose
+lifetime is tied to its owning `Mesh`. Labels attached to materialized entities
+reuse the packed entity-to-vertex connectivity, while labels on omitted layers
+borrow from a compact, private key buffer; copies of `Mesh` share the backing
+storage. Do not retain a copied `PhysicalLabel` beyond the lifetime of its Mesh.
 
 ## Second-order geometry
 

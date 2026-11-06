@@ -208,6 +208,45 @@ void mixed_geometry_orders()
     check(mesh.cell_order(0) == 1 && mesh.cell_order(1) == 2, "mixed geometry orders");
     check(mesh.cell_geometry_nodes(0).size() == 3 && mesh.cell_geometry_nodes(1).size() == 6, "mixed local geometry nodes");
 }
+
+void omitted_layer_labels()
+{
+    auto make = [] {
+        idmesh::MeshBuilder builder(2, 2);
+        builder.add_vertex({0, 0, 0});
+        builder.add_vertex({1, 0, 0});
+        builder.add_vertex({0, 1, 0});
+        const std::array<Index, 3> triangle {0, 1, 2};
+        const std::array<Index, 2> edge {0, 1};
+        builder.add_cell(idmesh::CellType::triangle, triangle, 21);
+        builder.add_physical_tag(1, edge, 42);
+        builder.add_physical_tag(1, edge, 43);
+        return std::move(builder).finalize(idmesh::TopologyOptions::cells_and_vertices());
+    };
+    // Labels are borrowed from the Mesh: copying the Mesh must preserve
+    // storage ownership, including keys on omitted dimensions.
+    const auto mesh = make();
+    const auto shared = mesh;
+    check(shared.physical_labels().size() == 3, "omitted label multiplicity");
+    for (const auto& label : shared.physical_labels()) {
+        if (label.dimension == 1) {
+            check(label.entity == idmesh::invalid_index, "omitted edge materialized");
+            check(label.vertices.size() == 2 && label.vertices[0] == 0
+                    && label.vertices[1] == 1,
+                "omitted label vertex key changed");
+        }
+        else {
+            check(label.dimension == 2 && label.entity == 0,
+                "top-dimensional label lost");
+            const auto actual = shared.entity_vertices(2, 0);
+            check(std::equal(actual.begin(), actual.end(),
+                      label.vertices.begin(), label.vertices.end()),
+                "top-dimensional label vertex key changed");
+        }
+    }
+    shared.validate();
+}
+
 void many_labels()
 {
     idmesh::MeshBuilder builder(1, 1);
@@ -225,6 +264,11 @@ void many_labels()
     const auto mesh = std::move(builder).finalize(idmesh::TopologyOptions::cells_and_vertices());
     check(mesh.physical_labels().size() == n + (n + 10) / 11,
         "physical group deduplication or entity count");
+    for (const auto& label : mesh.physical_labels()) {
+        const auto key = mesh.entity_vertices(label.dimension, label.entity);
+        check(std::equal(key.begin(), key.end(), label.vertices.begin(), label.vertices.end()),
+            "materialized physical label did not reuse entity connectivity");
+    }
     for (Index c = 0; c < n; ++c) {
         auto tags = mesh.physical_tags(1, c);
         check(tags.size() == (c % 11 == 0 ? 2u : 1u), "physical membership count");
@@ -244,6 +288,7 @@ int main()
         medit_round_trip();
         mixed_geometry_orders();
         many_labels();
+        omitted_layer_labels();
         std::cout << "IDMesh high-order/IO tests passed\n";
         return 0;
     }
