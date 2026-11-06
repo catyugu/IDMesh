@@ -42,8 +42,9 @@ namespace idmesh::kokkos {
             off(row) = r.offsets.empty() ? row * r.stride : r.offsets[row];
         for (std::size_t i = 0; i < r.indices.size(); ++i) {
             idx(i) = r.indices[i];
-            sign(i) = r.signs[i];
         }
+        for (std::size_t i = 0; i < r.signs.size(); ++i)
+            sign(i) = r.signs[i];
         Kokkos::deep_copy(data_->offsets, off);
         Kokkos::deep_copy(data_->indices, idx);
         Kokkos::deep_copy(data_->signs, sign);

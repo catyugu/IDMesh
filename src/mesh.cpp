@@ -123,7 +123,7 @@ namespace idmesh {
 
         using PendingRelation = std::vector<PendingIncidence>;
 
-        RelationData allocate_relation(std::span<const Index> counts)
+        RelationData allocate_relation(std::span<const Index> counts, bool oriented)
         {
             require(counts.size() < invalid_index, "too many relation rows");
             RelationData result;
@@ -146,8 +146,10 @@ namespace idmesh {
                     result.offsets[row + 1] = result.offsets[row] + counts[row];
             }
             result.indices.resize(total);
-            result.signs.resize(total);
-            result.orientations.resize(total);
+            if (oriented) {
+                result.signs.resize(total);
+                result.orientations.resize(total);
+            }
             return result;
         }
 
@@ -164,7 +166,7 @@ namespace idmesh {
             return positions;
         }
 
-        RelationData compress(const PendingRelation& entries, Index row_count)
+        RelationData compress(const PendingRelation& entries, Index row_count, bool oriented)
         {
             std::vector<Index> counts(row_count, 0);
             for (const auto& pending : entries) {
@@ -172,13 +174,15 @@ namespace idmesh {
                 require(counts[pending.row] < invalid_index, "relation row overflow");
                 ++counts[pending.row];
             }
-            auto result = allocate_relation(counts);
+            auto result = allocate_relation(counts, oriented);
             auto positions = write_positions(result);
             for (const auto& pending : entries) {
                 const Index slot = positions[pending.row]++;
                 result.indices[slot] = pending.entry.entity;
-                result.signs[slot] = pending.entry.sign;
-                result.orientations[slot] = pending.entry.orientation;
+                if (oriented) {
+                    result.signs[slot] = pending.entry.sign;
+                    result.orientations[slot] = pending.entry.orientation;
+                }
             }
             return result;
         }
@@ -193,7 +197,8 @@ namespace idmesh {
                 require(counts[target] < invalid_index, "transposed relation row overflow");
                 ++counts[target];
             }
-            auto result = allocate_relation(counts);
+            const bool oriented = !forward.signs.empty();
+            auto result = allocate_relation(counts, oriented);
             auto positions = write_positions(result);
             const auto view = forward.view();
             for (Index row = 0; row < forward.rows; ++row) {
@@ -203,8 +208,10 @@ namespace idmesh {
                 for (std::size_t i = 0; i < targets.size(); ++i) {
                     const Index slot = positions[targets[i]]++;
                     result.indices[slot] = row;
-                    result.signs[slot] = signs[i];
-                    result.orientations[slot] = orientations[i];
+                    if (oriented) {
+                        result.signs[slot] = signs[i];
+                        result.orientations[slot] = orientations[i];
+                    }
                 }
             }
             return result;
@@ -337,6 +344,8 @@ namespace idmesh {
     {
         if (index >= rows)
             throw std::out_of_range("relation row");
+        if (signs.empty())
+            return {};
         auto begin = offsets.empty() ? static_cast<std::size_t>(index) * stride : offsets[index];
         auto end = offsets.empty() ? begin + stride : offsets[index + 1];
         return signs.subspan(begin, end - begin);
@@ -346,6 +355,8 @@ namespace idmesh {
     {
         if (index >= rows)
             throw std::out_of_range("relation row");
+        if (orientations.empty())
+            return {};
         auto begin = offsets.empty() ? static_cast<std::size_t>(index) * stride : offsets[index];
         auto end = offsets.empty() ? begin + stride : offsets[index + 1];
         return orientations.subspan(begin, end - begin);
@@ -788,7 +799,10 @@ namespace idmesh {
                 const auto& entries = incidence[from][to];
                 if (entries.empty())
                     continue;
-                auto relation = compress(entries, static_cast<Index>(data->vertices[from].size()));
+                // Only consecutive dimensions form oriented boundary operators.
+                // Direct geometric connectivity omits redundant sign/permutation arrays.
+                const bool oriented = from == to + 1;
+                auto relation = compress(entries, static_cast<Index>(data->vertices[from].size()), oriented);
                 if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1)) {
                     const auto targets = to == 0
                         ? data->coordinates.size()
@@ -862,8 +876,10 @@ namespace idmesh {
                 auto relation = this->relation(from, to);
                 if (relation.rows != entity_count(from))
                     throw std::logic_error("relation row count");
-                if (relation.signs.size() != relation.indices.size()
-                    || relation.orientations.size() != relation.indices.size())
+                const bool oriented = from == to + 1;
+                const auto payload = relation.indices.size();
+                if ((oriented && (relation.signs.size() != payload || relation.orientations.size() != payload))
+                    || (!oriented && (!relation.signs.empty() || !relation.orientations.empty())))
                     throw std::logic_error("relation metadata size mismatch");
                 if (relation.offsets.empty()) {
                     if (static_cast<std::size_t>(relation.rows) * relation.stride != relation.indices.size())

@@ -129,6 +129,21 @@ namespace {
             check(full.has_relation(3, 2) && full.has_relation(2, 1) && full.has_relation(1, 0),
                 "missing complete chain");
             check(!full.has_relation(3, 1), "unexpected skipped relation");
+            for (const auto [from, to] : std::array<std::pair<Index, Index>, 2> {{{3, 0}, {2, 0}}}) {
+                const auto direct = full.relation(from, to);
+                check(!direct.indices.empty(), "missing direct geometric connectivity");
+                check(direct.signs.empty() && direct.orientations.empty(),
+                    "redundant metadata in geometric connectivity");
+                check(direct.row_signs(0).empty() && direct.row_orientations(0).empty(),
+                    "signless relation row should have no metadata");
+            }
+            const auto facet_support = full.relation(0, 2);
+            check(facet_support.signs.empty() && facet_support.orientations.empty(),
+                "redundant metadata in transposed geometric connectivity");
+            const auto boundary = full.relation(3, 2);
+            check(boundary.signs.size() == boundary.indices.size()
+                    && boundary.orientations.size() == boundary.indices.size(),
+                "oriented boundary metadata missing");
             auto fv = build(idmesh::TopologyOptions::finite_volume());
             check(fv.has_entities(2) && !fv.has_entities(1), "finite volume entity mask");
             check(fv.has_relation(3, 2) && fv.has_relation(2, 0), "finite volume connections");
