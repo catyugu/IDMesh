@@ -30,9 +30,13 @@ jobs:
         run: cmake --build build --config Release --parallel 2
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
-      - name: Benchmark smoke
+      - name: Benchmark smoke (2D and 3D)
         if: runner.os == 'Linux'
-        run: ./build/idmesh_benchmark 8 2
+        run: |
+          ./build/idmesh_benchmark 8 2 --trials 2
+          ./build/idmesh_benchmark 3 2 --dim 3 --shape simplex --trials 2
+          ./build/idmesh_benchmark 3 2 --dim 3 --shape tensor --trials 2
+          ./build/idmesh_benchmark 3 2 --dim 3 --shape mixed --trials 2
       - name: Install
         run: cmake --install build --config Release --prefix install
       - name: Installed package consumer
