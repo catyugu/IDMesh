@@ -789,7 +789,8 @@ namespace idmesh {
                 auto relation = compress(entries, static_cast<Index>(data->vertices[from].size()));
                 if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1)) {
                     const auto targets = to == 0
-                        ? data->coordinates.size() : data->vertices[to].size();
+                        ? data->coordinates.size()
+                        : data->vertices[to].size();
                     data->relations[to][from] = transpose(relation, static_cast<Index>(targets));
                 }
                 data->relations[from][to] = std::move(relation);
