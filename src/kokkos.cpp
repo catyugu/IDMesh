@@ -208,7 +208,7 @@ namespace idmesh::kokkos {
     {
         check_runtime();
         ::idmesh::detail::require_argument(components != 0
-            && static_cast<std::uint64_t>(entities) * components <= invalid_index,
+                && static_cast<std::uint64_t>(entities) * components <= invalid_index,
             "invalid device field shape");
         data_->entities = entities;
         data_->components = components;

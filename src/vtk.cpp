@@ -1,5 +1,5 @@
-#include "idmesh/mesh.hpp"
 #include "contracts.hpp"
+#include "idmesh/mesh.hpp"
 #include "second_order.hpp"
 
 #include <algorithm>

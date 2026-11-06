@@ -1,5 +1,5 @@
-#include "idmesh/mpi.hpp"
 #include "contracts.hpp"
+#include "idmesh/mpi.hpp"
 
 #include <algorithm>
 #include <array>
@@ -20,7 +20,6 @@
 
 namespace idmesh::mpi {
     namespace {
-
 
         std::vector<std::vector<Index>> dual_graph(const Mesh& mesh)
         {

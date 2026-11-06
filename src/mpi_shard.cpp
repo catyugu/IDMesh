@@ -1,7 +1,7 @@
-#include "idmesh/mpi.hpp"
-#include "mpi_internal.hpp"
 #include "contracts.hpp"
+#include "idmesh/mpi.hpp"
 #include "mpi_errors.hpp"
+#include "mpi_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,7 +25,6 @@
 
 namespace idmesh::mpi {
     namespace {
-
 
         struct ReceivedBytes {
             std::vector<int> counts;
@@ -54,7 +53,8 @@ namespace idmesh::mpi {
                 sc[peer] = static_cast<int>(sends[peer].size() * sizeof(T));
             }
             ::idmesh::mpi::detail::check_mpi(MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT,
-                comm), "MPI_Alltoall");
+                                                 comm),
+                "MPI_Alltoall");
             std::size_t ns = 0, nr = 0;
             for (int peer = 0; peer < size; ++peer) {
                 ::idmesh::detail::require_argument(rc[peer] >= 0 && rc[peer] % sizeof(T) == 0,
@@ -73,7 +73,8 @@ namespace idmesh::mpi {
                 write += bucket.size();
             }
             ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(send_data.data(), sc.data(), sd.data(), MPI_BYTE,
-                recv_data.data(), rc.data(), rd.data(), MPI_BYTE, comm), "MPI_Alltoallv");
+                                                 recv_data.data(), rc.data(), rd.data(), MPI_BYTE, comm),
+                "MPI_Alltoallv");
             Received<T> result;
             result.values = std::move(recv_data);
             result.counts.resize(size);
@@ -361,7 +362,8 @@ namespace idmesh::mpi {
         }
         for (Index k = 1; k < dim; ++k) {
             ::idmesh::mpi::detail::check_mpi(MPI_Exscan(&local_unique[k], &prefix[k], 1,
-                MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm), "MPI_Exscan");
+                                                 MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm),
+                "MPI_Exscan");
             if (rank == 0)
                 prefix[k] = 0;
         }
@@ -395,7 +397,7 @@ namespace idmesh::mpi {
         }
         for (Index k = 0; k < dim; ++k)
             ::idmesh::detail::require_argument(std::all_of(assigned[k].begin(), assigned[k].end(),
-                        [](bool value) { return value; }),
+                                                   [](bool value) { return value; }),
                 "missing distributed entity response");
 
         std::map<std::uint64_t, Index> owned_cells;

@@ -1,7 +1,7 @@
 #include "idmesh/mpi.hpp"
-#include "mpi_internal.hpp"
 #include "contracts.hpp"
 #include "mpi_errors.hpp"
+#include "mpi_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -156,7 +156,8 @@ namespace idmesh::mpi {
             receive_size += receiving;
         }
         ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(send, sc.data(), sd.data(), MPI_DOUBLE,
-            receive, rc.data(), rd.data(), MPI_DOUBLE, data_->comm), "MPI_Alltoallv");
+                                             receive, rc.data(), rd.data(), MPI_DOUBLE, data_->comm),
+            "MPI_Alltoallv");
     }
 
     void ExchangePlan::exchange(std::span<double> values, Index components) const
@@ -190,8 +191,9 @@ namespace idmesh::mpi {
             }
         }
         ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(sendBuffer.data(), sc.data(), sd.data(), MPI_DOUBLE,
-            recvBuffer.data(), rc.data(), rd.data(), MPI_DOUBLE,
-            data_->comm), "MPI_Alltoallv");
+                                             recvBuffer.data(), rc.data(), rd.data(), MPI_DOUBLE,
+                                             data_->comm),
+            "MPI_Alltoallv");
         for (int peer = 0; peer < size; ++peer) {
             std::size_t input = rd[peer];
             for (auto cell : data_->recv[peer]) {

@@ -14,7 +14,6 @@
 namespace idmesh {
     namespace {
 
-
         // Standard intermediate entities have at most four corner vertices.
         // Keep construction keys inline so facet/edge canonicalization performs
         // no per-entity heap allocation.

@@ -1,5 +1,5 @@
-#include "idmesh/mesh.hpp"
 #include "contracts.hpp"
+#include "idmesh/mesh.hpp"
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,6 @@
 
 namespace idmesh {
     namespace {
-
 
         struct ElementInfo {
             CellType type;

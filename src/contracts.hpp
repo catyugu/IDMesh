@@ -47,8 +47,8 @@ namespace idmesh::detail {
 
 // For bugs in internal invariants only; never for external input validation.
 // Unlike assert(), this stays active in Release builds.
-#define IDMESH_ASSERT(expression) \
-    do { \
-        if (!(expression)) \
+#define IDMESH_ASSERT(expression)                                                \
+    do {                                                                         \
+        if (!(expression))                                                       \
             ::idmesh::detail::assertion_failed(#expression, __FILE__, __LINE__); \
     } while (false)
