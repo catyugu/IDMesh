@@ -11,9 +11,12 @@
 - [x] Test boundary-of-boundary and installation on Linux, Windows and macOS.
 
 ## Milestone 2: distributed execution
-- Global entity identity and deterministic cross-rank orientation matching.
-- Owned/ghost ranges, partitioning and halo exchange; MPI remains an optional backend.
-- Geometry/field mirrors and device-aware communication.
+- [x] Global entity identity and deterministic cross-rank orientation matching.
+- [x] Owned/ghost ranges, partitioning and halo exchange; MPI remains an optional backend.
+- [x] Rank-local shard input with a distributed shared-entity registry.
+- [x] Geometry/field mirrors and device-aware communication with host-staging fallback.
+- [ ] Communicator-scoped MPI contexts and nonblocking halo exchange.
+- [ ] Multi-node weak scaling and external partitioner integration.
 
 ## Milestone 3: advanced mesh coupling
 - Arbitrary polyhedral cells, nonmatching interface maps, periodic couplings and high-order curved geometry.
@@ -36,8 +39,9 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Owner/ghost ranges, facet-based ghost expansion and cell-value ExchangePlan.
 - [x] Persistent Kokkos topology/geometry mirrors and parallel reductions (Serial CI).
 - [x] Standalone FVM conservation/normal and FEEC incidence examples.
-- [ ] Scalable distributed mesh input and graph-based partitioning.
-- [ ] GPU-backed field buffers, asynchronous device-aware halo exchange and CUDA/HIP CI.
+- [x] Scalable rank-local shard input and dependency-free graph-based partitioning baseline.
+- [x] GPU-backed field buffers and device-aware halo exchange with Host Staging fallback.
+- [ ] Nonblocking device-aware halo exchange and physical CUDA/HIP validation.
 - [x] Add executable Basix C++-backed Nedelec DOF-transformation integration tests and CI.
 
 ## Scalable distributed input
