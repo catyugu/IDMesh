@@ -764,7 +764,9 @@ namespace idmesh {
             append_label(dim, entity, key.vertices, assignment.tag);
             if (dim == dimension_ - 1 && entity != invalid_index) {
                 if (data->facet_tags.empty())
-                    data->facet_tags.resize(data->vertices[dim].size());
+                    data->facet_tags.resize(dim == 0
+                            ? data->coordinates.size()
+                            : data->vertices[dim].size());
                 if (data->facet_tags[entity] == 0)
                     data->facet_tags[entity] = assignment.tag;
             }
