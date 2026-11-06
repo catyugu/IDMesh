@@ -31,41 +31,81 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md) and [develo
 
 ## Benchmarks
 
-`IDMESH_BUILD_BENCHMARKS` controls the standalone `idmesh_benchmark` executable
-(disabled by default, including in CI). It is never installed or executed
-by CI; explicitly enable it for local performance measurements.
+`IDMESH_BUILD_BENCHMARKS` enables two standalone developer executables.
+CI **compiles and runs only tiny correctness smoke cases**; it never uses CI
+timings as performance regressions. Neither benchmark is installed.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON
-cmake --build build --config Release
+cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON
+cmake --build build-bench --config Release
 
-# Backward-compatible 2D mixed triangle/quad smoke.
-./build/idmesh_benchmark 128 20
+# Backward-compatible 2D mixed triangle/quad measurement.
+./build-bench/idmesh_benchmark 128 20
 
-# 3D six-tetrahedron cubes (6 * side^3 cells), 5 independent trials.
-./build/idmesh_benchmark 32 10 --dim 3 --shape simplex --trials 5
+# 3D tetrahedra, hexahedra and mixed hex/prism.
+./build-bench/idmesh_benchmark 32 10 --dim 3 --shape simplex --trials 5
+./build-bench/idmesh_benchmark 32 10 --dim 3 --shape tensor --trials 5
+./build-bench/idmesh_benchmark 32 10 --dim 3 --shape mixed --trials 5
 
-# 3D mixed hexahedron/prism and pure hexahedron cases.
-./build/idmesh_benchmark 32 10 --dim 3 --shape mixed --trials 5
-./build/idmesh_benchmark 32 10 --dim 3 --shape tensor --trials 5
+# Deterministically scramble vertex numbering and cell insertion order,
+# optionally perturb interior coordinates without changing connectivity.
+./build-bench/idmesh_benchmark 32 10 --dim 3 --shape mixed \
+    --scramble --seed 2026 --jitter 0.10 --trials 5
+
+# Real ASCII Gmsh 2.2/4.1 input, read+finalize together.
+./build-bench/idmesh_benchmark 2 10 --gmsh path/to/mesh.msh --trials 5
 ```
 
-The CSV output reports **input construction** separately from `finalize()`.
-For each materialized `Cell -> Vertex`, `Cell -> Facet`, and
-`Facet -> Cell` relation it records the median (p50) and nearest-rank
-p95 of traversal times, plus a deterministic traversal checksum. Missing
-relations produce no traversal row. The benchmark compares minimal, finite-volume
-and full materialization configurations for the same mesh.
+Both generated and Gmsh cases compare the same three materializations:
+`minimal`, `finite_volume` and `full`. CPU CSV preserves the original first
+18 columns and appends source, reproducibility flags, memory and incidence
+counts. It includes Cell–Vertex, Cell–Facet and Facet–Cell traversal, additional
+Facet–Vertex traversal when materialized, and a separate oriented Cell–Facet
+traversal, all with repeatable checksums. Input generation and `finalize()`
+are timed separately for generated meshes; for Gmsh, the public importer
+combines reading and finalization, so `input_ms_p50=0` and `finalize_ms_p50`
+measures their combined duration. Scramble/jitter apply only to generated input.
 
-`relation_bytes` sums visible relation offset, index, sign and orientation
-array payloads. It excludes entity-to-vertex data stored separately, cell
-metadata, coordinates, allocator overhead and transient construction memory:
-it is **not** an estimate of total resident mesh memory. Absolute timings
-are machine-dependent; use comparable Release builds and isolated runs before
-drawing performance conclusions. The generated meshes are structured
-conforming benchmark families; they do not replace tests on imported
-industrial non-structured geometries.
+Memory fields have **different meanings**:
 
+- `relation_bytes` is the visible relation offsets/indices/sign/orientation
+  array payload only, as before.
+- `visible_payload_bytes` estimates the logical payload exposed through
+  the public mesh API, including entity-to-vertex connectivity, geometry,
+  labels and relations. It excludes unused vector capacity, allocation
+  metadata, maps, object/control blocks, and transient input buffers; it is
+  a **lower bound**, not actual resident memory.
+- `process_rss_bytes_p50` is whole-process resident size after finalize,
+  including the allocator and unrelated runtime allocations; zero means the
+  current platform does not provide the measurement.
+- `process_peak_rss_bytes` is the **process-lifetime** high-water mark,
+  including construction and prior trials/configurations; it is not a
+  per-mesh peak allocation metric.
+
+The CSV has `incidences_per_round` for throughput calculations. Use identical
+Release flags, isolated processes, and multiple trials for comparisons; the
+three configurations are measured sequentially in one executable, so process
+memory high-water marks cannot be compared as independent allocations.
+Generated mesh families remain conforming structured families even when their
+IDs are scrambled. Imported industrial unstructured meshes should be included
+before generalizing performance conclusions.
+
+For the optional Kokkos backend:
+
+```sh
+cmake -S . -B build-kokkos-bench -DCMAKE_BUILD_TYPE=Release \
+    -DIDMESH_ENABLE_KOKKOS=ON -DIDMESH_BUILD_BENCHMARKS=ON
+cmake --build build-kokkos-bench --config Release
+./build-kokkos-bench/idmesh_kokkos_benchmark 32 10 --dim 3 --shape mixed --trials 5
+```
+
+`idmesh_kokkos_benchmark` reports separately: persistent geometry mirror
+construction/upload, Cell–Facet relation mirror construction/upload, resident
+centroid reductions, geometry-connectivity checksum, and resident incidence
+count kernels. Device upload measurements include host packing/allocation,
+staging and fences; the kernel timings exclude upload and use the selected
+Kokkos backend. Kokkos Serial CI only confirms correctness and API linkage;
+physical GPU results require real CUDA/HIP hardware.
 
 ## Geometry order and additional formats
 

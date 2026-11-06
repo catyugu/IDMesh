@@ -40,7 +40,7 @@ if(IDMESH_ENABLE_KOKKOS)
         set(CMAKE_CUDA_STANDARD_REQUIRED ON)
         set(Kokkos_ENABLE_CUDA ON CACHE BOOL "" FORCE)
         set(Kokkos_ENABLE_COMPILE_AS_CMAKE_LANGUAGE ON CACHE BOOL "" FORCE)
-        set_source_files_properties(src/kokkos.cpp src/mpi_kokkos.cpp
+        set_source_files_properties(src/kokkos.cpp src/mpi_kokkos.cpp benchmarks/kokkos.cpp
             tests/test_kokkos.cpp tests/test_mpi_kokkos.cpp PROPERTIES LANGUAGE CUDA)
     elseif(IDMESH_KOKKOS_DEVICE_BACKEND STREQUAL "HIP")
         enable_language(HIP)
@@ -48,7 +48,7 @@ if(IDMESH_ENABLE_KOKKOS)
         set(CMAKE_HIP_STANDARD_REQUIRED ON)
         set(Kokkos_ENABLE_HIP ON CACHE BOOL "" FORCE)
         set(Kokkos_ENABLE_COMPILE_AS_CMAKE_LANGUAGE ON CACHE BOOL "" FORCE)
-        set_source_files_properties(src/kokkos.cpp src/mpi_kokkos.cpp
+        set_source_files_properties(src/kokkos.cpp src/mpi_kokkos.cpp benchmarks/kokkos.cpp
             tests/test_kokkos.cpp tests/test_mpi_kokkos.cpp PROPERTIES LANGUAGE HIP)
     elseif(NOT IDMESH_KOKKOS_DEVICE_BACKEND STREQUAL "SERIAL")
         message(FATAL_ERROR "Unsupported IDMESH_KOKKOS_DEVICE_BACKEND")
@@ -171,6 +171,27 @@ endif()
 if(IDMESH_BUILD_BENCHMARKS)
     add_executable(idmesh_benchmark benchmarks/topology.cpp)
     target_link_libraries(idmesh_benchmark PRIVATE idmesh)
+    if(WIN32)
+        target_link_libraries(idmesh_benchmark PRIVATE psapi)
+    endif()
+    if(IDMESH_ENABLE_KOKKOS)
+        add_executable(idmesh_kokkos_benchmark benchmarks/kokkos.cpp)
+        target_link_libraries(idmesh_kokkos_benchmark PRIVATE idmesh_kokkos Kokkos::kokkos)
+    endif()
+    if(IDMESH_BUILD_TESTS)
+        # Functional smoke only; CI timings must never be treated as performance data.
+        add_test(NAME idmesh.benchmark.generated
+            COMMAND idmesh_benchmark 2 1 --dim 3 --shape mixed --scramble
+                --seed 17 --jitter 0.05 --trials 1)
+        add_test(NAME idmesh.benchmark.gmsh
+            COMMAND idmesh_benchmark 2 1 --gmsh
+                ${PROJECT_SOURCE_DIR}/benchmarks/fixtures/mixed_2d.msh --trials 1)
+        if(IDMESH_ENABLE_KOKKOS)
+            add_test(NAME idmesh.benchmark.kokkos
+                COMMAND idmesh_kokkos_benchmark 2 1 --dim 3 --shape mixed
+                    --scramble --trials 1)
+        endif()
+    endif()
 endif()
 
 if(IDMESH_INSTALL)
