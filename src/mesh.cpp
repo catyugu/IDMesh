@@ -222,7 +222,8 @@ namespace idmesh {
     struct Mesh::Data {
         Index dimension = 0;
         Index geometric_dimension = 0;
-        // Mutable construction scratch, released before publication.
+        // Intermediate-entity construction scratch, released before publication.
+        // Top-dimensional Cell connectivity enters already packed from MeshBuilder.
         std::array<std::vector<Loop>, 4> vertices;
         std::array<Index, 4> counts {};
         std::array<bool, 4> enabled {};
@@ -525,6 +526,8 @@ namespace idmesh {
     {
         require(dimension >= 1 && dimension <= 3, "topological dimension must be 1..3");
         require(geometric_dimension >= dimension && geometric_dimension <= 3, "invalid geometric dimension");
+        cell_offsets_.push_back(0);
+        cell_extra_offsets_.push_back(0);
     }
 
     Index MeshBuilder::add_vertex(std::array<double, 3> position)
@@ -540,19 +543,25 @@ namespace idmesh {
     {
         require(cell_dimension(type) == dimension_, "cell dimension mismatch");
         require(vertices.size() == cell_vertex_count(type), "incorrect cell arity");
-        std::vector<Index> ordered(vertices.begin(), vertices.end());
-        for (auto index : ordered)
-            require(index < coordinates_.size(), "invalid vertex index");
-        auto sorted = ordered;
-        std::sort(sorted.begin(), sorted.end());
-        require(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(), "duplicate cell vertex");
-        require(cells_.size() < invalid_index, "too many cells");
-        cells_.push_back(std::move(ordered));
+        std::array<Index, 8> sorted {};
+        for (std::size_t i = 0; i < vertices.size(); ++i) {
+            require(vertices[i] < coordinates_.size(), "invalid vertex index");
+            sorted[i] = vertices[i];
+        }
+        std::sort(sorted.begin(), sorted.begin() + vertices.size());
+        require(std::adjacent_find(sorted.begin(), sorted.begin() + vertices.size())
+                == sorted.begin() + vertices.size(),
+            "duplicate cell vertex");
+        require(types_.size() < invalid_index, "too many cells");
+        require(cell_vertices_.size() + vertices.size() < invalid_index,
+            "cell connectivity overflow");
+        cell_vertices_.insert(cell_vertices_.end(), vertices.begin(), vertices.end());
+        cell_offsets_.push_back(static_cast<Index>(cell_vertices_.size()));
         types_.push_back(type);
         tags_.push_back(tag);
         cell_orders_.push_back(1);
-        cell_extra_nodes_.emplace_back();
-        return static_cast<Index>(cells_.size() - 1);
+        cell_extra_offsets_.push_back(static_cast<Index>(cell_extra_nodes_.size()));
+        return static_cast<Index>(types_.size() - 1);
     }
 
     Index MeshBuilder::add_geometry_node(std::array<double, 3> position)
@@ -597,15 +606,19 @@ namespace idmesh {
             "unsupported quadratic geometry node count");
         for (Index index : extra_nodes)
             require(index < extra_geometry_nodes_.size(), "invalid extra geometry node");
+        require(cell_extra_nodes_.size() + extra_nodes.size() < invalid_index,
+            "geometry connectivity overflow");
         const Index cell = add_cell(type, vertices, tag);
         cell_orders_[cell] = 2;
-        cell_extra_nodes_[cell].assign(extra_nodes.begin(), extra_nodes.end());
+        cell_extra_nodes_.insert(
+            cell_extra_nodes_.end(), extra_nodes.begin(), extra_nodes.end());
+        cell_extra_offsets_.back() = static_cast<Index>(cell_extra_nodes_.size());
         return cell;
     }
 
     void MeshBuilder::add_cell_physical_tag(Index cell, int tag)
     {
-        require(cell < cells_.size(), "invalid cell for physical label");
+        require(cell < types_.size(), "invalid cell for physical label");
         if (tag != 0)
             cell_physical_tags_.emplace_back(cell, tag);
     }
@@ -618,15 +631,24 @@ namespace idmesh {
             : dimension == 1              ? vertices.size() == 2
                                           : vertices.size() == 3 || vertices.size() == 4;
         require(arity, "invalid physical entity arity");
-        for (Index vertex : vertices)
-            require(vertex < coordinates_.size(), "invalid physical entity vertex");
-        std::vector<Index> sorted(vertices.begin(), vertices.end());
-        std::sort(sorted.begin(), sorted.end());
-        require(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(),
+        std::array<Index, 4> sorted {};
+        for (std::size_t i = 0; i < vertices.size(); ++i) {
+            require(vertices[i] < coordinates_.size(), "invalid physical entity vertex");
+            sorted[i] = vertices[i];
+        }
+        std::sort(sorted.begin(), sorted.begin() + vertices.size());
+        require(std::adjacent_find(sorted.begin(), sorted.begin() + vertices.size())
+                == sorted.begin() + vertices.size(),
             "duplicate physical entity vertex");
-        if (tag != 0)
-            physical_assignments_.push_back({dimension,
-                std::vector<Index>(vertices.begin(), vertices.end()), tag});
+        if (tag == 0)
+            return;
+        require(physical_assignment_vertices_.size() + vertices.size() < invalid_index,
+            "physical label connectivity overflow");
+        const auto begin = static_cast<Index>(physical_assignment_vertices_.size());
+        physical_assignment_vertices_.insert(
+            physical_assignment_vertices_.end(), vertices.begin(), vertices.end());
+        const auto finish = static_cast<Index>(physical_assignment_vertices_.size());
+        physical_assignments_.push_back({dimension, begin, finish, tag});
     }
 
     void MeshBuilder::add_facet_tag(std::span<const Index> vertices, int tag)
@@ -650,25 +672,45 @@ namespace idmesh {
         data->dimension = dimension_;
         data->geometric_dimension = geometric_dimension_;
         data->coordinates = std::move(coordinates_);
+        data->counts[dimension_] = static_cast<Index>(types_.size());
+        data->vertex_offsets[dimension_] = std::move(cell_offsets_);
+        data->vertex_indices[dimension_] = std::move(cell_vertices_);
         data->types = std::move(types_);
         data->tags = std::move(tags_);
         data->cell_orders = std::move(cell_orders_);
         data->extra_geometry_nodes = std::move(extra_geometry_nodes_);
         data->physical_names = std::move(physical_names_);
-        data->vertices[dimension_] = std::move(cells_);
+
+        const auto construction_count = [&](Index dim) -> Index {
+            return dim == dimension_ ? data->counts[dim]
+                                     : static_cast<Index>(data->vertices[dim].size());
+        };
+        const auto construction_vertices = [&](Index dim, Index id) -> std::span<const Index> {
+            if (dim == dimension_) {
+                const auto& offsets = data->vertex_offsets[dim];
+                const auto& indices = data->vertex_indices[dim];
+                const auto begin = offsets[id];
+                return {indices.data() + begin, offsets[id + 1] - begin};
+            }
+            return data->vertices[dim][id];
+        };
+
         // No additional geometry-connectivity storage for purely linear meshes.
         // In mixed meshes, only order-two cells own full geometry-node sequences.
         if (std::any_of(data->cell_orders.begin(), data->cell_orders.end(),
                 [](std::uint8_t order) { return order == 2; })) {
-            data->geometry_offsets.reserve(data->vertices[dimension_].size() + 1);
+            data->geometry_offsets.reserve(static_cast<std::size_t>(data->counts[dimension_]) + 1);
             data->geometry_offsets.push_back(0);
-            for (Index c = 0; c < data->vertices[dimension_].size(); ++c) {
+            for (Index c = 0; c < data->counts[dimension_]; ++c) {
                 if (data->cell_orders[c] == 2) {
-                    const auto& corners = data->vertices[dimension_][c];
+                    const auto corners = construction_vertices(dimension_, c);
                     data->geometry_indices.insert(
                         data->geometry_indices.end(), corners.begin(), corners.end());
-                    for (Index extra : cell_extra_nodes_[c]) {
-                        const auto node = static_cast<std::size_t>(extra) + data->coordinates.size();
+                    const Index begin = cell_extra_offsets_[c];
+                    const Index finish = cell_extra_offsets_[c + 1];
+                    for (Index i = begin; i < finish; ++i) {
+                        const auto node = static_cast<std::size_t>(cell_extra_nodes_[i])
+                            + data->coordinates.size();
                         require(node < invalid_index, "geometry node index overflow");
                         data->geometry_indices.push_back(static_cast<Index>(node));
                     }
@@ -679,6 +721,9 @@ namespace idmesh {
                     static_cast<Index>(data->geometry_indices.size()));
             }
         }
+        std::vector<Index>().swap(cell_extra_offsets_);
+        std::vector<Index>().swap(cell_extra_nodes_);
+
         // Vertex entities have identity connectivity. Avoid constructing one
         // separately allocated singleton vector per vertex during finalize.
         std::array<std::unordered_map<Loop, Index, LoopHash>, 4> lookup;
@@ -705,8 +750,8 @@ namespace idmesh {
         };
 
         // Cell-to-vertex is permanently available even with intermediate dimensions omitted.
-        for (Index c = 0; c < data->vertices[dimension_].size(); ++c) {
-            const auto& vertices = data->vertices[dimension_][c];
+        for (Index c = 0; c < data->counts[dimension_]; ++c) {
+            const auto vertices = construction_vertices(dimension_, c);
             for (Index local = 0; local < vertices.size(); ++local) {
                 auto sign = dimension_ == 1 ? (local == 0 ? -1 : 1) : 0;
                 attach(dimension_, 0, c, {vertices[local], static_cast<std::int8_t>(sign), {}});
@@ -763,15 +808,18 @@ namespace idmesh {
             labels.push_back({dim, entity, std::vector<Index>(vertices.begin(), vertices.end()), tag});
         };
         for (Index cell = 0; cell < data->types.size(); ++cell)
-            append_label(dimension_, cell, data->vertices[dimension_][cell], data->tags[cell]);
+            append_label(dimension_, cell, construction_vertices(dimension_, cell), data->tags[cell]);
         for (const auto& [cell, tag] : cell_physical_tags_)
-            append_label(dimension_, cell, data->vertices[dimension_][cell], tag);
+            append_label(dimension_, cell, construction_vertices(dimension_, cell), tag);
         for (const auto& assignment : physical_assignments_) {
             const Index dim = assignment.dimension;
-            const auto key = canonicalize(assignment.vertices);
+            const std::span<const Index> assigned {
+                physical_assignment_vertices_.data() + assignment.begin,
+                assignment.end - assignment.begin};
+            const auto key = canonicalize(assigned);
             Index entity = invalid_index;
             if (dim == 0) {
-                entity = assignment.vertices.front();
+                entity = assigned.front();
             }
             else if (want(dim)) {
                 const auto found = lookup[dim].find(key.vertices);
@@ -788,6 +836,8 @@ namespace idmesh {
                     data->facet_tags[entity] = assignment.tag;
             }
         }
+        std::vector<Index>().swap(physical_assignment_vertices_);
+        std::vector<PhysicalAssignment>().swap(physical_assignments_);
 
         // Build-time sort/unique is O(L log L) rather than repeated O(L) label
         // lookups, where L can scale with the number of mesh cells.
@@ -809,12 +859,13 @@ namespace idmesh {
                 // Only consecutive dimensions form oriented boundary operators.
                 // Direct geometric connectivity omits redundant sign/permutation arrays.
                 const bool oriented = from == to + 1;
-                auto relation = compress(entries, static_cast<Index>(data->vertices[from].size()), oriented);
+                auto relation = compress(entries, construction_count(from), oriented);
                 if (options.support && !(from == dimension_ && to == 0 && dimension_ > 1)) {
                     const auto targets = to == 0
                         ? data->coordinates.size()
-                        : data->vertices[to].size();
-                    data->relations[to][from] = transpose(relation, static_cast<Index>(targets));
+                        : construction_count(to);
+                    data->relations[to][from] = transpose(
+                        relation, static_cast<Index>(targets));
                 }
                 data->relations[from][to] = std::move(relation);
             }
@@ -834,6 +885,8 @@ namespace idmesh {
                 offsets[count] = count;
                 continue;
             }
+            if (dim == dimension_)
+                continue;
             const auto& lists = data->vertices[dim];
             data->counts[dim] = static_cast<Index>(lists.size());
             offsets.reserve(lists.size() + 1);

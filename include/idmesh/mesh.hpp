@@ -142,16 +142,20 @@ namespace idmesh {
         Index geometric_dimension_;
         std::vector<std::array<double, 3>> coordinates_;
         std::vector<CellType> types_;
-        std::vector<std::vector<Index>> cells_;
+        std::vector<Index> cell_offsets_;
+        std::vector<Index> cell_vertices_;
         std::vector<int> tags_;
         std::vector<std::array<double, 3>> extra_geometry_nodes_;
-        std::vector<std::vector<Index>> cell_extra_nodes_;
+        std::vector<Index> cell_extra_offsets_;
+        std::vector<Index> cell_extra_nodes_;
         std::vector<std::uint8_t> cell_orders_;
         struct PhysicalAssignment {
             Index dimension;
-            std::vector<Index> vertices;
+            Index begin;
+            Index end;
             int tag;
         };
+        std::vector<Index> physical_assignment_vertices_;
         std::vector<PhysicalAssignment> physical_assignments_;
         std::vector<std::pair<Index, int>> cell_physical_tags_;
         std::map<std::pair<Index, int>, std::string> physical_names_;
