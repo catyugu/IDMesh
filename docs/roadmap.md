@@ -55,7 +55,7 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 
 ## GPU transport and numerical execution
 - [x] DeviceCellField with explicit Host upload/download.
-- [x] DeviceDiffusion conservative two-point Cell-Facet kernel.
+- [x] Keep device field/topology transport in the mesh SDK; discretization-specific kernels live above it.
 - [x] Direct GPU-aware MPI capability query and safe failure on unsupported memory spaces.
 - [x] Packed Kokkos device Halo plan, including automatic Host Staging fallback.
 - [ ] Verify CUDA/HIP kernels on physical GPUs using the reusable GPU hardware workflow.

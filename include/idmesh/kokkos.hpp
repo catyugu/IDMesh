@@ -61,19 +61,6 @@ namespace idmesh::kokkos {
         std::shared_ptr<Data> data_;
     };
 
-    // Matrix-free, conservative two-point diffusion action on a static
-    // nonmanifold-free mesh. Neumann-zero boundary facets have no contribution.
-    class IDMESH_KOKKOS_API DeviceDiffusion {
-    public:
-        DeviceDiffusion(const Mesh& mesh, std::span<const double> facet_weights);
-        void apply(const DeviceCellField& input, DeviceCellField& output) const;
-        Index cells() const noexcept;
-
-    private:
-        struct Data;
-        std::shared_ptr<Data> data_;
-    };
-
     class IDMESH_KOKKOS_API DeviceRelation {
     public:
         DeviceRelation(const Mesh& mesh, Index from, Index to);

@@ -1,7 +1,6 @@
 #include "idmesh/kokkos.hpp"
 #include <Kokkos_Core.hpp>
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -215,101 +214,6 @@ namespace idmesh::kokkos {
     const void* DeviceCellField::device_data() const noexcept
     {
         return data_->values.data();
-    }
-
-    struct DeviceDiffusion::Data {
-        Index cells = 0;
-        Kokkos::View<Index*, MemorySpace> cell_offsets;
-        Kokkos::View<Index*, MemorySpace> cell_facets;
-        Kokkos::View<Index*, MemorySpace> facet_offsets;
-        Kokkos::View<Index*, MemorySpace> facet_cells;
-        Kokkos::View<double*, MemorySpace> weights;
-    };
-
-    DeviceDiffusion::DeviceDiffusion(
-        const Mesh& mesh, std::span<const double> weights)
-        : data_(std::make_shared<Data>())
-    {
-        check_runtime();
-        const Index d = mesh.dimension();
-        if (!mesh.has_relation(d, d - 1) || !mesh.has_relation(d - 1, d))
-            throw std::invalid_argument("diffusion requires Cell-Facet/Facet-Cell");
-        const auto downward = mesh.relation(d, d - 1);
-        const auto support = mesh.relation(d - 1, d);
-        if (weights.size() != mesh.entity_count(d - 1))
-            throw std::invalid_argument("facet transmissibility count mismatch");
-        for (Index f = 0; f < support.rows; ++f)
-            if (support.row(f).size() > 2)
-                throw std::invalid_argument("nonmanifold facet in diffusion kernel");
-        for (auto w : weights)
-            if (!std::isfinite(w) || w < 0)
-                throw std::invalid_argument("invalid diffusion coefficient");
-
-        data_->cells = mesh.entity_count(d);
-        std::vector<Index> co(downward.rows + 1), fo(support.rows + 1);
-        for (Index c = 0; c < downward.rows; ++c)
-            co[c + 1] = co[c] + static_cast<Index>(downward.row(c).size());
-        for (Index f = 0; f < support.rows; ++f)
-            fo[f + 1] = fo[f] + static_cast<Index>(support.row(f).size());
-
-        const auto create_index_view = [](const char* name,
-                                           std::span<const Index> values) {
-            Kokkos::View<Index*, MemorySpace> device(std::string(name), values.size());
-            auto host = Kokkos::create_mirror_view(device);
-            for (std::size_t i = 0; i < values.size(); ++i)
-                host(i) = values[i];
-            Kokkos::deep_copy(device, host);
-            return device;
-        };
-        data_->cell_offsets = create_index_view("idmesh_diff_co",
-            std::span<const Index>(co));
-        data_->cell_facets = create_index_view("idmesh_diff_cf",
-            downward.indices);
-        data_->facet_offsets = create_index_view("idmesh_diff_fo",
-            std::span<const Index>(fo));
-        data_->facet_cells = create_index_view("idmesh_diff_fc",
-            support.indices);
-        data_->weights = Kokkos::View<double*, MemorySpace>(
-            "idmesh_diff_weights", weights.size());
-        auto host = Kokkos::create_mirror_view(data_->weights);
-        for (std::size_t i = 0; i < weights.size(); ++i)
-            host(i) = weights[i];
-        Kokkos::deep_copy(data_->weights, host);
-        ExecutionSpace().fence();
-    }
-
-    void DeviceDiffusion::apply(
-        const DeviceCellField& input, DeviceCellField& output) const
-    {
-        if (input.cells() != data_->cells || output.cells() != data_->cells || input.components() != 1 || output.components() != 1)
-            throw std::invalid_argument("diffusion requires one scalar per cell");
-        const auto cell_offsets = data_->cell_offsets;
-        const auto cell_facets = data_->cell_facets;
-        const auto facet_offsets = data_->facet_offsets;
-        const auto facet_cells = data_->facet_cells;
-        const auto weight = data_->weights;
-        const auto* x = static_cast<const double*>(input.device_data());
-        auto* y = static_cast<double*>(output.device_data());
-        Kokkos::parallel_for("idmesh_conservative_diffusion", Kokkos::RangePolicy<ExecutionSpace>(0, data_->cells), KOKKOS_LAMBDA(const Index cell) {
-                double residual = 0;
-                for (Index i = cell_offsets(cell);
-                     i < cell_offsets(cell + 1); ++i) {
-                    const Index facet = cell_facets(i);
-                    const Index first = facet_offsets(facet);
-                    const Index last = facet_offsets(facet + 1);
-                    if (last - first != 2)
-                        continue;
-                    const Index a = facet_cells(first);
-                    const Index b = facet_cells(first + 1);
-                    const Index neighbor = a == cell ? b : a;
-                    residual += weight(facet) * (x[cell] - x[neighbor]);
-                }
-                y[cell] = residual; });
-        ExecutionSpace().fence();
-    }
-    Index DeviceDiffusion::cells() const noexcept
-    {
-        return data_->cells;
     }
 
     std::uint64_t incidence_count(const Mesh& mesh, Index from, Index to)

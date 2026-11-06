@@ -214,13 +214,14 @@ communicator, metadata use blocking MPI operations, and local shard
 files must be consistent. Extremely large individual messages remain
 subject to MPI_Alltoallv's integer-count limits.
 
-## GPU fields, numerical kernels and direct MPI transport
+## GPU fields and direct MPI transport
 
-The Kokkos backend owns `DeviceCellField` buffers and `DeviceDiffusion`
-Cell-Facet CSR weights. Parallel kernels evaluate the conservative
-two-point action on the current default execution space; data transfer
-to/from the Host is explicit. The combined MPI/Kokkos adapter packs
-owned Cell records and unpacks Ghost records using Kokkos kernels.
+The Kokkos backend owns `DeviceMesh`, `DeviceRelation` and
+`DeviceCellField` storage while keeping Kokkos types out of the installed
+ABI. Discretization-specific operators are intentionally outside the mesh
+SDK; applications can build them from mirrored topology/geometry and device
+fields. The combined MPI/Kokkos adapter packs owned Cell records and unpacks
+Ghost records using Kokkos kernels.
 
 `DeviceHaloPlan` stores the peer-index maps in device memory and
 supports `Automatic`, `HostStaging`, and `RequireGpuAware` transports.
