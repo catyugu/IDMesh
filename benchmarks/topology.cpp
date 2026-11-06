@@ -16,11 +16,13 @@
 #include <vector>
 
 #if defined(_WIN32)
-#include <psapi.h>
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// clang-format off
 #include <windows.h>
+#include <psapi.h>
+// clang-format on
 #elif defined(__unix__) || defined(__APPLE__)
 #include <sys/resource.h>
 #if defined(__linux__)
