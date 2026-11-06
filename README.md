@@ -84,14 +84,14 @@ MPI communication and partition construction are verified using 2 and
 3 ranks. Scalable root-only/distributed-file ingestion is not yet supported.
 
 `idmesh_fvm` validates conservative facet fluxes and physical normals on
-a three-dimensional Edge-free finite-volume mesh. `idmesh_feec` constructs
+a three-dimensional Edge-free finite-volume mesh. `idmesh_fem` constructs
 the oriented G/C/D matrices on mixed Hex/Prism cells and verifies both
 boundary-operator compositions vanish. The optional Kokkos adapter provides
 a persistent `DeviceRelation` mirror for batched parallel reductions.
 
 ## External FEEC transformation validation
 
-`examples/basix_orientations.cpp` exports actual oriented tetrahedral
+`examples/basix_orientation.cpp` exports actual oriented tetrahedral
 face and edge incidences. `tests/test_basix.py` consumes this output using
 the `fenics-basix` Python bindings backed by Basix C++, checking higher-order
 Nedelec edge reversal and triangular-face dihedral-group transformations.
@@ -147,11 +147,34 @@ zero Neumann boundary contribution. The GPU tests compare numerical
 results and discrete conservation to CPU expectations. The combined
 MPI/Kokkos Serial path runs automatically in CI.
 
-Real-device validation is provided by the manually dispatched
-`.github/workflows/gpu-validation.yml`. Configure an approved CUDA/HIP
-GPU runner label and matching architecture in the Actions UI; no standard
-GitHub-hosted runner is assumed to contain a GPU. CUDA/HIP verification
-remains unverified until a run on actual hardware succeeds.
+Real-device validation is defined in the reusable
+`.github/workflows/gpu-validation.yml` workflow (`workflow_call`).
+It has no direct manual, push, or pull-request trigger. A trusted calling
+workflow must provide a provisioned CUDA/HIP GPU runner and matching
+architecture; CUDA/HIP execution remains unverified until a physical
+hardware run succeeds.
 
 See [verification and known limits](docs/validation.md) for the current
 CPU/MPI test matrix and the unverified CUDA/HIP hardware acceptance gate.
+
+## Running the three examples
+
+The `examples` CI job builds and executes all three independent programs:
+
+- `idmesh_basix_orientation`: orientation data from tetrahedral faces/edges,
+  checked against second-order Nédélec DOF transformations with Basix.
+- `idmesh_fvm`: conservative facet-based diffusion with omitted Edge topology.
+- `idmesh_fem`: mixed hexahedron/prism oriented incidence and FEEC identities
+  `CG=0` and `DC=0` (the topology needed for compatible finite elements).
+
+The Basix dependency belongs exclusively to tests. To repeat the CI locally:
+
+```sh
+python -m pip install fenics-basix==0.11.0 numpy
+cmake -S . -B build-examples -DIDMESH_BUILD_TESTS=ON -DIDMESH_BUILD_EXAMPLES=ON -DIDMESH_TEST_BASIX=ON
+cmake --build build-examples --target idmesh_basix_orientation idmesh_fvm idmesh_fem
+ctest --test-dir build-examples --output-on-failure -R '^idmesh[.]example[.]'
+```
+
+The original minimal triangle smoke demo was removed from `examples/`
+so these three programs make up the complete example set.

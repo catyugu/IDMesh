@@ -64,10 +64,10 @@ int main()
                 shared = true;
         if (!shared)
             throw std::runtime_error("missing mixed-cell interface");
-        std::cout << "FEEC: mixed hex/prism, CG=0 and DC=0 OK\n";
+        std::cout << "FEM (FEEC): mixed hex/prism, CG=0 and DC=0 OK\n";
     }
     catch (const std::exception& e) {
-        std::cerr << "FEEC example failure: " << e.what() << '\n';
+        std::cerr << "FEM (FEEC) example failure: " << e.what() << '\n';
         return 1;
     }
 }

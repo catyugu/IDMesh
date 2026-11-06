@@ -8,7 +8,7 @@ CPU execution backend.
 | --- | --- | --- |
 | C++ formatting | pinned clang-format 19.1.7 | all tracked .h/.hpp/.cpp |
 | Serial core | Linux GCC, Windows MSVC, macOS Clang | reference cells, oriented incidence, Gmsh, VTK, Medit, geometric Jacobians |
-| Independent applications | FVM and FEEC CTest executables | conservative flux and oriented CG=0 / DC=0 |
+| Independent applications | `examples` CI job, three CTest examples | Basix orientation, conservative FVM flux, and mixed-cell FEM/FEEC exact sequence CG=0 / DC=0 |
 | Distributed MPI | OpenMPI with 2 and 3 ranks | replicated and rank-local shards, dual-graph cuts, 1/2 Ghost layers, shared global IDs and field exchanges |
 | Kokkos | Serial runtime | persistent topology/geometry, device-owned Cell fields and matrix-free diffusion |
 | MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | device pack/unpack, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
@@ -18,8 +18,9 @@ CPU execution backend.
 ## Device-hardware acceptance
 
 GPU hardware is not present on standard GitHub-hosted Ubuntu runners.
-The `GPU hardware validation` workflow is **manual only** and must be
-run on a provisioned accelerator runner. It verifies that a real GPU
+The `GPU hardware validation` workflow is **reusable** (`workflow_call`)
+and must be invoked by a trusted caller on a provisioned accelerator runner.
+It has no direct manual or automatic repository event trigger. It verifies that a real GPU
 is visible before building Kokkos with CUDA/HIP and executing the device
 numerical and two-rank Halo tests.
 
@@ -35,9 +36,10 @@ Staging and the explicit unsupported-mode error.
 
 **Current acceptance boundary:** CUDA and HIP hardware execution and
 direct GPU-aware MPI on physical GPUs have not yet been demonstrated by
-the repository's available CI runners. The manual workflow is ready for
-an approved GPU runner, but must not be represented as a passing hardware
-test until its run completes successfully.
+the repository's available CI runners. The reusable workflow can run
+only through a trusted calling workflow with an approved GPU runner and
+must not be represented as a passing hardware test until that hardware
+execution completes successfully.
 
 ## Performance scope
 
@@ -49,3 +51,11 @@ a Rank's local owned/ghost data and uses a distributed identity registry.
 Large multi-node weak scaling, ParMETIS-class partition quality, generic
 distributed Gmsh ingestion, dynamic repartitioning and GPU-aware MPI
 throughput are future work.
+
+## GPU workflow trigger policy
+
+`.github/workflows/gpu-validation.yml` exposes only `workflow_call`.
+A trusted workflow may invoke it with `backend` (CUDA or HIP),
+`runner_label`, `compiler_arch` and `kokkos_arch`. The GPU validation
+workflow is not directly invokable from the Actions **Run workflow** UI
+and does not start on push or pull request.

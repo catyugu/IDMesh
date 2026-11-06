@@ -74,18 +74,18 @@ jobs:
       - name: Build external MPI consumer
         run: cmake -S tests/consumer -B consumer-mpi -DCMAKE_PREFIX_PATH=$PWD/install-mpi && cmake --build consumer-mpi --parallel 2
 
-  basix-integration:
+  examples:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install external Basix C++ bindings
+      - name: Install Basix test dependency
         run: python -m pip install fenics-basix==0.11.0 numpy
-      - name: Configure
-        run: cmake -S . -B build-basix -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON
-      - name: Build orientation exporter
-        run: cmake --build build-basix --target idmesh_orientation_export --parallel 2
-      - name: Validate Nedelec DOF symmetry transformations with Basix
-        run: python tests/test_basix.py ./build-basix/idmesh_orientation_export
+      - name: Configure three standalone examples
+        run: cmake -S . -B build-examples -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_BUILD_EXAMPLES=ON -DIDMESH_TEST_BASIX=ON -DPython3_EXECUTABLE=$(command -v python)
+      - name: Build basix_orientation, FVM and FEM
+        run: cmake --build build-examples --target idmesh_basix_orientation idmesh_fvm idmesh_fem --parallel 2
+      - name: Run all three examples
+        run: ctest --test-dir build-examples --output-on-failure -R '^idmesh[.]example[.](basix_orientation|fvm|fem)$'
 
   mpi-kokkos-serial:
     runs-on: ubuntu-24.04

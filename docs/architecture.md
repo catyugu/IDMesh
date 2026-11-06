@@ -121,7 +121,7 @@ uses the world communicator and blocking host transfers.
 
 `idmesh_fvm` assembles a 3D two-tetra diffusion operator using
 `TopologyOptions::finite_volume()` (no Edge layer), checking conservative
-internal flux and outward physical normals. `idmesh_feec` assembles G, C, D
+internal flux and outward physical normals. `idmesh_fem` assembles G, C, D
 on a mixed Hex/Prism mesh and verifies `CG=0`, `DC=0`.
 
 The Kokkos adapter additionally offers a `DeviceRelation` owning a
@@ -133,7 +133,7 @@ builds and device CI to be certified.
 
 ## External high-order finite-element orientation validation
 
-A separate Basix integration CI job builds the orientation exporter and
+The `examples` CI job builds all three examples and
 uses Basix's C++-backed N1E degree-two element transformations. It tests
 edge reversal involutions, face rotation/reflection group relations and
 the consistency of canonical DOF coefficients through both local views of
@@ -229,5 +229,5 @@ does not support direct GPU pointers.
 
 The default CMake backend is `SERIAL`. The optional CUDA/HIP modes
 compile the Kokkos adapter sources in the CUDA/HIP CMake language and
-are exposed as `IDMESH_KOKKOS_DEVICE_BACKEND`. A manual GPU workflow
+are exposed as `IDMESH_KOKKOS_DEVICE_BACKEND`. A reusable GPU workflow
 tests real devices only on explicitly provisioned runners.

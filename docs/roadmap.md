@@ -54,5 +54,5 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] DeviceDiffusion conservative two-point Cell-Facet kernel.
 - [x] Direct GPU-aware MPI capability query and safe failure on unsupported memory spaces.
 - [x] Packed Kokkos device Halo plan, including automatic Host Staging fallback.
-- [ ] Verify CUDA/HIP kernels on physical GPUs using the manual CI workflow.
+- [ ] Verify CUDA/HIP kernels on physical GPUs using the reusable GPU hardware workflow.
 - [ ] Verify direct CUDA/ROCm-aware MPI exchange on a capable multi-GPU MPI runtime.

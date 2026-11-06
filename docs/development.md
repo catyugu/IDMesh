@@ -31,8 +31,8 @@ their runtime preconditions and scaling limitations documented.
 
 ## Hardware validation
 
-`.github/workflows/gpu-validation.yml` runs only through an authorized
-manual workflow dispatch. Select `CUDA` or `HIP`, an approved GPU
+`.github/workflows/gpu-validation.yml` uses only `workflow_call`.
+A trusted calling workflow supplies `CUDA` or `HIP`, an approved GPU
 runner label, and the matching CUDA architecture or AMD GFX target.
 The runner must already have the device driver, CUDA/ROCm compiler,
 CMake, and an MPI runtime available. Direct GPU-aware MPI requires a

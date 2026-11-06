@@ -1,27 +1,25 @@
 name: GPU hardware validation
 
-# Never run untrusted pull_request code on a privileged GPU runner.
-# Manually select a trusted, ephemeral CUDA/HIP runner configured by the owner.
+# This reusable workflow has no manual or repository-event trigger.
+# Only trusted callers should route it to approved, ephemeral GPU runners.
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       backend:
-        description: Kokkos GPU backend
-        type: choice
-        options: [CUDA, HIP]
-        required: true
+        description: Kokkos GPU backend, CUDA or HIP
+        type: string
         default: CUDA
       runner_label:
         description: Label of the approved GPU runner
-        required: true
+        type: string
         default: idmesh-cuda
       compiler_arch:
         description: CMake CUDA architecture (75) or HIP target (gfx90a)
-        required: true
+        type: string
         default: "75"
       kokkos_arch:
         description: Kokkos architecture suffix (TURING75 or AMD_GFX90A)
-        required: true
+        type: string
         default: TURING75
 
 permissions:
