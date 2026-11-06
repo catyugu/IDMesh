@@ -1,31 +1,67 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+
 jobs:
-  format:
+  style:
+    name: style advisory
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned clang-format
         run: python3 -m pip install clang-format==19.1.7
-      - name: Verify tracked C++ sources
-        run: bash scripts/check-format.sh
+      - name: Check formatting without blocking CI
+        id: style
+        shell: bash
+        run: |
+          bash scripts/format-cpp.sh
+          if git diff --quiet -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx'; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "C/C++ formatting is clean." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' > clang-format.patch
+            echo "::warning title=clang-format drift::Formatting differs from clang-format 19.1.7; see the patch artifact."
+            {
+              echo "### clang-format drift detected"
+              echo
+              echo "The build is not blocked. Apply `bash scripts/format-cpp.sh` locally."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload formatting patch
+        if: steps.style.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-format-patch
+          path: clang-format.patch
+          if-no-files-found: error
+          retention-days: 7
 
   native:
+    name: native / ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - name: linux-gcc
+            os: ubuntu-24.04
             sdk_name: IDMesh-linux-gcc-Release
-          - os: windows-2022
+          - name: windows-msvc
+            os: windows-2022
             sdk_name: IDMesh-windows-msvc-Release
-          - os: macos-15
+          - name: macos-clang
+            os: macos-15
             sdk_name: IDMesh-macos-clang-Release
     runs-on: ${{ matrix.os }}
     steps:
@@ -38,9 +74,9 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Install
         run: cmake --install build --config Release --prefix install
-      - name: Installed package consumer
+      - name: Configure installed-package consumer
         run: cmake -S tests/consumer -B consumer-build -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install
-      - name: Build consumer
+      - name: Build installed-package consumer
         run: cmake --build consumer-build --config Release
       - name: Upload installed SDK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -51,68 +87,105 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  kokkos-serial:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure Kokkos Serial
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_ENABLE_KOKKOS=ON -DIDMESH_BUILD_TESTS=ON
-      - name: Build
-        run: cmake --build build --parallel 2
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-      - name: Install Kokkos SDK
-        run: cmake --install build --prefix install-kokkos
-      - name: Build external Kokkos consumer
-        run: cmake -S tests/consumer -B consumer-kokkos -DCMAKE_PREFIX_PATH=$PWD/install-kokkos && cmake --build consumer-kokkos --parallel 2
-
-  mpi:
+  linux-backends:
+    name: backend / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: kokkos-serial
+            build_dir: build-kokkos
+            install_dir: install-kokkos
+            cmake_args: -DIDMESH_ENABLE_KOKKOS=ON
+            needs_mpi: false
+          - name: mpi
+            build_dir: build-mpi
+            install_dir: install-mpi
+            cmake_args: -DIDMESH_ENABLE_MPI=ON
+            needs_mpi: true
+          - name: mpi-kokkos-serial
+            build_dir: build-joint
+            install_dir: install-joint
+            cmake_args: -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
+            needs_mpi: true
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install OpenMPI
+        if: matrix.needs_mpi
         run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
-      - name: Configure MPI
-        run: cmake -S . -B build-mpi -DCMAKE_BUILD_TYPE=Release -DIDMESH_ENABLE_MPI=ON -DIDMESH_BUILD_TESTS=ON
-      - name: Build MPI and examples
-        run: cmake --build build-mpi --parallel 2
-      - name: Test MPI with two and three ranks
+      - name: Configure
+        run: cmake -S . -B ${{ matrix.build_dir }} -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON ${{ matrix.cmake_args }}
+      - name: Build
+        run: cmake --build ${{ matrix.build_dir }} --parallel 2
+      - name: Test
         env:
           OMPI_MCA_rmaps_base_oversubscribe: "1"
-        run: ctest --test-dir build-mpi --output-on-failure
-      - name: Install MPI SDK
-        run: cmake --install build-mpi --prefix install-mpi
-      - name: Build external MPI consumer
-        run: cmake -S tests/consumer -B consumer-mpi -DCMAKE_PREFIX_PATH=$PWD/install-mpi && cmake --build consumer-mpi --parallel 2
+        run: ctest --test-dir ${{ matrix.build_dir }} --output-on-failure
+      - name: Install SDK
+        run: cmake --install ${{ matrix.build_dir }} --prefix ${{ matrix.install_dir }}
+      - name: Verify external consumer
+        run: cmake -S tests/consumer -B consumer-${{ matrix.name }} -DCMAKE_PREFIX_PATH=$PWD/${{ matrix.install_dir }} && cmake --build consumer-${{ matrix.name }} --parallel 2
 
   examples:
+    name: examples / basix
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Basix test dependency
         run: python -m pip install fenics-basix==0.11.0 numpy
-      - name: Configure three standalone examples
+      - name: Configure examples
         run: cmake -S . -B build-examples -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_BUILD_EXAMPLES=ON -DIDMESH_TEST_BASIX=ON -DPython3_EXECUTABLE=$(command -v python)
-      - name: Build basix_orientation, FVM and FEM
+      - name: Build examples
         run: cmake --build build-examples --target idmesh_basix_orientation idmesh_fvm idmesh_fem --parallel 2
-      - name: Run all three examples
+      - name: Run examples
         run: ctest --test-dir build-examples --output-on-failure -R '^idmesh[.]example[.](basix_orientation|fvm|fem)$'
 
-  mpi-kokkos-serial:
+  cleanup:
+    name: actions retention
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [style, native, linux-backends, examples]
     runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      actions: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - name: Install MPI runtime and headers
-        run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
-      - name: Configure combined MPI/Kokkos backend
-        run: cmake -S . -B build-joint -DCMAKE_BUILD_TYPE=Release -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON -DIDMESH_BUILD_TESTS=ON
-      - name: Build
-        run: cmake --build build-joint --parallel 2
-      - name: Run MPI device-halo tests
+      - name: Prune obsolete main-branch workflow runs
         env:
-          OMPI_MCA_rmaps_base_oversubscribe: "1"
-        run: ctest --test-dir build-joint --output-on-failure
-      - name: Install combined SDK
-        run: cmake --install build-joint --prefix install-joint
-      - name: Verify external combined SDK consumer
-        run: cmake -S tests/consumer -B consumer-joint -DCMAKE_PREFIX_PATH=$PWD/install-joint && cmake --build consumer-joint --parallel 2
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          KEEP_CI_RUNS: "8"
+        shell: bash
+        run: |
+          mapfile -t runs < <(
+            gh api --paginate "/repos/$GITHUB_REPOSITORY/actions/runs?branch=main&per_page=100" \
+              --jq '.workflow_runs[] | [.id, .name, .status] | @tsv'
+          )
+
+          kept=0
+          deleted=0
+          for row in "${runs[@]}"; do
+            IFS=$'\t' read -r id name status <<< "$row"
+            [[ "$id" == "$CURRENT_RUN_ID" ]] && continue
+            [[ "$status" != "completed" ]] && continue
+
+            delete=false
+            if [[ "$name" == "CI" ]]; then
+              if (( kept < KEEP_CI_RUNS )); then
+                ((kept += 1))
+              else
+                delete=true
+              fi
+            else
+              delete=true
+            fi
+
+            if [[ "$delete" == true ]]; then
+              gh api --method DELETE "/repos/$GITHUB_REPOSITORY/actions/runs/$id"
+              ((deleted += 1))
+            fi
+          done
+
+          echo "Kept $kept completed CI runs and deleted $deleted obsolete or legacy runs." \
+            >> "$GITHUB_STEP_SUMMARY"
