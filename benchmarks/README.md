@@ -13,6 +13,27 @@ cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-bench --config Release --target idmesh_benchmark
 ```
 
+## Baseline matrix runner
+
+`run_baseline.py` executes every topology configuration in a fresh process,
+so peak-RSS high-water marks are comparable across `minimal`,
+`finite_volume` and `full`. It writes the unmodified benchmark columns plus
+`case` and `process_repeat` to `raw.csv`, together with
+`metadata.json` containing the exact commands and host/runtime metadata.
+
+```sh
+python3 benchmarks/run_baseline.py ./build-bench/idmesh_benchmark \
+  --output benchmark-results --repeats 5
+
+# Add larger 3D cases when the machine has sufficient memory.
+python3 benchmarks/run_baseline.py ./build-bench/idmesh_benchmark \
+  --output benchmark-results-large --repeats 5 --large
+```
+
+The runner is a local developer convenience and is not called by GitHub
+Actions. Use CPU affinity externally when comparing revisions on a shared
+workstation, and retain both output files with the benchmark report.
+
 ## Workload matrix
 
 Each command measures **one topology materialization per process**. This is
