@@ -13,7 +13,6 @@
 #include <limits>
 #include <map>
 #include <queue>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -122,19 +121,27 @@ namespace idmesh {
             return result;
         }
 
-        std::vector<std::set<Index>> entity_closure(
+        std::vector<std::vector<Index>> entity_closure(
             const Mesh& topology, std::span<const Index> cells)
         {
             const Index dim = topology.dimension();
-            std::vector<std::set<Index>> result(dim + 1);
-            result[dim].insert(cells.begin(), cells.end());
+            std::vector<std::vector<Index>> result(dim + 1);
+            result[dim].assign(cells.begin(), cells.end());
             for (int from = static_cast<int>(dim); from > 0; --from) {
+                auto& upper = result[from];
+                std::sort(upper.begin(), upper.end());
+                upper.erase(std::unique(upper.begin(), upper.end()), upper.end());
                 const auto boundary = topology.relation(
                     static_cast<Index>(from), static_cast<Index>(from - 1));
-                for (Index entity : result[from])
-                    for (Index lower : boundary[entity].targets)
-                        result[from - 1].insert(lower);
+                auto& lower = result[from - 1];
+                for (Index entity : upper) {
+                    const auto targets = boundary[entity].targets;
+                    lower.insert(lower.end(), targets.begin(), targets.end());
+                }
             }
+            auto& vertices = result[0];
+            std::sort(vertices.begin(), vertices.end());
+            vertices.erase(std::unique(vertices.begin(), vertices.end()), vertices.end());
             return result;
         }
 
@@ -293,7 +300,7 @@ namespace idmesh {
         const auto global_owners
             = entity_owners(identity, owners, parts);
 
-        std::vector<std::vector<std::set<Index>>> local_entities(parts);
+        std::vector<std::vector<std::vector<Index>>> local_entities(parts);
         for (int rank = 0; rank < parts; ++rank)
             local_entities[rank]
                 = entity_closure(identity, local_cells[rank]);
@@ -324,28 +331,31 @@ namespace idmesh {
             const auto& entities = local_entities[rank];
             const auto& corners = entities[0];
 
-            std::set<Index> geometry;
+            std::vector<Index> geometry;
             for (Index cell : local) {
                 const auto nodes = source.cell_geometry_nodes(cell);
                 for (std::size_t j
                          = cell_vertex_count(source.cell_types()[cell]);
                      j < nodes.size(); ++j)
-                    geometry.insert(nodes[j]);
+                    geometry.push_back(nodes[j]);
             }
+            std::sort(geometry.begin(), geometry.end());
+            geometry.erase(
+                std::unique(geometry.begin(), geometry.end()), geometry.end());
 
             std::vector<const Label*> labels;
             std::map<std::pair<Index, int>, std::string> names;
             for (const auto& label : source.labels()) {
                 if (label.dimension == d) {
                     if (label.entity == invalid_index
-                        || !entities[d].contains(label.entity))
+                        || !std::binary_search(entities[d].begin(), entities[d].end(), label.entity))
                         continue;
                 }
                 else {
                     const bool all_corners_present = std::all_of(
                         label.vertices.begin(), label.vertices.end(),
                         [&](Index vertex) {
-                            return corners.contains(vertex);
+                            return std::binary_search(corners.begin(), corners.end(), vertex);
                         });
                     if (!all_corners_present)
                         continue;
