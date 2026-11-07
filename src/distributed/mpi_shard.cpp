@@ -115,8 +115,13 @@ namespace idmesh::mpi {
                 }
                 else {
                     std::array<Index, 4> corners {};
-                    for (std::size_t j = 0; j < label.entities.size(); ++j)
-                        corners[j] = vertices.at(label.entities[j]);
+                    for (std::size_t j = 0; j < label.entities.size(); ++j) {
+                        const auto found = vertices.find(label.entities[j]);
+                        ::idmesh::detail::require_runtime(
+                            found != vertices.end(),
+                            "label refers to missing shard vertex");
+                        corners[j] = found->second;
+                    }
                     builder.add_label(label.dimension,
                         std::span(corners).first(label.entities.size()),
                         label.value);
