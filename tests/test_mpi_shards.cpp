@@ -105,8 +105,6 @@ namespace {
                 && partition.owner_ranks(dimension).size() == count,
             "distributed entity metadata mismatch");
         const auto owned = partition.owned_entities(dimension);
-        require(!owned.empty(), "rank owns no entities on a materialized dimension");
-
         std::vector<bool> is_owned(count);
         for (Index entity : owned) {
             require(entity < count && !is_owned[entity],

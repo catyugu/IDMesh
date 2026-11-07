@@ -1,4 +1,5 @@
 #include "idmesh/mpi_kokkos.hpp"
+#include "idmesh/partition.hpp"
 #include "mesh_factory.hpp"
 
 #include <Kokkos_Core.hpp>
