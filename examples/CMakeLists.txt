@@ -4,7 +4,7 @@ foreach(_example IN ITEMS fvm fem basix_orientation)
     idmesh_stage_runtime(idmesh_${_example})
 endforeach()
 
-if(IDMESH_BUILD_TESTS AND IDMESH_BUILD_INTEGRATION_TESTS AND PROJECT_IS_TOP_LEVEL)
+if(IDMESH_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL)
     add_test(NAME idmesh.example.fvm COMMAND idmesh_fvm)
     add_test(NAME idmesh.example.fem COMMAND idmesh_fem)
     set_tests_properties(idmesh.example.fvm idmesh.example.fem

@@ -9,7 +9,6 @@ in-memory checks of local contracts and algorithms. `integration` tests exercise
 file-format pipelines, installed consumers and real backend runtimes, including
 multi-rank MPI and Kokkos execution. Both layers use the repository's small
 `tests/support/test.hpp` runner; no external C++ test framework is required.
-`IDMESH_BUILD_INTEGRATION_TESTS=OFF` keeps only the fast unit layer.
 
 | Area | Automated verification | Scope |
 | --- | --- | --- |
