@@ -10,4 +10,11 @@ static_assert(std::is_same_v<
 static_assert(std::is_move_constructible_v<idmesh::mpi::kokkos::DeviceHaloPlan>);
 static_assert(!std::is_copy_constructible_v<idmesh::mpi::kokkos::DeviceHaloPlan>);
 
+void link_device_halo_api(idmesh::mpi::kokkos::DeviceHaloPlan& plan,
+    idmesh::kokkos::DeviceField& field)
+{
+    plan.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+    plan.wait();
+}
+
 int main() { return 0; }
