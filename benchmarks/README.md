@@ -138,3 +138,26 @@ cost. The FVM-to-full difference captures the additional Edge/Face
 materialization work. Add `--cell-labels` to assign one physical tag to every
 generated top-dimensional Cell; comparing the same command without the flag
 isolates a deliberately label-heavy finalization workload.
+
+## MPI halo measurements
+
+When MPI is enabled, `idmesh_mpi_benchmark` compares the complete host
+`ExchangePlan::exchange` path with the already-packed
+`ExchangePlan::exchange_packed` transport path. The reported median is reduced
+with `MPI_MAX`, so the printed value represents the slowest rank.
+
+```sh
+cmake -S . -B build-mpi-bench -DCMAKE_BUILD_TYPE=Release \
+  -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
+cmake --build build-mpi-bench --target idmesh_mpi_benchmark --parallel
+
+mpiexec -n 2 ./build-mpi-bench/benchmarks/idmesh_mpi_benchmark \
+  --side 96 --components 1 --ghost-layers 1 --iterations 50
+mpiexec -n 4 ./build-mpi-bench/benchmarks/idmesh_mpi_benchmark \
+  --side 96 --components 8 --ghost-layers 1 --iterations 50
+```
+
+Run the benchmark on controlled hosts only. It is intentionally excluded from
+CTest and GitHub Actions. The difference between `exchange_ms_p50_max` and
+`packed_mpi_ms_p50_max` approximates host packing/unpacking plus hot-path
+allocation overhead; the packed measurement excludes application-side packing.
