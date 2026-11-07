@@ -217,14 +217,10 @@ namespace {
     std::size_t visible_payload_bytes(const idmesh::Mesh& mesh)
     {
         std::size_t bytes = relation_bytes(mesh);
-        for (Index dimension = 0; dimension <= mesh.dimension(); ++dimension) {
-            if (!mesh.has_entities(dimension))
-                continue;
-            const Index count = mesh.entity_count(dimension);
-            bytes += static_cast<std::size_t>(count + 1) * sizeof(Index);
-            for (Index id = 0; id < count; ++id)
-                bytes += mesh.entity_vertices(dimension, id).size_bytes();
-        }
+        // Non-vertex entity connectivity is relation(k, 0) and is already
+        // counted above. Vertices retain only their compact identity array.
+        bytes += static_cast<std::size_t>(mesh.entity_count(0))
+            * sizeof(Index);
         bytes += mesh.coordinates().size_bytes();
         bytes += mesh.cell_types().size_bytes();
         const auto labels = mesh.labels();

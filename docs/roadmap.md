@@ -14,9 +14,9 @@
 - [x] Global entity identity and deterministic cross-rank orientation matching.
 - [x] Owned/ghost ranges, partitioning and halo exchange; MPI remains an optional backend.
 - [x] Rank-local shard input with a distributed shared-entity registry.
-- [x] Geometry/field mirrors and device-aware communication with host-staging fallback.
+- [x] Geometry mirrors and caller-owned device-aware communication with host-staging fallback.
 - [x] Communicator-scoped MPI contexts without exposing `mpi.h` in the SDK.
-- [x] Reusable nonblocking host halo exchange with persistent request buffers.
+- [x] Reusable sparse-neighbor host halo exchange with persistent request buffers.
 - [ ] Multi-node weak scaling and external partitioner adapters/tooling.
 
 ## Milestone 3: advanced mesh coupling
@@ -41,7 +41,7 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Persistent Kokkos topology/geometry mirrors with typed raw device descriptors (Serial CI).
 - [x] Standalone FVM conservation/normal and FEEC incidence examples.
 - [x] Scalable rank-local shard input and dependency-free graph-based partitioning baseline.
-- [x] GPU-backed field buffers and device-aware halo exchange with host staging fallback.
+- [x] Caller-owned device buffers and device-aware halo exchange with host staging fallback.
 - [x] Nonblocking device-aware halo exchange with reusable staging/request state.
 - [ ] Physical CUDA/HIP validation of overlap and direct GPU-aware MPI.
 - [x] Add executable Basix C++-backed Nedelec DOF-transformation integration tests and CI.
@@ -51,7 +51,7 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Serial graph partition to rank-local shard exporter (1/2 Ghost layers).
 - [x] Independently read owned/ghost Cell and quadratic geometry shards on each MPI Rank.
 - [x] Distributed registry for unique shared entity IDs and ownership.
-- [x] Build halo exchange from explicit global-ID ghost requests without global mesh replication.
+- [x] Build flat sparse-neighbor halo plans from explicit global-ID ghost requests without global mesh replication.
 - [x] Keep external partitioners behind the plain Cell-owner-vector shard-writer boundary.
 - [ ] Add ParMETIS/PT-Scotch adapters/tooling and multi-node weak scaling when a concrete caller requires them.
 - [ ] Fully distributed parallel generation of shard files from a global parallel mesh format.

@@ -1,5 +1,6 @@
 #pragma once
 #include "idmesh/mpi.hpp"
+#include "mpi_errors.hpp"
 #include <mpi.h>
 #include <climits>
 #include <cstddef>
@@ -26,15 +27,76 @@ namespace idmesh::mpi {
     };
 
     struct ExchangePlan::Data {
-        std::vector<std::vector<Index>> send;
-        std::vector<std::vector<Index>> recv;
-        std::vector<int> send_records;
-        std::vector<int> recv_records;
-        std::vector<int> send_record_offsets;
-        std::vector<int> recv_record_offsets;
+        std::vector<Index> send_entities;
+        std::vector<Index> recv_entities;
+        std::vector<int> send_entity_offsets;
+        std::vector<int> recv_entity_offsets;
+        std::vector<int> send_peers;
+        std::vector<int> recv_peers;
         Index local_entities = 0;
-        MPI_Comm comm = MPI_COMM_NULL;
+        int ranks = 0;
+        MPI_Comm neighbor_comm = MPI_COMM_NULL;
         std::shared_ptr<void> context_owner;
+
+        ~Data()
+        {
+            if (neighbor_comm == MPI_COMM_NULL)
+                return;
+            int finalized = 0;
+            MPI_Finalized(&finalized);
+            if (!finalized)
+                MPI_Comm_free(&neighbor_comm);
+        }
+
+        std::span<const Index> peer_span(
+            const std::vector<Index>& entities,
+            const std::vector<int>& offsets, int peer) const
+        {
+            const auto begin = static_cast<std::size_t>(offsets[peer]);
+            const auto end = static_cast<std::size_t>(offsets[peer + 1]);
+            return {entities.data() + begin, end - begin};
+        }
+
+        void initialize_layout(MPI_Comm comm,
+            std::vector<std::vector<Index>> send,
+            std::vector<std::vector<Index>> recv)
+        {
+            ranks = static_cast<int>(send.size());
+            if (recv.size() != send.size())
+                throw std::invalid_argument("halo send/receive rank count mismatch");
+            send_entity_offsets.resize(static_cast<std::size_t>(ranks) + 1);
+            recv_entity_offsets.resize(static_cast<std::size_t>(ranks) + 1);
+            for (int peer = 0; peer < ranks; ++peer) {
+                if (!send[peer].empty())
+                    send_peers.push_back(peer);
+                if (!recv[peer].empty())
+                    recv_peers.push_back(peer);
+                if (send_entities.size() > static_cast<std::size_t>(INT_MAX)
+                    - send[peer].size()
+                    || recv_entities.size() > static_cast<std::size_t>(INT_MAX)
+                    - recv[peer].size())
+                    throw std::length_error("halo entity layout exceeds MPI int range");
+                send_entities.insert(send_entities.end(),
+                    send[peer].begin(), send[peer].end());
+                recv_entities.insert(recv_entities.end(),
+                    recv[peer].begin(), recv[peer].end());
+                send_entity_offsets[peer + 1]
+                    = static_cast<int>(send_entities.size());
+                recv_entity_offsets[peer + 1]
+                    = static_cast<int>(recv_entities.size());
+            }
+
+            ::idmesh::mpi::detail::check_mpi(
+                MPI_Dist_graph_create_adjacent(comm,
+                    static_cast<int>(recv_peers.size()), recv_peers.data(),
+                    MPI_UNWEIGHTED,
+                    static_cast<int>(send_peers.size()), send_peers.data(),
+                    MPI_UNWEIGHTED, MPI_INFO_NULL, 0, &neighbor_comm),
+                "MPI_Dist_graph_create_adjacent");
+            ::idmesh::mpi::detail::check_mpi(
+                MPI_Comm_set_errhandler(neighbor_comm, MPI_ERRORS_RETURN),
+                "MPI_Comm_set_errhandler");
+        }
 
         void scaled_layout(std::size_t bytes_per_entity,
             std::vector<int>& send_counts, std::vector<int>& recv_counts,
@@ -43,48 +105,31 @@ namespace idmesh::mpi {
             if (bytes_per_entity == 0)
                 throw std::invalid_argument("halo record size must be positive");
             const auto width = static_cast<std::uint64_t>(bytes_per_entity);
-            const int peers = static_cast<int>(send.size());
-            send_counts.resize(peers);
-            recv_counts.resize(peers);
-            send_offsets.resize(peers);
-            recv_offsets.resize(peers);
-            for (int peer = 0; peer < peers; ++peer) {
-                const auto send_count = static_cast<std::uint64_t>(send_records[peer]) * width;
-                const auto recv_count = static_cast<std::uint64_t>(recv_records[peer]) * width;
-                const auto send_offset = static_cast<std::uint64_t>(send_record_offsets[peer]) * width;
-                const auto recv_offset = static_cast<std::uint64_t>(recv_record_offsets[peer]) * width;
-                if (send_count > INT_MAX || recv_count > INT_MAX
-                    || send_offset > INT_MAX || recv_offset > INT_MAX)
-                    throw std::length_error("halo exchange exceeds MPI count/displacement limits");
-                send_counts[peer] = static_cast<int>(send_count);
-                recv_counts[peer] = static_cast<int>(recv_count);
-                send_offsets[peer] = static_cast<int>(send_offset);
-                recv_offsets[peer] = static_cast<int>(recv_offset);
-            }
-        }
+            send_counts.resize(send_peers.size());
+            recv_counts.resize(recv_peers.size());
+            send_offsets.resize(send_peers.size());
+            recv_offsets.resize(recv_peers.size());
 
-        void finalize_layout()
-        {
-            const int peers = static_cast<int>(send.size());
-            send_records.resize(peers);
-            recv_records.resize(peers);
-            send_record_offsets.resize(peers);
-            recv_record_offsets.resize(peers);
-            int send_offset = 0;
-            int recv_offset = 0;
-            for (int peer = 0; peer < peers; ++peer) {
-                if (send[peer].size() > static_cast<std::size_t>(INT_MAX)
-                    || recv[peer].size() > static_cast<std::size_t>(INT_MAX))
-                    throw std::length_error("halo peer record count exceeds MPI int range");
-                send_records[peer] = static_cast<int>(send[peer].size());
-                recv_records[peer] = static_cast<int>(recv[peer].size());
-                send_record_offsets[peer] = send_offset;
-                recv_record_offsets[peer] = recv_offset;
-                if (send_offset > INT_MAX - send_records[peer]
-                    || recv_offset > INT_MAX - recv_records[peer])
-                    throw std::length_error("halo record displacement overflow");
-                send_offset += send_records[peer];
-                recv_offset += recv_records[peer];
+            const auto scale = [width](int value) {
+                const auto scaled = static_cast<std::uint64_t>(value) * width;
+                if (scaled > INT_MAX)
+                    throw std::length_error(
+                        "halo exchange exceeds MPI count/displacement limits");
+                return static_cast<int>(scaled);
+            };
+            for (std::size_t i = 0; i < send_peers.size(); ++i) {
+                const int peer = send_peers[i];
+                send_offsets[i] = scale(send_entity_offsets[peer]);
+                send_counts[i] = scale(
+                    send_entity_offsets[peer + 1]
+                    - send_entity_offsets[peer]);
+            }
+            for (std::size_t i = 0; i < recv_peers.size(); ++i) {
+                const int peer = recv_peers[i];
+                recv_offsets[i] = scale(recv_entity_offsets[peer]);
+                recv_counts[i] = scale(
+                    recv_entity_offsets[peer + 1]
+                    - recv_entity_offsets[peer]);
             }
         }
     };

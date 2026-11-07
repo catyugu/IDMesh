@@ -175,8 +175,8 @@ namespace idmesh {
         // Top-dimensional Cell connectivity enters already packed from MeshBuilder.
         std::array<Index, 4> counts {};
         std::array<bool, 4> enabled {};
-        std::array<std::vector<Index>, 4> vertex_offsets;
-        std::array<std::vector<Index>, 4> vertex_indices;
+        // Vertex identity is the only entity-to-vertex storage outside relation(k, 0).
+        std::vector<Index> vertex_ids;
         std::array<std::array<RelationData, 4>, 4> relations;
         std::vector<std::array<double, 3>> coordinates;
         std::vector<CellType> types;
@@ -298,9 +298,12 @@ namespace idmesh {
             throw std::logic_error("empty mesh");
         if (dimension > data_->dimension || id >= data_->counts[dimension])
             throw std::out_of_range("entity index");
-        const auto& offsets = data_->vertex_offsets[dimension];
-        const auto& indices = data_->vertex_indices[dimension];
-        return {indices.data() + offsets[id], offsets[id + 1] - offsets[id]};
+        if (dimension == 0)
+            return {data_->vertex_ids.data() + id, 1};
+        const auto& connectivity = data_->relations[dimension][0];
+        if (!connectivity.present)
+            throw std::logic_error("entity-to-vertex relation missing");
+        return connectivity.view()[id].targets;
     }
     std::span<const std::array<double, 3>> Mesh::coordinates() const
     {
@@ -532,10 +535,51 @@ namespace idmesh {
             data.dimension = source.dimension_;
             data.geometric_dimension = source.geometric_dimension_;
             data.coordinates = std::move(source.coordinates_);
-            data.counts[source.dimension_] = static_cast<Index>(source.types_.size());
-            data.vertex_offsets[source.dimension_] = std::move(source.cell_offsets_);
-            data.vertex_indices[source.dimension_] = std::move(source.cell_vertices_);
+            detail::require_length(data.coordinates.size() < invalid_index,
+                "too many vertices");
+            data.counts[0] = static_cast<Index>(data.coordinates.size());
+            data.vertex_ids.resize(data.coordinates.size());
+            for (Index vertex = 0; vertex < data.counts[0]; ++vertex)
+                data.vertex_ids[vertex] = vertex;
+
+            data.counts[source.dimension_]
+                = static_cast<Index>(source.types_.size());
             data.types = std::move(source.types_);
+
+            auto offsets = std::move(source.cell_offsets_);
+            auto& connectivity = data.relations[source.dimension_][0];
+            connectivity.present = true;
+            connectivity.rows = data.counts[source.dimension_];
+            connectivity.indices = std::move(source.cell_vertices_);
+            IDMESH_ASSERT(offsets.size()
+                == static_cast<std::size_t>(connectivity.rows) + 1);
+            IDMESH_ASSERT(offsets.empty()
+                || (offsets.front() == 0
+                    && offsets.back() == connectivity.indices.size()));
+            const Index stride = connectivity.rows == 0
+                ? 0
+                : offsets[1] - offsets[0];
+            bool fixed = true;
+            for (Index row = 0; row < connectivity.rows; ++row)
+                fixed = fixed
+                    && offsets[row + 1] - offsets[row] == stride;
+            if (fixed)
+                connectivity.stride = stride;
+            else
+                connectivity.offsets = std::move(offsets);
+
+            if (source.dimension_ == 1) {
+                connectivity.signs.resize(connectivity.indices.size());
+                connectivity.orientations.resize(
+                    connectivity.indices.size());
+                for (Index cell = 0; cell < connectivity.rows; ++cell) {
+                    const auto begin = static_cast<std::size_t>(cell) * 2;
+                    IDMESH_ASSERT(begin + 1 < connectivity.signs.size());
+                    connectivity.signs[begin] = -1;
+                    connectivity.signs[begin + 1] = 1;
+                }
+            }
+
             data.cell_orders = std::move(source.cell_orders_);
             data.extra_geometry_nodes = std::move(source.extra_geometry_nodes_);
             data.label_names = std::move(source.label_names_);
@@ -551,10 +595,7 @@ namespace idmesh {
                 static_cast<std::size_t>(data.counts[data.dimension]) + 1);
             data.geometry_offsets.push_back(0);
             const auto cell_vertices = [&](Index cell) -> std::span<const Index> {
-                const auto& offsets = data.vertex_offsets[data.dimension];
-                const auto& indices = data.vertex_indices[data.dimension];
-                const auto begin = offsets[cell];
-                return {indices.data() + begin, offsets[cell + 1] - begin};
+                return data.relations[data.dimension][0].view()[cell].targets;
             };
             for (Index c = 0; c < data.counts[data.dimension]; ++c) {
                 if (data.cell_orders[c] == 2) {
@@ -585,12 +626,8 @@ namespace idmesh {
             std::array<std::vector<Loop>, 4> entities;
             const auto construction_vertices =
                 [&](Index dim, Index id) -> std::span<const Index> {
-                if (dim == data.dimension) {
-                    const auto& offsets = data.vertex_offsets[dim];
-                    const auto& indices = data.vertex_indices[dim];
-                    const auto begin = offsets[id];
-                    return {indices.data() + begin, offsets[id + 1] - begin};
-                }
+                if (dim == data.dimension)
+                    return data.relations[dim][0].view()[id].targets;
                 return entities[dim][id].view();
             };
 
@@ -628,13 +665,10 @@ namespace idmesh {
                 incidence[from][to].push_back({id, entry});
             };
     
-            // Cell-to-vertex is permanently available even with intermediate dimensions omitted.
+            // Cell-to-vertex is already the packed relation moved from MeshBuilder.
             for (Index c = 0; c < data.counts[source.dimension_]; ++c) {
-                const auto vertices = construction_vertices(source.dimension_, c);
-                for (Index local = 0; local < vertices.size(); ++local) {
-                    auto sign = source.dimension_ == 1 ? (local == 0 ? -1 : 1) : 0;
-                    attach(source.dimension_, 0, c, {vertices[local], static_cast<std::int8_t>(sign), {}});
-                }
+                const auto vertices
+                    = construction_vertices(source.dimension_, c);
                 if (source.dimension_ == 1)
                     continue;
                 if (want(source.dimension_ - 1)) {
@@ -727,33 +761,9 @@ namespace idmesh {
                                      && a.unbound_vertices == b.unbound_vertices;
                              }),
                 labels.end());
-            for (Index dim = 0; dim <= source.dimension_; ++dim) {
-                auto& offsets = data.vertex_offsets[dim];
-                auto& indices = data.vertex_indices[dim];
-                if (dim == 0) {
-                    const auto count = static_cast<Index>(data.coordinates.size());
-                    data.counts[0] = count;
-                    offsets.resize(static_cast<std::size_t>(count) + 1);
-                    indices.resize(count);
-                    for (Index v = 0; v < count; ++v) {
-                        offsets[v] = v;
-                        indices[v] = v;
-                    }
-                    offsets[count] = count;
-                    continue;
-                }
-                if (dim == source.dimension_)
-                    continue;
-                auto& lists = entities[dim];
-                data.counts[dim] = static_cast<Index>(lists.size());
-                offsets.reserve(lists.size() + 1);
-                offsets.push_back(0);
-                for (const auto& vertices : lists) {
-                    indices.insert(indices.end(), vertices.begin(), vertices.end());
-                    offsets.push_back(static_cast<Index>(indices.size()));
-                }
-                std::vector<Loop>().swap(lists);
-            }
+            for (Index dim = 1; dim < source.dimension_; ++dim)
+                data.counts[dim]
+                    = static_cast<Index>(entities[dim].size());
             for (Index from = 1; from <= source.dimension_; ++from) {
                 for (Index to = 0; to < from; ++to) {
                     auto& entries = incidence[from][to];
@@ -764,15 +774,24 @@ namespace idmesh {
                     const bool oriented = from == to + 1;
                     auto relation = compress(entries, data.counts[from], oriented);
                     PendingRelation().swap(entries);
-                    if (options.relations == RelationDirection::bidirectional && from == to + 1) {
+                    if (options.relations == RelationDirection::bidirectional
+                        && from == to + 1) {
                         data.relations[to][from] = transpose(
                             relation, data.counts[to]);
                     }
                     data.relations[from][to] = std::move(relation);
                 }
             }
-            // Materialized entities borrow their already-packed connectivity.
-            // Only labels on absent topology layers keep private vertex keys.
+            if (source.dimension_ == 1
+                && options.relations == RelationDirection::bidirectional) {
+                data.relations[0][1] = transpose(
+                    data.relations[1][0], data.counts[0]);
+            }
+            for (Index dim = 1; dim < source.dimension_; ++dim)
+                std::vector<Loop>().swap(entities[dim]);
+
+            // Materialized labels borrow relation(k, 0), the canonical entity
+            // connectivity storage. Only labels on absent layers keep private keys.
             std::size_t unbound_entries = 0;
             for (const auto& label : labels)
                 if (label.entity == invalid_index)
@@ -782,10 +801,15 @@ namespace idmesh {
             for (const auto& label : labels) {
                 std::span<const Index> vertices;
                 if (label.entity != invalid_index) {
-                    const auto& offsets = data.vertex_offsets[label.dimension];
-                    const auto& indices = data.vertex_indices[label.dimension];
-                    const auto begin = offsets[label.entity];
-                    vertices = {indices.data() + begin, offsets[label.entity + 1] - begin};
+                    if (label.dimension == 0) {
+                        vertices = {
+                            data.vertex_ids.data() + label.entity, 1};
+                    }
+                    else {
+                        vertices = data.relations[label.dimension][0]
+                                       .view()[label.entity]
+                                       .targets;
+                    }
                 }
                 else {
                     const auto begin = data.unbound_label_vertices.size();
@@ -819,6 +843,14 @@ namespace idmesh {
             throw std::logic_error("empty mesh");
         if (data_->cell_orders.size() != data_->counts[data_->dimension])
             throw std::logic_error("invalid cell geometry count");
+        if (data_->vertex_ids.size() != data_->counts[0])
+            throw std::logic_error("invalid vertex identity storage");
+        for (Index vertex = 0; vertex < data_->counts[0]; ++vertex)
+            if (data_->vertex_ids[vertex] != vertex)
+                throw std::logic_error("invalid vertex identity");
+        for (Index dimension = 1; dimension <= data_->dimension; ++dimension)
+            if (has_entities(dimension) && !has_relation(dimension, 0))
+                throw std::logic_error("missing entity-to-vertex relation");
         if (data_->geometry_offsets.empty()) {
             if (!data_->geometry_indices.empty() || std::any_of(data_->cell_orders.begin(), data_->cell_orders.end(), [](std::uint8_t order) { return order != 1; }))
                 throw std::logic_error("missing high-order geometry connectivity");

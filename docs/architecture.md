@@ -129,7 +129,7 @@ an owned-first local range.
 
 `exchange_plan(dimension).make_request(bytes_per_entity)` allocates byte counts,
 displacements and packed buffers once. Repeated `start(records)` / `wait()`
-cycles perform no IDMesh-side host allocation. Records are opaque bytes, so the mesh layer does not prescribe a scalar or field type. The same transport applies to Vertex, Edge, Facet and Cell records. `start` packs owner records and launches `MPI_Ialltoallv`; `wait()` completes the collective and unpacks ghost records, allowing independent work to overlap the communication interval.
+cycles perform no IDMesh-side host allocation. Records are opaque bytes, so the mesh layer does not prescribe a scalar or field type. The same transport applies to Vertex, Edge, Facet and Cell records. `start` packs owner records and launches `MPI_Ineighbor_alltoallv`; `wait()` completes the collective and unpacks ghost records, allowing independent work to overlap the communication interval.
 
 The bundled graph partitioner and shard writer are core, dependency-free serial
 preprocessing tools exposed by `idmesh/partition.hpp`. The shard writer takes
@@ -216,7 +216,11 @@ registry share, rather than the complete global mesh.
 After global identity and ownership are established, each materialized
 dimension builds its halo plan from global-ID requests sent to entity owners.
 The resulting `ExchangePlan` is topology-dimension agnostic and operates
-without accessing the original mesh or the identity registry.
+without accessing the original mesh or the identity registry. Its peer index
+lists are stored as flat arrays with rank offsets. A distributed-graph
+communicator is created once from the nonempty send/receive peer sets, so
+repeated halo exchanges use sparse neighborhood collectives rather than
+communicator-wide collectives.
 
 `idmesh::partition_graph` performs balanced region growing on the
 Facet-adjacency cell dual graph, initializing well-separated seeds and
@@ -230,8 +234,9 @@ connectivity and supplied Ghost layers; the reader does not infer
 missing off-rank neighbors from geometry. All distributed operations use
 the communicator owned by the caller-supplied `mpi::Context`; metadata
 operations are still blocking and local shard files must be consistent.
-Extremely large individual messages remain subject to MPI_Alltoallv's
-integer-count limits.
+Registry setup still uses bounded communicator-wide `MPI_Alltoallv`; repeated
+halo traffic uses sparse neighborhood collectives. Extremely large individual
+messages remain subject to MPI integer-count limits.
 
 ## GPU fields and direct MPI transport
 
@@ -243,7 +248,8 @@ supports `automatic`, `host_staging`, and `require_gpu_aware` transports.
 When using Open MPI, capability is queried via
 `MPIX_Query_cuda_support` / `MPIX_Query_rocm_support`, when present.
 `DeviceHaloPlan::start(device_data, byte_size)` packs caller-owned records, fences the pack dependency,
-performs D2H staging when required, and launches `MPI_Ialltoallv`.
+performs D2H staging when required, and launches `MPI_Ineighbor_alltoallv` on
+the plan's distributed-graph communicator.
 Applications may launch work that does not depend on Ghost values before
 calling `wait`; MPI progress during that interval depends on the MPI runtime.
 `wait` completes MPI, performs H2D staging when required, unpacks Ghost

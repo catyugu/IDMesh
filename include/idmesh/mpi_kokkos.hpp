@@ -33,7 +33,7 @@ namespace idmesh::mpi::kokkos {
         bool direct_device_transport_available() const;
 
         // Packs fixed-width records from caller-owned device memory, performs
-        // any required D2H staging, then starts MPI_Ialltoallv. The device
+        // any required D2H staging, then starts the sparse MPI neighborhood exchange. The device
         // storage must remain alive until wait() completes.
         void start(void* device_data, std::size_t byte_size,
             DeviceTransport mode = DeviceTransport::automatic);

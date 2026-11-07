@@ -116,13 +116,8 @@ namespace idmesh::mpi::kokkos {
         data_->entities = plan.local_entity_count();
         data_->bytes_per_entity = bytes_per_entity;
 
-        std::vector<Index> send, receive;
-        for (int peer = 0; peer < plan.rank_count(); ++peer) {
-            const auto sending = plan.send_indices(peer);
-            const auto receiving = plan.receive_indices(peer);
-            send.insert(send.end(), sending.begin(), sending.end());
-            receive.insert(receive.end(), receiving.begin(), receiving.end());
-        }
+        const auto& send = plan.data_->send_entities;
+        const auto& receive = plan.data_->recv_entities;
         if (send.size() > std::numeric_limits<std::size_t>::max()
                     / bytes_per_entity
             || receive.size() > std::numeric_limits<std::size_t>::max()
@@ -213,13 +208,16 @@ namespace idmesh::mpi::kokkos {
         }
 
         MPI_Request request = MPI_REQUEST_NULL;
-        ::idmesh::mpi::detail::check_mpi(
-            MPI_Ialltoallv(send_pointer, data_->send_counts.data(),
-                data_->send_offsets.data(), MPI_BYTE,
-                receive_pointer, data_->receive_counts.data(),
-                data_->receive_offsets.data(), MPI_BYTE,
-                data_->plan.data_->comm, &request),
-            "MPI_Ialltoallv");
+        if (!data_->plan.empty()) {
+            ::idmesh::mpi::detail::check_mpi(
+                MPI_Ineighbor_alltoallv(send_pointer,
+                    data_->send_counts.data(), data_->send_offsets.data(),
+                    MPI_BYTE, receive_pointer,
+                    data_->receive_counts.data(),
+                    data_->receive_offsets.data(), MPI_BYTE,
+                    data_->plan.data_->neighbor_comm, &request),
+                "MPI_Ineighbor_alltoallv");
+        }
         data_->request = request;
         data_->field_data = field_data;
         data_->staged = !use_direct;
