@@ -11,7 +11,7 @@
 #include <utility>
 
 namespace {
-    idmesh::Mesh make_mesh()
+    idmesh::Mesh make_mesh(idmesh::BuildOptions options = {})
     {
         idmesh::MeshBuilder builder(2, 2);
         for (const auto& p : std::array<std::array<double, 3>, 9> {{
@@ -23,7 +23,7 @@ namespace {
                  {{0, 1, 4, 3}}, {{4, 5, 8, 7}},
                  {{1, 2, 5, 4}}, {{3, 4, 7, 6}}}})
             builder.add_cell(idmesh::CellType::quadrilateral, c);
-        return std::move(builder).finalize();
+        return std::move(builder).finalize(options);
     }
 }
 
@@ -87,11 +87,63 @@ void partition_shards()
         std::filesystem::remove(path);
     }
 }
+void partial_topology_shards()
+{
+    const auto full = make_mesh();
+    const auto owners = idmesh::partition_graph(full, 2);
+    const auto prefix = (std::filesystem::temp_directory_path()
+        / "idmesh-partial-topology").string();
+
+    const auto contents = [](const std::string& filename) {
+        std::ifstream input(filename);
+        require(static_cast<bool>(input), "missing partition shard output");
+        return std::string(std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>());
+    };
+
+    for (idmesh::Index ghost = 0; ghost <= 2; ++ghost) {
+        const auto base = prefix + "-base-" + std::to_string(ghost);
+        idmesh::write_partition_shards(full, owners, ghost, base);
+        for (const auto layout : {
+                 idmesh::TopologyLayout::cell_vertices,
+                 idmesh::TopologyLayout::cell_facets,
+                 idmesh::TopologyLayout::complete}) {
+            for (const auto relations : {
+                     idmesh::RelationDirection::downward,
+                     idmesh::RelationDirection::bidirectional}) {
+                const auto mesh = make_mesh({layout, relations});
+                const auto candidate = prefix + "-partial";
+                idmesh::write_partition_shards(
+                    mesh, owners, ghost, candidate);
+                for (int rank = 0; rank < 2; ++rank) {
+                    const auto suffix = "." + std::to_string(rank) + ".idm";
+                    require(contents(base + suffix)
+                            == contents(candidate + suffix),
+                        "partial topology changed shard identity or halo");
+                    std::filesystem::remove(candidate + suffix);
+                }
+            }
+        }
+        for (int rank = 0; rank < 2; ++rank)
+            std::filesystem::remove(
+                base + "." + std::to_string(rank) + ".idm");
+    }
+
+    const std::array<int, 4> sparse_ranks {0, 1000000000, 0, 0};
+    expect_error<std::invalid_argument>(
+        [&] {
+            idmesh::write_partition_shards(
+                full, sparse_ranks, 0, prefix + "-invalid");
+        },
+        "sparse rank IDs attempted oversized shard allocation");
+}
+
 } // namespace
 
 int main()
 {
     return idmesh::test::run({
         {"partition shard pipeline", partition_shards},
+        {"partial topology shards", partial_topology_shards},
     });
 }
