@@ -19,7 +19,7 @@ if(IDMESH_ENABLE_KOKKOS)
     endif()
 
     if(IDMESH_DEVICE_LANGUAGE)
-        set_source_files_properties(src/kokkos.cpp src/mpi_kokkos.cpp
+        set_source_files_properties(src/device/kokkos.cpp src/device/mpi_kokkos.cpp
             PROPERTIES LANGUAGE ${IDMESH_DEVICE_LANGUAGE})
     endif()
 

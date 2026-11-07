@@ -1,7 +1,7 @@
 #include "idmesh/mpi.hpp"
 #include "idmesh/partition.hpp"
 #include "mesh_factory.hpp"
-#include "mpi_shard_profile.hpp"
+#include "distributed/mpi_shard_profile.hpp"
 
 #include <array>
 #include <chrono>

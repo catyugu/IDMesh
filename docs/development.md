@@ -27,6 +27,11 @@ contains file/backend/end-to-end tests, and `tests/support/test.hpp` is the
 small dependency-free test runner shared by both layers. `examples/` and
 `benchmarks/` own their executable targets separately.
 
+Implementation files are grouped under `src/core/`, `src/io/`,
+`src/distributed/` and `src/device/`. These are source-level boundaries:
+the existing four exported SDK targets and their link interfaces stay unchanged.
+Shared implementation-only contracts remain in `src/contracts.hpp`.
+
 Build options, public target aliases (`IDMesh::IDMesh`, `IDMesh::Kokkos`,
 `IDMesh::MPI`, `IDMesh::MPIKokkos`), installed package files, and CTest
 names remain stable. Test and example executables stage their required

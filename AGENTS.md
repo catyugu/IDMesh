@@ -22,8 +22,8 @@ the dedicated trusted GPU runner.
 
 ## Conventions
 
-- `include/idmesh/*.hpp` is the supported SDK surface; `src/*.hpp` is
-  implementation-private. Never expose Kokkos or MPI types through core APIs.
+- `include/idmesh/*.hpp` is the supported SDK surface; headers under
+  `src/` are implementation-private. Never expose Kokkos or MPI types through core APIs.
 - `include/idmesh/export.hpp` is the sole definition of ABI export macros.
 - `Index` is uint32_t and `invalid_index` is reserved; use size_t for host
   container sizes and check for narrowing/overflow before conversions.
