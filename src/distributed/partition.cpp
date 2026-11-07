@@ -74,6 +74,9 @@ namespace idmesh {
             bool complete = true;
             for (Index k = 0; k <= dim; ++k)
                 complete = complete && source.has_entities(k);
+            for (Index k = 1; k <= dim; ++k)
+                complete = complete && source.has_relation(k, k - 1);
+            complete = complete && source.has_relation(dim - 1, dim);
             if (complete)
                 return source;
 
@@ -136,8 +139,10 @@ namespace idmesh {
         }
 
         struct HaloLayout {
-            std::map<int, std::vector<Index>> send;
-            std::map<int, std::vector<Index>> receive;
+            struct Peer {
+                std::vector<Index> send, receive;
+            };
+            std::map<int, Peer> peers;
         };
 
     } // namespace
@@ -246,25 +251,26 @@ namespace idmesh {
             parts = std::max(parts, owner + 1);
         }
         ::idmesh::detail::require_argument(
-            parts >= 1, "empty shard partition");
-
-        const auto graph = dual_graph(source);
-        std::vector<std::vector<Index>> owned(parts);
-        for (Index cell = 0; cell < n; ++cell)
-            owned[owners[cell]].push_back(cell);
-
+            parts >= 1 && static_cast<std::uint64_t>(parts) <= n,
+            "invalid shard rank count");
         std::vector<std::vector<Index>> local_cells(parts);
-        for (int rank = 0; rank < parts; ++rank) {
+        for (Index cell = 0; cell < n; ++cell)
+            local_cells[owners[cell]].push_back(cell);
+        for (const auto& cells : local_cells)
             ::idmesh::detail::require_argument(
-                !owned[rank].empty(),
+                !cells.empty(),
                 "every exported shard must own cells");
+
+        const auto identity = complete_identity_topology(source);
+        const auto graph = dual_graph(identity);
+        for (int rank = 0; rank < parts; ++rank) {
             std::vector<bool> seen(n);
             std::vector<Index> frontier;
-            for (Index cell : owned[rank]) {
+            for (Index cell : local_cells[rank]) {
                 seen[cell] = true;
                 frontier.push_back(cell);
             }
-            std::set<Index> ghosts;
+            std::vector<Index> ghosts;
             for (Index depth = 0; depth < ghost_layers; ++depth) {
                 std::vector<Index> next;
                 for (Index cell : frontier) {
@@ -274,17 +280,16 @@ namespace idmesh {
                         seen[neighbor] = true;
                         next.push_back(neighbor);
                         if (owners[neighbor] != rank)
-                            ghosts.insert(neighbor);
+                            ghosts.push_back(neighbor);
                     }
                 }
                 frontier = std::move(next);
             }
-            local_cells[rank] = owned[rank];
+            std::sort(ghosts.begin(), ghosts.end());
             local_cells[rank].insert(local_cells[rank].end(),
                 ghosts.begin(), ghosts.end());
         }
 
-        const Mesh identity = complete_identity_topology(source);
         const auto global_owners
             = entity_owners(identity, owners, parts);
 
@@ -301,23 +306,18 @@ namespace idmesh {
                     const int owner = global_owners[k][entity];
                     if (owner == rank)
                         continue;
-                    halos[rank][k].receive[owner].push_back(entity);
-                    halos[owner][k].send[rank].push_back(entity);
+                    halos[rank][k].peers[owner].receive.push_back(entity);
+                    halos[owner][k].peers[rank].send.push_back(entity);
                 }
             }
         }
-        for (auto& rank_halos : halos) {
-            for (auto& layout : rank_halos) {
-                for (auto& [peer, ids] : layout.send) {
+        for (auto& rank_halos : halos)
+            for (auto& layout : rank_halos)
+                for (auto& [peer, lists] : layout.peers) {
                     (void)peer;
-                    std::sort(ids.begin(), ids.end());
+                    std::sort(lists.send.begin(), lists.send.end());
+                    std::sort(lists.receive.begin(), lists.receive.end());
                 }
-                for (auto& [peer, ids] : layout.receive) {
-                    (void)peer;
-                    std::sort(ids.begin(), ids.end());
-                }
-            }
-        }
 
         for (int rank = 0; rank < parts; ++rank) {
             const auto& local = local_cells[rank];
@@ -335,12 +335,10 @@ namespace idmesh {
 
             std::vector<const Label*> labels;
             std::map<std::pair<Index, int>, std::string> names;
-            const std::set<Index> local_cell_set(
-                local.begin(), local.end());
             for (const auto& label : source.labels()) {
                 if (label.dimension == d) {
                     if (label.entity == invalid_index
-                        || !local_cell_set.contains(label.entity))
+                        || !entities[d].contains(label.entity))
                         continue;
                 }
                 else {
@@ -365,18 +363,8 @@ namespace idmesh {
                 identity_count += entities[k].size();
 
             std::size_t halo_count = 0;
-            for (Index k = 0; k <= d; ++k) {
-                std::set<int> peers;
-                for (const auto& [peer, ids] : halos[rank][k].send) {
-                    (void)ids;
-                    peers.insert(peer);
-                }
-                for (const auto& [peer, ids] : halos[rank][k].receive) {
-                    (void)ids;
-                    peers.insert(peer);
-                }
-                halo_count += peers.size();
-            }
+            for (Index k = 0; k <= d; ++k)
+                halo_count += halos[rank][k].peers.size();
 
             std::ofstream out(
                 prefix + "." + std::to_string(rank) + ".idm");
@@ -429,39 +417,17 @@ namespace idmesh {
             }
 
             out << "HALOS " << halo_count << '\n';
-            for (Index k = 0; k <= d; ++k) {
-                std::set<int> peers;
-                for (const auto& [peer, ids] : halos[rank][k].send) {
-                    (void)ids;
-                    peers.insert(peer);
-                }
-                for (const auto& [peer, ids] : halos[rank][k].receive) {
-                    (void)ids;
-                    peers.insert(peer);
-                }
-                for (int peer : peers) {
-                    static const std::vector<Index> empty;
-                    const auto sent = halos[rank][k].send.find(peer);
-                    const auto received
-                        = halos[rank][k].receive.find(peer);
-                    const auto& send_ids = sent == halos[rank][k].send.end()
-                        ? empty
-                        : sent->second;
-                    const auto& receive_ids
-                        = received == halos[rank][k].receive.end()
-                        ? empty
-                        : received->second;
-
+            for (Index k = 0; k <= d; ++k)
+                for (const auto& [peer, lists] : halos[rank][k].peers) {
                     out << k << ' ' << peer << ' '
-                        << send_ids.size() << ' '
-                        << receive_ids.size();
-                    for (Index id : send_ids)
+                        << lists.send.size() << ' '
+                        << lists.receive.size();
+                    for (Index id : lists.send)
                         out << ' ' << id;
-                    for (Index id : receive_ids)
+                    for (Index id : lists.receive)
                         out << ' ' << id;
                     out << '\n';
                 }
-            }
 
             out << "LABELS " << labels.size() << '\n';
             for (const auto* label : labels) {

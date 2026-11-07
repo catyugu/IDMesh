@@ -32,7 +32,8 @@ namespace idmesh::detail::shard {
         Index dimension = 0;
         std::uint64_t id = 0;
         int owner = -1;
-        std::vector<std::uint64_t> vertices;
+        std::array<std::uint64_t, 4> vertices {};
+        std::uint8_t arity = 0;
     };
 
     struct HaloRecord {
