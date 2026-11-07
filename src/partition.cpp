@@ -21,6 +21,64 @@
 namespace idmesh {
     namespace {
 
+        Mesh complete_identity_topology(const Mesh& source)
+        {
+            const Index dim = source.dimension();
+            bool complete = true;
+            for (Index k = 0; k <= dim; ++k)
+                complete = complete && source.has_entities(k);
+            if (complete)
+                return source;
+
+            MeshBuilder builder(dim, source.geometric_dimension());
+            for (const auto& point : source.coordinates())
+                builder.add_vertex(point);
+            for (Index cell = 0; cell < source.entity_count(dim); ++cell)
+                builder.add_cell(source.cell_types()[cell],
+                    source.entity_vertices(dim, cell));
+            return std::move(builder).finalize(
+                {.topology = TopologyLayout::complete,
+                    .relations = RelationDirection::bidirectional});
+        }
+
+        std::vector<std::vector<int>> entity_owners(
+            const Mesh& topology, std::span<const int> cell_owners, int parts)
+        {
+            const Index dim = topology.dimension();
+            std::vector<std::vector<int>> result(dim + 1);
+            for (Index k = 0; k <= dim; ++k)
+                result[k].assign(topology.entity_count(k), parts);
+            result[dim].assign(cell_owners.begin(), cell_owners.end());
+
+            for (int from = static_cast<int>(dim); from > 0; --from) {
+                const auto boundary = topology.relation(from, from - 1);
+                for (Index entity = 0;
+                     entity < topology.entity_count(from); ++entity)
+                    for (Index lower : boundary[entity].targets)
+                        result[from - 1][lower] = std::min(
+                            result[from - 1][lower], result[from][entity]);
+            }
+            return result;
+        }
+
+        std::vector<std::set<Index>> local_subentities(
+            const Mesh& topology, std::span<const Index> cells)
+        {
+            const Index dim = topology.dimension();
+            std::vector<std::set<Index>> result(dim);
+            std::set<Index> current(cells.begin(), cells.end());
+            for (int from = static_cast<int>(dim); from > 0; --from) {
+                const auto boundary = topology.relation(from, from - 1);
+                std::set<Index> next;
+                for (Index entity : current)
+                    for (Index lower : boundary[entity].targets)
+                        next.insert(lower);
+                result[from - 1] = next;
+                current = std::move(next);
+            }
+            return result;
+        }
+
         std::vector<std::vector<Index>> dual_graph(const Mesh& mesh)
         {
             const auto dim = mesh.dimension();
@@ -172,6 +230,9 @@ namespace idmesh {
         for (Index cell = 0; cell < n; ++cell)
             owned[owners[cell]].push_back(cell);
 
+        const auto identity = complete_identity_topology(source);
+        const auto global_owners = entity_owners(identity, owners, parts);
+
         for (int rank = 0; rank < parts; ++rank) {
             ::idmesh::detail::require_argument(!owned[rank].empty(), "every exported shard must own cells");
             std::vector<bool> seen(n);
@@ -197,6 +258,7 @@ namespace idmesh {
             }
             std::vector<Index> local = owned[rank];
             local.insert(local.end(), ghosts.begin(), ghosts.end());
+            const auto identities = local_subentities(identity, local);
 
             std::set<Index> corners;
             std::set<Index> geometry;
@@ -231,12 +293,13 @@ namespace idmesh {
 
             std::ofstream out(prefix + "." + std::to_string(rank) + ".idm");
             ::idmesh::detail::require_runtime(static_cast<bool>(out), "cannot create partition shard file");
-            out << "IDMESH_SHARD 2\nDIM " << d << ' ' << source.geometric_dimension() << '\n';
+            out << "IDMESH_SHARD 3\nDIM " << d << ' ' << source.geometric_dimension() << '\n';
             out << std::setprecision(17);
             out << "VERTICES " << corners.size() << '\n';
             for (Index id : corners) {
                 const auto p = source.coordinates()[id];
-                out << id << ' ' << p[0] << ' ' << p[1] << ' ' << p[2] << '\n';
+                out << id << ' ' << global_owners[0][id] << ' '
+                    << p[0] << ' ' << p[1] << ' ' << p[2] << '\n';
             }
             out << "GEOMETRY_NODES " << geometry.size() << '\n';
             for (Index id : geometry) {
@@ -252,6 +315,24 @@ namespace idmesh {
                     out << ' ' << id;
                 out << '\n';
             }
+
+            std::size_t identity_count = 0;
+            for (Index k = 1; k < d; ++k)
+                identity_count += identities[k].size();
+            out << "ENTITIES " << identity_count << '\n';
+            for (Index k = 1; k < d; ++k) {
+                for (Index entity : identities[k]) {
+                    const auto vertices
+                        = identity.entity_vertices(k, entity);
+                    out << k << ' ' << entity << ' '
+                        << global_owners[k][entity] << ' '
+                        << vertices.size();
+                    for (Index vertex : vertices)
+                        out << ' ' << vertex;
+                    out << '\n';
+                }
+            }
+
             out << "LABELS " << labels.size() << '\n';
             for (const auto* label : labels) {
                 if (label->dimension == d) {

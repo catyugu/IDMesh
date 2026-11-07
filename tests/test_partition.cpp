@@ -54,7 +54,7 @@ int main()
             std::string magic;
             int version = 0;
             require(static_cast<bool>(input >> magic >> version)
-                    && magic == "IDMESH_SHARD" && version == 2,
+                    && magic == "IDMESH_SHARD" && version == 3,
                 "invalid core shard output");
         }
         std::filesystem::remove(path);

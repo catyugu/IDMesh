@@ -124,12 +124,22 @@ namespace idmesh::mpi {
             std::vector<std::uint64_t> entities;
         };
 
+        struct EntityIdentity {
+            Index dimension = 0;
+            std::uint64_t id = 0;
+            int owner = -1;
+            std::vector<std::uint64_t> vertices;
+        };
+
         struct Shard {
+            int version = 0;
             Index dimension = 0;
             Index geometric_dimension = 0;
             std::map<std::uint64_t, std::array<double, 3>> vertices;
+            std::map<std::uint64_t, int> vertex_owners;
             std::map<std::uint64_t, std::array<double, 3>> geometry_nodes;
             std::vector<Cell> cells;
+            std::vector<EntityIdentity> entities;
             std::vector<Label> labels;
             std::map<std::pair<Index, int>, std::string> label_names;
         };
@@ -140,19 +150,41 @@ namespace idmesh::mpi {
             ::idmesh::detail::require_runtime(static_cast<bool>(file), "cannot open local IDMesh partition shard");
             Shard shard;
             std::string word;
-            int version = 0;
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> version) && word == "IDMESH_SHARD" && version == 2, "invalid IDMesh shard version");
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> shard.version)
+                    && word == "IDMESH_SHARD"
+                    && (shard.version == 2 || shard.version == 3),
+                "invalid IDMesh shard version");
             ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> shard.dimension >> shard.geometric_dimension) && word == "DIM" && shard.dimension >= 1 && shard.dimension <= 3 && shard.geometric_dimension >= shard.dimension && shard.geometric_dimension <= 3, "invalid shard dimensions");
             std::size_t count = 0;
             ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "VERTICES" && count < invalid_index, "invalid shard VERTICES section");
             for (std::size_t i = 0; i < count; ++i) {
                 std::uint64_t id = 0;
+                int owner = -1;
                 std::array<double, 3> p {};
-                ::idmesh::detail::require_runtime(static_cast<bool>(file >> id >> p[0] >> p[1] >> p[2]),
-                    "truncated shard vertex");
-                ::idmesh::detail::require_argument(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]),
+                if (shard.version >= 3) {
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(
+                            file >> id >> owner >> p[0] >> p[1] >> p[2]),
+                        "truncated shard vertex");
+                    ::idmesh::detail::require_runtime(
+                        owner >= 0 && owner < size,
+                        "invalid shard vertex owner");
+                    shard.vertex_owners[id] = owner;
+                }
+                else {
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(
+                            file >> id >> p[0] >> p[1] >> p[2]),
+                        "truncated shard vertex");
+                }
+                ::idmesh::detail::require_argument(
+                    std::isfinite(p[0]) && std::isfinite(p[1])
+                        && std::isfinite(p[2]),
                     "nonfinite shard vertex");
-                ::idmesh::detail::require_runtime(shard.vertices.emplace(id, p).second, "duplicate shard vertex");
+                ::idmesh::detail::require_runtime(
+                    shard.vertices.emplace(id, p).second,
+                    "duplicate shard vertex");
             }
             ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "GEOMETRY_NODES" && count < invalid_index, "invalid GEOMETRY_NODES section");
             for (std::size_t i = 0; i < count; ++i) {
@@ -188,6 +220,39 @@ namespace idmesh::mpi {
                         "cell references missing high-order geometry node");
                 ::idmesh::detail::require_runtime(seen.insert(cell.id).second, "duplicate shard global cell ID");
                 shard.cells.push_back(std::move(cell));
+            }
+            if (shard.version >= 3) {
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> word >> count)
+                        && word == "ENTITIES" && count < invalid_index,
+                    "invalid shard ENTITIES section");
+                std::set<std::pair<Index, std::uint64_t>> seen_entities;
+                for (std::size_t i = 0; i < count; ++i) {
+                    EntityIdentity entity;
+                    std::size_t arity = 0;
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(file >> entity.dimension
+                            >> entity.id >> entity.owner >> arity)
+                            && entity.dimension > 0
+                            && entity.dimension < shard.dimension
+                            && entity.owner >= 0 && entity.owner < size
+                            && arity >= 2 && arity <= 4,
+                        "invalid shard entity identity header");
+                    entity.vertices.resize(arity);
+                    for (auto& vertex : entity.vertices) {
+                        ::idmesh::detail::require_runtime(
+                            static_cast<bool>(file >> vertex),
+                            "truncated shard entity identity");
+                        ::idmesh::detail::require_runtime(
+                            shard.vertices.contains(vertex),
+                            "entity identity references missing vertex");
+                    }
+                    ::idmesh::detail::require_runtime(
+                        seen_entities.emplace(
+                            entity.dimension, entity.id).second,
+                        "duplicate shard entity global ID");
+                    shard.entities.push_back(std::move(entity));
+                }
             }
             ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "LABELS",
                 "missing shard LABELS section");
@@ -348,13 +413,15 @@ namespace idmesh::mpi {
             std::vector<std::vector<int>> owner_ranks;
         };
 
-        IdentityMetadata resolve_entity_identity(MPI_Comm comm,
+        IdentityMetadata resolve_entity_identity_v2(MPI_Comm comm,
             int rank, int size, const Mesh& mesh,
             const std::vector<std::uint64_t>& local_to_global_vertex,
             std::vector<std::uint64_t> cell_ids,
             std::vector<int> cell_owners,
             detail::ShardReadProfile* profile)
         {
+            if (profile)
+                profile->registry_used = true;
             const Index dim = mesh.dimension();
             IdentityMetadata metadata;
             metadata.global_ids.resize(dim + 1);
@@ -498,6 +565,97 @@ namespace idmesh::mpi {
             return metadata;
         }
 
+        IdentityMetadata resolve_entity_identity_v3(
+            const Shard& shard, const Mesh& mesh,
+            const std::vector<std::uint64_t>& local_to_global_vertex,
+            std::vector<std::uint64_t> cell_ids,
+            std::vector<int> cell_owners,
+            detail::ShardReadProfile* profile)
+        {
+            const auto begin
+                = profile ? Clock::now() : Clock::time_point {};
+            const Index dim = mesh.dimension();
+            IdentityMetadata metadata;
+            metadata.global_ids.resize(dim + 1);
+            metadata.owner_ranks.resize(dim + 1);
+            metadata.global_ids[dim] = std::move(cell_ids);
+            metadata.owner_ranks[dim] = std::move(cell_owners);
+
+            metadata.global_ids[0].resize(mesh.entity_count(0));
+            metadata.owner_ranks[0].resize(mesh.entity_count(0));
+            for (Index vertex = 0; vertex < mesh.entity_count(0); ++vertex) {
+                const auto global = local_to_global_vertex[vertex];
+                const auto owner = shard.vertex_owners.find(global);
+                ::idmesh::detail::require_runtime(
+                    owner != shard.vertex_owners.end(),
+                    "shard lacks vertex owner");
+                metadata.global_ids[0][vertex] = global;
+                metadata.owner_ranks[0][vertex] = owner->second;
+            }
+
+            std::map<Key, std::pair<std::uint64_t, int>> embedded;
+            for (const auto& entity : shard.entities) {
+                Key key;
+                key.dim = static_cast<std::uint8_t>(entity.dimension);
+                key.arity = static_cast<std::uint8_t>(entity.vertices.size());
+                for (std::size_t j = 0; j < entity.vertices.size(); ++j)
+                    key.ids[j] = entity.vertices[j];
+                std::sort(key.ids.begin(), key.ids.begin() + key.arity);
+                ::idmesh::detail::require_runtime(
+                    embedded.emplace(
+                        key, std::pair {entity.id, entity.owner}).second,
+                    "duplicate shard entity identity key");
+            }
+
+            for (Index k = 1; k < dim; ++k) {
+                if (!mesh.has_entities(k))
+                    continue;
+                metadata.global_ids[k].resize(mesh.entity_count(k));
+                metadata.owner_ranks[k].resize(mesh.entity_count(k));
+                for (Index entity = 0;
+                     entity < mesh.entity_count(k); ++entity) {
+                    const auto local = mesh.entity_vertices(k, entity);
+                    Key key;
+                    key.dim = static_cast<std::uint8_t>(k);
+                    key.arity = static_cast<std::uint8_t>(local.size());
+                    ::idmesh::detail::require_runtime(
+                        key.arity >= 2 && key.arity <= 4,
+                        "invalid local entity arity");
+                    for (std::size_t j = 0; j < local.size(); ++j)
+                        key.ids[j] = local_to_global_vertex[local[j]];
+                    std::sort(key.ids.begin(), key.ids.begin() + key.arity);
+                    const auto found = embedded.find(key);
+                    ::idmesh::detail::require_runtime(
+                        found != embedded.end(),
+                        "shard lacks materialized entity identity");
+                    metadata.global_ids[k][entity] = found->second.first;
+                    metadata.owner_ranks[k][entity] = found->second.second;
+                }
+            }
+
+            if (profile)
+                profile->embedded_identity_ms
+                    = milliseconds(begin, Clock::now());
+            return metadata;
+        }
+
+        IdentityMetadata resolve_entity_identity(
+            MPI_Comm comm, int rank, int size, const Shard& shard,
+            const Mesh& mesh,
+            const std::vector<std::uint64_t>& local_to_global_vertex,
+            std::vector<std::uint64_t> cell_ids,
+            std::vector<int> cell_owners,
+            detail::ShardReadProfile* profile)
+        {
+            if (shard.version >= 3)
+                return resolve_entity_identity_v3(
+                    shard, mesh, local_to_global_vertex,
+                    std::move(cell_ids), std::move(cell_owners), profile);
+            return resolve_entity_identity_v2(
+                comm, rank, size, mesh, local_to_global_vertex,
+                std::move(cell_ids), std::move(cell_owners), profile);
+        }
+
         struct ExchangeLayout {
             std::vector<Index> owned;
             std::vector<std::vector<Index>> send;
@@ -612,7 +770,7 @@ namespace idmesh::mpi {
                 = milliseconds(mesh_begin, Clock::now());
 
         auto metadata = resolve_entity_identity(
-            comm, rank, size, local.mesh,
+            comm, rank, size, input, local.mesh,
             local.local_to_global_vertex,
             std::move(local.cell_ids),
             std::move(local.cell_owners), profile);

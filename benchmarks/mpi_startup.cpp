@@ -214,6 +214,8 @@ int main(int argc, char** argv)
             const auto mesh_ms = reduce_max(profile.local_mesh_ms, MPI_DOUBLE);
             const auto owner_ms
                 = reduce_max(profile.owner_candidates_ms, MPI_DOUBLE);
+            const auto embedded_ms
+                = reduce_max(profile.embedded_identity_ms, MPI_DOUBLE);
             const auto request_ms
                 = reduce_max(profile.registry_request_ms, MPI_DOUBLE);
             const auto resolve_ms
@@ -228,6 +230,11 @@ int main(int argc, char** argv)
             std::uint64_t peak_delta
                 = peak_after > peak_before ? peak_after - peak_before : 0;
             peak_delta = reduce_max(peak_delta, MPI_UINT64_T);
+
+            int registry_used_local = profile.registry_used ? 1 : 0;
+            int registry_used = 0;
+            MPI_Reduce(&registry_used_local, &registry_used, 1,
+                MPI_INT, MPI_MAX, 0, MPI_COMM_WORLD);
 
             const auto registry_send
                 = reduce_sum(profile.registry_send_bytes);
@@ -258,6 +265,7 @@ int main(int argc, char** argv)
                           << "ranks,layout,local_cells_max,local_facets_max,"
                              "local_edges_max,total_ms_max,parse_ms_max,"
                              "local_mesh_ms_max,owner_candidates_ms_max,"
+                             "embedded_identity_ms_max,registry_used,"
                              "registry_request_ms_max,registry_resolve_ms_max,"
                              "registry_reply_ms_max,exchange_plan_ms_max,"
                              "validate_ms_max,peak_rss_delta_bytes_max,"
@@ -268,6 +276,7 @@ int main(int argc, char** argv)
                           << max_cells << ',' << max_facets << ','
                           << max_edges << ',' << total_ms << ',' << parse_ms
                           << ',' << mesh_ms << ',' << owner_ms << ','
+                          << embedded_ms << ',' << registry_used << ','
                           << request_ms << ',' << resolve_ms << ','
                           << reply_ms << ',' << plan_ms << ','
                           << validate_ms << ',' << peak_delta << ','

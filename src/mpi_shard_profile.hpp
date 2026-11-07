@@ -11,6 +11,8 @@ namespace idmesh::mpi::detail {
         double parse_ms = 0.0;
         double local_mesh_ms = 0.0;
         double owner_candidates_ms = 0.0;
+        double embedded_identity_ms = 0.0;
+        bool registry_used = false;
         double registry_request_ms = 0.0;
         double registry_resolve_ms = 0.0;
         double registry_reply_ms = 0.0;
