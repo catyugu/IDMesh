@@ -502,9 +502,10 @@ namespace idmesh {
         for (Index vertex : vertices)
             detail::require_argument(vertex < data_->coordinates_.size(),
                 "invalid labeled entity vertex");
-        const auto end = sorted.begin() + vertices.size();
-        std::sort(sorted.begin(), end);
-        detail::require_argument(std::adjacent_find(sorted.begin(), end) == end,
+        const auto sorted_end = sorted.begin() + vertices.size();
+        std::sort(sorted.begin(), sorted_end);
+        detail::require_argument(
+            std::adjacent_find(sorted.begin(), sorted_end) == sorted_end,
             "duplicate labeled entity vertex");
         detail::require_length(data_->label_assignment_vertices_.size() < std::size_t(invalid_index) - vertices.size(),
             "label connectivity overflow");
