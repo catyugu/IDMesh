@@ -3,6 +3,7 @@
 #include "idmesh/export.hpp"
 #include "idmesh/mesh.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>

@@ -7,6 +7,7 @@
 #include <limits>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
