@@ -37,6 +37,7 @@ namespace idmesh::detail::vtk {
     };
 
     EncodedCell encode_cell(const Mesh& mesh, Index cell);
+    std::vector<double> point_coordinates(const Mesh& mesh);
 
     enum class AttributeAssociation : std::uint8_t {
         point,

@@ -737,14 +737,7 @@ namespace idmesh::vtk {
                 "duplicate VTU field name in one association");
         }
 
-        std::vector<double> coordinates;
-        coordinates.reserve(
-            static_cast<std::size_t>(mesh.geometry_node_count()) * 3);
-        for (Index point = 0; point < mesh.geometry_node_count(); ++point) {
-            const auto p = mesh.geometry_node_position(point);
-            coordinates.insert(
-                coordinates.end(), p.begin(), p.end());
-        }
+        const auto coordinates = detail::vtk::point_coordinates(mesh);
         const auto points_array
             = data::make_interleaved_array(
                 std::span(coordinates), 3);

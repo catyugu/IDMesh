@@ -180,6 +180,17 @@ namespace idmesh::detail::vtk {
         return result;
     }
 
+    std::vector<double> point_coordinates(const Mesh& mesh)
+    {
+        std::vector<double> result;
+        result.reserve(static_cast<std::size_t>(mesh.geometry_node_count()) * 3);
+        for (Index point = 0; point < mesh.geometry_node_count(); ++point) {
+            const auto xyz = mesh.geometry_node_position(point);
+            result.insert(result.end(), xyz.begin(), xyz.end());
+        }
+        return result;
+    }
+
     AttributeAssociation attribute_association(
         const Mesh& mesh, const data::MeshDataView& field)
     {
