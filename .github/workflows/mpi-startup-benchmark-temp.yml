@@ -27,13 +27,21 @@ jobs:
         run: cmake --build build --target idmesh_mpi_startup_benchmark --parallel 2
       - name: Measure 2-rank startup
         run: |
+          start=$(date +%s%N)
           build/benchmarks/idmesh_mpi_startup_benchmark --prepare /tmp/idmesh-startup-2 --parts 2 --side 24 --ghost-layers 1
+          end=$(date +%s%N)
+          echo "prepare_ns_2=$((end-start))"
+          echo "shard_bytes_2=$(wc -c /tmp/idmesh-startup-2.*.idm | tail -n 1 | awk '{print $1}')"
           for layout in cell_vertices cell_facets complete; do
             mpiexec -n 2 build/benchmarks/idmesh_mpi_startup_benchmark --prefix /tmp/idmesh-startup-2 --parts 2 --layout "$layout"
           done
       - name: Measure 4-rank startup
         run: |
+          start=$(date +%s%N)
           build/benchmarks/idmesh_mpi_startup_benchmark --prepare /tmp/idmesh-startup-4 --parts 4 --side 24 --ghost-layers 1
+          end=$(date +%s%N)
+          echo "prepare_ns_4=$((end-start))"
+          echo "shard_bytes_4=$(wc -c /tmp/idmesh-startup-4.*.idm | tail -n 1 | awk '{print $1}')"
           for layout in cell_vertices cell_facets complete; do
             mpiexec -n 4 build/benchmarks/idmesh_mpi_startup_benchmark --prefix /tmp/idmesh-startup-4 --parts 4 --layout "$layout"
           done
