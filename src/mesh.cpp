@@ -1,5 +1,6 @@
 #include "idmesh/mesh.hpp"
 #include "contracts.hpp"
+#include "reference_cell.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -287,94 +288,28 @@ namespace idmesh {
         std::map<std::pair<Index, int>, std::string> label_names_;
     };
 
-    namespace {
-        struct ReferenceFacet {
-            std::array<std::uint8_t, 4> vertices;
-            std::uint8_t size;
-        };
-        constexpr std::array<ReferenceFacet, 2> segment_facets {{{{{1, 0, 0, 0}}, 1}, {{{0, 0, 0, 0}}, 1}}};
-        constexpr std::array<ReferenceFacet, 3> triangle_facets {{{{{0, 1, 0, 0}}, 2}, {{{1, 2, 0, 0}}, 2}, {{{2, 0, 0, 0}}, 2}}};
-        constexpr std::array<ReferenceFacet, 4> quad_facets {{{{{0, 1, 0, 0}}, 2}, {{{1, 2, 0, 0}}, 2},
-            {{{2, 3, 0, 0}}, 2}, {{{3, 0, 0, 0}}, 2}}};
-        constexpr std::array<ReferenceFacet, 4> tetra_facets {{{{{1, 2, 3, 0}}, 3}, {{{0, 3, 2, 0}}, 3},
-            {{{0, 1, 3, 0}}, 3}, {{{0, 2, 1, 0}}, 3}}};
-        constexpr std::array<ReferenceFacet, 6> hex_facets {{{{{0, 3, 2, 1}}, 4}, {{{4, 5, 6, 7}}, 4},
-            {{{0, 1, 5, 4}}, 4}, {{{1, 2, 6, 5}}, 4},
-            {{{2, 3, 7, 6}}, 4}, {{{3, 0, 4, 7}}, 4}}};
-        constexpr std::array<ReferenceFacet, 5> prism_facets {{{{{0, 2, 1, 0}}, 3}, {{{3, 4, 5, 0}}, 3},
-            {{{0, 1, 4, 3}}, 4}, {{{1, 2, 5, 4}}, 4}, {{{2, 0, 3, 5}}, 4}}};
-        constexpr std::array<ReferenceFacet, 5> pyramid_facets {{{{{0, 3, 2, 1}}, 4}, {{{0, 1, 4, 0}}, 3},
-            {{{1, 2, 4, 0}}, 3}, {{{2, 3, 4, 0}}, 3}, {{{3, 0, 4, 0}}, 3}}};
-        std::span<const ReferenceFacet> reference_facets(CellType type)
-        {
-            switch (type) {
-            case CellType::segment:
-                return segment_facets;
-            case CellType::triangle:
-                return triangle_facets;
-            case CellType::quadrilateral:
-                return quad_facets;
-            case CellType::tetrahedron:
-                return tetra_facets;
-            case CellType::hexahedron:
-                return hex_facets;
-            case CellType::prism:
-                return prism_facets;
-            case CellType::pyramid:
-                return pyramid_facets;
-            }
-            throw std::invalid_argument("unknown reference cell type");
-        }
-    } // namespace
-
     Index cell_facet_count(CellType type)
     {
-        return static_cast<Index>(reference_facets(type).size());
+        return static_cast<Index>(detail::reference_cell(type).facets.size());
     }
 
     std::span<const std::uint8_t> reference_facet_vertices(CellType type, Index facet)
     {
-        const auto facets = reference_facets(type);
-        if (facet >= facets.size())
+        const auto reference = detail::reference_cell(type);
+        if (facet >= reference.facets.size())
             throw std::out_of_range("reference facet index");
-        return {facets[facet].vertices.data(), facets[facet].size};
+        const auto& entry = reference.facets[facet];
+        return {entry.vertices.data(), entry.size};
     }
 
     Index cell_dimension(CellType type)
     {
-        switch (type) {
-        case CellType::segment:
-            return 1;
-        case CellType::triangle:
-        case CellType::quadrilateral:
-            return 2;
-        case CellType::tetrahedron:
-        case CellType::hexahedron:
-        case CellType::prism:
-        case CellType::pyramid:
-            return 3;
-        }
-        throw std::invalid_argument("unknown cell type");
+        return detail::reference_cell(type).dimension;
     }
 
     Index cell_vertex_count(CellType type)
     {
-        switch (type) {
-        case CellType::segment:
-            return 2;
-        case CellType::triangle:
-            return 3;
-        case CellType::quadrilateral:
-        case CellType::tetrahedron:
-            return 4;
-        case CellType::pyramid:
-            return 5;
-        case CellType::prism:
-            return 6;
-        case CellType::hexahedron:
-            return 8;
-        }
-        throw std::invalid_argument("unknown cell type");
+        return detail::reference_cell(type).vertices;
     }
 
     RelationRow RelationView::operator[](Index row) const
@@ -666,263 +601,289 @@ namespace idmesh {
         data_->label_names_[{dimension, value}] = std::move(name);
     }
 
+    namespace {
+
+        void move_base_storage(auto& source, auto& data)
+        {
+            data.dimension = source.dimension_;
+            data.geometric_dimension = source.geometric_dimension_;
+            data.coordinates = std::move(source.coordinates_);
+            data.counts[source.dimension_] = static_cast<Index>(source.types_.size());
+            data.vertex_offsets[source.dimension_] = std::move(source.cell_offsets_);
+            data.vertex_indices[source.dimension_] = std::move(source.cell_vertices_);
+            data.types = std::move(source.types_);
+            data.cell_orders = std::move(source.cell_orders_);
+            data.extra_geometry_nodes = std::move(source.extra_geometry_nodes_);
+            data.label_names = std::move(source.label_names_);
+        }
+
+        void pack_high_order_geometry(auto& source, auto& data)
+        {
+            if (!std::any_of(data.cell_orders.begin(), data.cell_orders.end(),
+                    [](std::uint8_t order) { return order == 2; }))
+                return;
+
+            data.geometry_offsets.reserve(
+                static_cast<std::size_t>(data.counts[data.dimension]) + 1);
+            data.geometry_offsets.push_back(0);
+            const auto cell_vertices = [&](Index cell) -> std::span<const Index> {
+                const auto& offsets = data.vertex_offsets[data.dimension];
+                const auto& indices = data.vertex_indices[data.dimension];
+                const auto begin = offsets[cell];
+                return {indices.data() + begin, offsets[cell + 1] - begin};
+            };
+            for (Index c = 0; c < data.counts[data.dimension]; ++c) {
+                if (data.cell_orders[c] == 2) {
+                    const auto corners = cell_vertices(c);
+                    data.geometry_indices.insert(
+                        data.geometry_indices.end(), corners.begin(), corners.end());
+                    const Index begin = source.cell_extra_offsets_[c];
+                    const Index finish = source.cell_extra_offsets_[c + 1];
+                    for (Index i = begin; i < finish; ++i) {
+                        const auto node = static_cast<std::size_t>(source.cell_extra_nodes_[i])
+                            + data.coordinates.size();
+                        detail::require_length(node < invalid_index,
+                            "geometry node index overflow");
+                        data.geometry_indices.push_back(static_cast<Index>(node));
+                    }
+                    detail::require_length(data.geometry_indices.size() < invalid_index,
+                        "geometry connectivity overflow");
+                }
+                data.geometry_offsets.push_back(
+                    static_cast<Index>(data.geometry_indices.size()));
+            }
+            std::vector<Index>().swap(source.cell_extra_offsets_);
+            std::vector<Index>().swap(source.cell_extra_nodes_);
+        }
+
+        void finalize_topology(auto& source, auto& data, BuildOptions options)
+        {
+            std::array<std::vector<Loop>, 4> entities;
+            const auto construction_vertices =
+                [&](Index dim, Index id) -> std::span<const Index> {
+                if (dim == data.dimension) {
+                    const auto& offsets = data.vertex_offsets[dim];
+                    const auto& indices = data.vertex_indices[dim];
+                    const auto begin = offsets[id];
+                    return {indices.data() + begin, offsets[id + 1] - begin};
+                }
+                return entities[dim][id].view();
+            };
+
+            // Vertex entities have identity connectivity. Avoid constructing one
+            // separately allocated singleton vector per vertex during finalize.
+            std::array<std::unordered_map<Loop, Index, LoopHash>, 4> lookup;
+            std::array<std::array<PendingRelation, 4>, 4> incidence;
+            const auto want = [&](Index dim) {
+                if (dim == 0 || dim == source.dimension_)
+                    return true;
+                switch (options.topology) {
+                case TopologyLayout::cell_vertices:
+                    return false;
+                case TopologyLayout::cell_facets:
+                    return dim == source.dimension_ - 1;
+                case TopologyLayout::complete:
+                    return true;
+                }
+                return false;
+            };
+            for (Index dim = 0; dim <= source.dimension_; ++dim)
+                data.enabled[dim] = want(dim);
+            if (source.dimension_ > 1 && want(source.dimension_ - 1))
+                lookup[source.dimension_ - 1].reserve(data.types.size() * 2);
+            auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
+                auto canon = canonicalize(local);
+                detail::require_length(entities[dim].size() < invalid_index, "too many topology entities");
+                auto [it, inserted] = lookup[dim].try_emplace(canon.key,
+                    static_cast<Index>(entities[dim].size()));
+                if (inserted)
+                    entities[dim].push_back(canon.key);
+                return {it->second, static_cast<std::int8_t>(canon.orientation.sign()), canon.orientation};
+            };
+            auto attach = [&](Index from, Index to, Index id, Incidence entry) {
+                incidence[from][to].push_back({id, entry});
+            };
+    
+            // Cell-to-vertex is permanently available even with intermediate dimensions omitted.
+            for (Index c = 0; c < data.counts[source.dimension_]; ++c) {
+                const auto vertices = construction_vertices(source.dimension_, c);
+                for (Index local = 0; local < vertices.size(); ++local) {
+                    auto sign = source.dimension_ == 1 ? (local == 0 ? -1 : 1) : 0;
+                    attach(source.dimension_, 0, c, {vertices[local], static_cast<std::int8_t>(sign), {}});
+                }
+                if (source.dimension_ == 1)
+                    continue;
+                if (want(source.dimension_ - 1)) {
+                    for (Index facet = 0; facet < cell_facet_count(data.types[c]); ++facet) {
+                        const auto face = boundary_loop(data.types[c], facet, vertices);
+                        attach(source.dimension_, source.dimension_ - 1, c,
+                            register_entity(source.dimension_ - 1, face.view()));
+                    }
+                }
+            }
+    
+            if (source.dimension_ == 3 && want(1) && want(2)) {
+                for (Index f = 0; f < entities[2].size(); ++f) {
+                    const auto vertices = entities[2][f].view();
+                    for (std::size_t edge = 0; edge < vertices.size(); ++edge) {
+                        const auto endpoints = polygon_edge(vertices, edge);
+                        attach(2, 1, f, register_entity(1, endpoints.view()));
+                    }
+                }
+            }
+            if (source.dimension_ >= 2 && want(1)) {
+                for (Index e = 0; e < entities[1].size(); ++e) {
+                    const auto& vertices = entities[1][e];
+                    IDMESH_ASSERT(vertices.size() == 2);
+                    attach(1, 0, e, {vertices[0], -1, {}});
+                    attach(1, 0, e, {vertices[1], 1, {}});
+                }
+            }
+    
+            // Direct facet-to-vertex traversal is needed by finite-volume kernels
+            // even when intermediate edges have not been materialized.
+            if (source.dimension_ == 3 && want(2)) {
+                for (Index f = 0; f < entities[2].size(); ++f) {
+                    for (auto v : entities[2][f])
+                        attach(2, 0, f, {v, 0, {}});
+                }
+            }
+    
+            // Resolve and deduplicate labels before replacing temporary entity keys
+            // with borrowed spans into the finalized connectivity.
+            struct PendingLabel {
+                Index dimension = 0;
+                Index entity = invalid_index;
+                EntityKey unbound_vertices;
+                int value = 0;
+            };
+            std::vector<PendingLabel> labels;
+            labels.reserve(source.cell_labels_.size() + source.label_assignments_.size());
+            for (const auto& [cell, value] : source.cell_labels_)
+                labels.push_back({source.dimension_, cell, {}, value});
+            std::vector<std::pair<Index, int>>().swap(source.cell_labels_);
+            for (const auto& assignment : source.label_assignments_) {
+                const Index dim = assignment.dimension;
+                const std::span<const Index> assigned {
+                    source.label_assignment_vertices_.data() + assignment.begin,
+                    assignment.end - assignment.begin};
+                const auto key = canonicalize(assigned);
+                Index entity = invalid_index;
+                if (dim == 0) {
+                    entity = assigned.front();
+                }
+                else if (want(dim)) {
+                    const auto found = lookup[dim].find(key.key);
+                    if (found != lookup[dim].end())
+                        entity = found->second;
+                }
+                PendingLabel label {dim, entity, {}, assignment.value};
+                if (entity == invalid_index)
+                    label.unbound_vertices = key.key;
+                labels.push_back(label);
+            }
+            std::vector<Index>().swap(source.label_assignment_vertices_);
+            decltype(source.label_assignments_) {}.swap(source.label_assignments_);
+            for (auto& table : lookup)
+                std::unordered_map<Loop, Index, LoopHash> {}.swap(table);
+    
+            std::sort(labels.begin(), labels.end(), [](const PendingLabel& a, const PendingLabel& b) {
+                const auto a_head = std::tie(a.dimension, a.entity, a.value);
+                const auto b_head = std::tie(b.dimension, b.entity, b.value);
+                if (a_head != b_head)
+                    return a_head < b_head;
+                return std::lexicographical_compare(
+                    a.unbound_vertices.begin(), a.unbound_vertices.end(),
+                    b.unbound_vertices.begin(), b.unbound_vertices.end());
+            });
+            labels.erase(std::unique(labels.begin(), labels.end(),
+                             [](const PendingLabel& a, const PendingLabel& b) {
+                                 return a.dimension == b.dimension && a.entity == b.entity
+                                     && a.value == b.value
+                                     && a.unbound_vertices == b.unbound_vertices;
+                             }),
+                labels.end());
+            for (Index dim = 0; dim <= source.dimension_; ++dim) {
+                auto& offsets = data.vertex_offsets[dim];
+                auto& indices = data.vertex_indices[dim];
+                if (dim == 0) {
+                    const auto count = static_cast<Index>(data.coordinates.size());
+                    data.counts[0] = count;
+                    offsets.resize(static_cast<std::size_t>(count) + 1);
+                    indices.resize(count);
+                    for (Index v = 0; v < count; ++v) {
+                        offsets[v] = v;
+                        indices[v] = v;
+                    }
+                    offsets[count] = count;
+                    continue;
+                }
+                if (dim == source.dimension_)
+                    continue;
+                auto& lists = entities[dim];
+                data.counts[dim] = static_cast<Index>(lists.size());
+                offsets.reserve(lists.size() + 1);
+                offsets.push_back(0);
+                for (const auto& vertices : lists) {
+                    indices.insert(indices.end(), vertices.begin(), vertices.end());
+                    offsets.push_back(static_cast<Index>(indices.size()));
+                }
+                std::vector<Loop>().swap(lists);
+            }
+            for (Index from = 1; from <= source.dimension_; ++from) {
+                for (Index to = 0; to < from; ++to) {
+                    auto& entries = incidence[from][to];
+                    if (entries.empty())
+                        continue;
+                    // Only consecutive dimensions form oriented boundary operators.
+                    // Direct geometric connectivity omits redundant sign/permutation arrays.
+                    const bool oriented = from == to + 1;
+                    auto relation = compress(entries, data.counts[from], oriented);
+                    PendingRelation().swap(entries);
+                    if (options.relations == RelationDirection::bidirectional && !(from == source.dimension_ && to == 0 && source.dimension_ > 1)) {
+                        data.relations[to][from] = transpose(
+                            relation, data.counts[to]);
+                    }
+                    data.relations[from][to] = std::move(relation);
+                }
+            }
+            // Materialized entities borrow their already-packed connectivity.
+            // Only labels on absent topology layers keep private vertex keys.
+            std::size_t unbound_entries = 0;
+            for (const auto& label : labels)
+                if (label.entity == invalid_index)
+                    unbound_entries += label.unbound_vertices.size();
+            data.unbound_label_vertices.reserve(unbound_entries);
+            data.labels.reserve(labels.size());
+            for (const auto& label : labels) {
+                std::span<const Index> vertices;
+                if (label.entity != invalid_index) {
+                    const auto& offsets = data.vertex_offsets[label.dimension];
+                    const auto& indices = data.vertex_indices[label.dimension];
+                    const auto begin = offsets[label.entity];
+                    vertices = {indices.data() + begin, offsets[label.entity + 1] - begin};
+                }
+                else {
+                    const auto begin = data.unbound_label_vertices.size();
+                    data.unbound_label_vertices.insert(data.unbound_label_vertices.end(),
+                        label.unbound_vertices.begin(), label.unbound_vertices.end());
+                    vertices = {data.unbound_label_vertices.data() + begin,
+                        label.unbound_vertices.size()};
+                }
+                data.labels.push_back({label.dimension, label.entity, vertices, label.value});
+            }
+    
+        }
+
+    } // namespace
+
     Mesh MeshBuilder::finalize(BuildOptions options) &&
     {
         auto data = std::make_shared<Mesh::Data>();
-        data->dimension = data_->dimension_;
-        data->geometric_dimension = data_->geometric_dimension_;
-        data->coordinates = std::move(data_->coordinates_);
-        data->counts[data_->dimension_] = static_cast<Index>(data_->types_.size());
-        data->vertex_offsets[data_->dimension_] = std::move(data_->cell_offsets_);
-        data->vertex_indices[data_->dimension_] = std::move(data_->cell_vertices_);
-        data->types = std::move(data_->types_);
-        data->cell_orders = std::move(data_->cell_orders_);
-        data->extra_geometry_nodes = std::move(data_->extra_geometry_nodes_);
-        data->label_names = std::move(data_->label_names_);
+        move_base_storage(*data_, *data);
+        pack_high_order_geometry(*data_, *data);
+        finalize_topology(*data_, *data, options);
 
-        // Construction-only entity keys never escape finalize().
-        std::array<std::vector<Loop>, 4> entities;
-        const auto construction_vertices = [&](Index dim, Index id) -> std::span<const Index> {
-            if (dim == data_->dimension_) {
-                const auto& offsets = data->vertex_offsets[dim];
-                const auto& indices = data->vertex_indices[dim];
-                const auto begin = offsets[id];
-                return {indices.data() + begin, offsets[id + 1] - begin};
-            }
-            return entities[dim][id].view();
-        };
-
-        // No additional geometry-connectivity storage for purely linear meshes.
-        // In mixed meshes, only order-two cells own full geometry-node sequences.
-        if (std::any_of(data->cell_orders.begin(), data->cell_orders.end(),
-                [](std::uint8_t order) { return order == 2; })) {
-            data->geometry_offsets.reserve(static_cast<std::size_t>(data->counts[data_->dimension_]) + 1);
-            data->geometry_offsets.push_back(0);
-            for (Index c = 0; c < data->counts[data_->dimension_]; ++c) {
-                if (data->cell_orders[c] == 2) {
-                    const auto corners = construction_vertices(data_->dimension_, c);
-                    data->geometry_indices.insert(
-                        data->geometry_indices.end(), corners.begin(), corners.end());
-                    const Index begin = data_->cell_extra_offsets_[c];
-                    const Index finish = data_->cell_extra_offsets_[c + 1];
-                    for (Index i = begin; i < finish; ++i) {
-                        const auto node = static_cast<std::size_t>(data_->cell_extra_nodes_[i])
-                            + data->coordinates.size();
-                        detail::require_length(node < invalid_index, "geometry node index overflow");
-                        data->geometry_indices.push_back(static_cast<Index>(node));
-                    }
-                    detail::require_length(data->geometry_indices.size() < invalid_index,
-                        "geometry connectivity overflow");
-                }
-                data->geometry_offsets.push_back(
-                    static_cast<Index>(data->geometry_indices.size()));
-            }
-        }
-        std::vector<Index>().swap(data_->cell_extra_offsets_);
-        std::vector<Index>().swap(data_->cell_extra_nodes_);
-
-        // Vertex entities have identity connectivity. Avoid constructing one
-        // separately allocated singleton vector per vertex during finalize.
-        std::array<std::unordered_map<Loop, Index, LoopHash>, 4> lookup;
-        std::array<std::array<PendingRelation, 4>, 4> incidence;
-        const auto want = [&](Index dim) {
-            if (dim == 0 || dim == data_->dimension_)
-                return true;
-            switch (options.topology) {
-            case TopologyLayout::cell_vertices:
-                return false;
-            case TopologyLayout::cell_facets:
-                return dim == data_->dimension_ - 1;
-            case TopologyLayout::complete:
-                return true;
-            }
-            return false;
-        };
-        for (Index dim = 0; dim <= data_->dimension_; ++dim)
-            data->enabled[dim] = want(dim);
-        if (data_->dimension_ > 1 && want(data_->dimension_ - 1))
-            lookup[data_->dimension_ - 1].reserve(data->types.size() * 2);
-        auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
-            auto canon = canonicalize(local);
-            detail::require_length(entities[dim].size() < invalid_index, "too many topology entities");
-            auto [it, inserted] = lookup[dim].try_emplace(canon.key,
-                static_cast<Index>(entities[dim].size()));
-            if (inserted)
-                entities[dim].push_back(canon.key);
-            return {it->second, static_cast<std::int8_t>(canon.orientation.sign()), canon.orientation};
-        };
-        auto attach = [&](Index from, Index to, Index id, Incidence entry) {
-            incidence[from][to].push_back({id, entry});
-        };
-
-        // Cell-to-vertex is permanently available even with intermediate dimensions omitted.
-        for (Index c = 0; c < data->counts[data_->dimension_]; ++c) {
-            const auto vertices = construction_vertices(data_->dimension_, c);
-            for (Index local = 0; local < vertices.size(); ++local) {
-                auto sign = data_->dimension_ == 1 ? (local == 0 ? -1 : 1) : 0;
-                attach(data_->dimension_, 0, c, {vertices[local], static_cast<std::int8_t>(sign), {}});
-            }
-            if (data_->dimension_ == 1)
-                continue;
-            if (want(data_->dimension_ - 1)) {
-                for (Index facet = 0; facet < cell_facet_count(data->types[c]); ++facet) {
-                    const auto face = boundary_loop(data->types[c], facet, vertices);
-                    attach(data_->dimension_, data_->dimension_ - 1, c,
-                        register_entity(data_->dimension_ - 1, face.view()));
-                }
-            }
-        }
-
-        if (data_->dimension_ == 3 && want(1) && want(2)) {
-            for (Index f = 0; f < entities[2].size(); ++f) {
-                const auto vertices = entities[2][f].view();
-                for (std::size_t edge = 0; edge < vertices.size(); ++edge) {
-                    const auto endpoints = polygon_edge(vertices, edge);
-                    attach(2, 1, f, register_entity(1, endpoints.view()));
-                }
-            }
-        }
-        if (data_->dimension_ >= 2 && want(1)) {
-            for (Index e = 0; e < entities[1].size(); ++e) {
-                const auto& vertices = entities[1][e];
-                IDMESH_ASSERT(vertices.size() == 2);
-                attach(1, 0, e, {vertices[0], -1, {}});
-                attach(1, 0, e, {vertices[1], 1, {}});
-            }
-        }
-
-        // Direct facet-to-vertex traversal is needed by finite-volume kernels
-        // even when intermediate edges have not been materialized.
-        if (data_->dimension_ == 3 && want(2)) {
-            for (Index f = 0; f < entities[2].size(); ++f) {
-                for (auto v : entities[2][f])
-                    attach(2, 0, f, {v, 0, {}});
-            }
-        }
-
-        // Resolve and deduplicate labels before replacing temporary entity keys
-        // with borrowed spans into the finalized connectivity.
-        struct PendingLabel {
-            Index dimension = 0;
-            Index entity = invalid_index;
-            EntityKey unbound_vertices;
-            int value = 0;
-        };
-        std::vector<PendingLabel> labels;
-        labels.reserve(data_->cell_labels_.size() + data_->label_assignments_.size());
-        for (const auto& [cell, value] : data_->cell_labels_)
-            labels.push_back({data_->dimension_, cell, {}, value});
-        std::vector<std::pair<Index, int>>().swap(data_->cell_labels_);
-        for (const auto& assignment : data_->label_assignments_) {
-            const Index dim = assignment.dimension;
-            const std::span<const Index> assigned {
-                data_->label_assignment_vertices_.data() + assignment.begin,
-                assignment.end - assignment.begin};
-            const auto key = canonicalize(assigned);
-            Index entity = invalid_index;
-            if (dim == 0) {
-                entity = assigned.front();
-            }
-            else if (want(dim)) {
-                const auto found = lookup[dim].find(key.key);
-                if (found != lookup[dim].end())
-                    entity = found->second;
-            }
-            PendingLabel label {dim, entity, {}, assignment.value};
-            if (entity == invalid_index)
-                label.unbound_vertices = key.key;
-            labels.push_back(label);
-        }
-        std::vector<Index>().swap(data_->label_assignment_vertices_);
-        std::vector<Data::LabelAssignment>().swap(data_->label_assignments_);
-        for (auto& table : lookup)
-            std::unordered_map<Loop, Index, LoopHash> {}.swap(table);
-
-        std::sort(labels.begin(), labels.end(), [](const PendingLabel& a, const PendingLabel& b) {
-            const auto a_head = std::tie(a.dimension, a.entity, a.value);
-            const auto b_head = std::tie(b.dimension, b.entity, b.value);
-            if (a_head != b_head)
-                return a_head < b_head;
-            return std::lexicographical_compare(
-                a.unbound_vertices.begin(), a.unbound_vertices.end(),
-                b.unbound_vertices.begin(), b.unbound_vertices.end());
-        });
-        labels.erase(std::unique(labels.begin(), labels.end(),
-                         [](const PendingLabel& a, const PendingLabel& b) {
-                             return a.dimension == b.dimension && a.entity == b.entity
-                                 && a.value == b.value
-                                 && a.unbound_vertices == b.unbound_vertices;
-                         }),
-            labels.end());
-        for (Index dim = 0; dim <= data_->dimension_; ++dim) {
-            auto& offsets = data->vertex_offsets[dim];
-            auto& indices = data->vertex_indices[dim];
-            if (dim == 0) {
-                const auto count = static_cast<Index>(data->coordinates.size());
-                data->counts[0] = count;
-                offsets.resize(static_cast<std::size_t>(count) + 1);
-                indices.resize(count);
-                for (Index v = 0; v < count; ++v) {
-                    offsets[v] = v;
-                    indices[v] = v;
-                }
-                offsets[count] = count;
-                continue;
-            }
-            if (dim == data_->dimension_)
-                continue;
-            auto& lists = entities[dim];
-            data->counts[dim] = static_cast<Index>(lists.size());
-            offsets.reserve(lists.size() + 1);
-            offsets.push_back(0);
-            for (const auto& vertices : lists) {
-                indices.insert(indices.end(), vertices.begin(), vertices.end());
-                offsets.push_back(static_cast<Index>(indices.size()));
-            }
-            std::vector<Loop>().swap(lists);
-        }
-        for (Index from = 1; from <= data_->dimension_; ++from) {
-            for (Index to = 0; to < from; ++to) {
-                auto& entries = incidence[from][to];
-                if (entries.empty())
-                    continue;
-                // Only consecutive dimensions form oriented boundary operators.
-                // Direct geometric connectivity omits redundant sign/permutation arrays.
-                const bool oriented = from == to + 1;
-                auto relation = compress(entries, data->counts[from], oriented);
-                PendingRelation().swap(entries);
-                if (options.relations == RelationDirection::bidirectional && !(from == data_->dimension_ && to == 0 && data_->dimension_ > 1)) {
-                    data->relations[to][from] = transpose(
-                        relation, data->counts[to]);
-                }
-                data->relations[from][to] = std::move(relation);
-            }
-        }
-        // Materialized entities borrow their already-packed connectivity.
-        // Only labels on absent topology layers keep private vertex keys.
-        std::size_t unbound_entries = 0;
-        for (const auto& label : labels)
-            if (label.entity == invalid_index)
-                unbound_entries += label.unbound_vertices.size();
-        data->unbound_label_vertices.reserve(unbound_entries);
-        data->labels.reserve(labels.size());
-        for (const auto& label : labels) {
-            std::span<const Index> vertices;
-            if (label.entity != invalid_index) {
-                const auto& offsets = data->vertex_offsets[label.dimension];
-                const auto& indices = data->vertex_indices[label.dimension];
-                const auto begin = offsets[label.entity];
-                vertices = {indices.data() + begin, offsets[label.entity + 1] - begin};
-            }
-            else {
-                const auto begin = data->unbound_label_vertices.size();
-                data->unbound_label_vertices.insert(data->unbound_label_vertices.end(),
-                    label.unbound_vertices.begin(), label.unbound_vertices.end());
-                vertices = {data->unbound_label_vertices.data() + begin,
-                    label.unbound_vertices.size()};
-            }
-            data->labels.push_back({label.dimension, label.entity, vertices, label.value});
-        }
         Mesh mesh(std::move(data));
         mesh.validate_structure();
         return mesh;
