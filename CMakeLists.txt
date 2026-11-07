@@ -3,7 +3,7 @@ if(TARGET IDMesh::IDMesh)
     return()
 endif()
 
-project(IDMesh VERSION 0.2.0 LANGUAGES CXX)
+project(IDMesh VERSION 0.3.0 LANGUAGES CXX)
 set(IDMESH_ABI_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 include(GNUInstallDirs)

@@ -206,11 +206,13 @@ namespace idmesh::mpi {
             request->send_offsets, request->recv_offsets);
 
         const auto send_total = request->send_offsets.empty()
-            ? 0
-            : request->send_offsets.back() + request->send_counts.back();
+            ? std::size_t {0}
+            : static_cast<std::size_t>(request->send_offsets.back())
+                + static_cast<std::size_t>(request->send_counts.back());
         const auto recv_total = request->recv_offsets.empty()
-            ? 0
-            : request->recv_offsets.back() + request->recv_counts.back();
+            ? std::size_t {0}
+            : static_cast<std::size_t>(request->recv_offsets.back())
+                + static_cast<std::size_t>(request->recv_counts.back());
         request->send_buffer.resize(send_total);
         request->recv_buffer.resize(recv_total);
         return ExchangeRequest(std::move(request));
