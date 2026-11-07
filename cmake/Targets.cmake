@@ -20,7 +20,7 @@ function(idmesh_stage_runtime target)
         COMMAND_EXPAND_LISTS)
 endfunction()
 
-add_library(idmesh src/mesh.cpp src/data.cpp src/geometry.cpp src/gmsh.cpp src/vtk_common.cpp src/vtk.cpp src/medit.cpp src/partition.cpp)
+add_library(idmesh src/mesh.cpp src/data.cpp src/geometry.cpp src/gmsh.cpp src/vtk_common.cpp src/vtk_data_io.cpp src/vtk.cpp src/medit.cpp src/partition.cpp)
 add_library(IDMesh::IDMesh ALIAS idmesh)
 idmesh_configure_target(idmesh IDMesh)
 set_target_properties(idmesh PROPERTIES POSITION_INDEPENDENT_CODE ON)
