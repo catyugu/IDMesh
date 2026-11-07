@@ -1,0 +1,72 @@
+name: MPI benchmark
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/mpi-benchmark.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/catyugu/idmesh-ci-mpi@sha256:8b7239500b857f196f6a40e51841f461dd14c76fffffbe3c447d173e52eecdc9
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      OMPI_MCA_rmaps_base_oversubscribe: "1"
+      OMPI_ALLOW_RUN_AS_ROOT: "1"
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2a63ccbde8565bc22ede22a5b69d13dbfacf006d
+          path: baseline
+      - uses: actions/checkout@v4
+        with:
+          path: current
+
+      - name: Configure and build both revisions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S baseline -B baseline/build -DCMAKE_BUILD_TYPE=Release             -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
+          cmake --build baseline/build --target idmesh_mpi_benchmark --parallel 2
+          cmake -S current -B current/build -DCMAKE_BUILD_TYPE=Release             -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
+          cmake --build current/build --target idmesh_mpi_benchmark --parallel 2
+
+      - name: Run same-runner comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > benchmark.log
+          run_case() {
+            local revision="$1"
+            local exe="$2"
+            local side="$3"
+            local components="$4"
+            local ghosts="$5"
+            local iterations="$6"
+            for repeat in 1 2 3; do
+              echo "CASE revision=${revision} side=${side} components=${components} ghosts=${ghosts} repeat=${repeat}" | tee -a benchmark.log
+              mpirun -n 2 --bind-to core "$exe"                 --side "$side" --components "$components"                 --ghost-layers "$ghosts" --iterations "$iterations" | tee -a benchmark.log
+            done
+          }
+
+          for spec in "128 1 1 200" "256 8 1 200" "256 8 4 200"; do
+            read -r side components ghosts iterations <<< "$spec"
+            run_case baseline baseline/build/benchmarks/idmesh_mpi_benchmark               "$side" "$components" "$ghosts" "$iterations"
+            run_case current current/build/benchmarks/idmesh_mpi_benchmark               "$side" "$components" "$ghosts" "$iterations"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpi-benchmark-comparison
+          path: benchmark.log
+          retention-days: 30
