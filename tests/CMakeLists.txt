@@ -10,6 +10,4 @@ endfunction()
 
 add_subdirectory(unit)
 
-if(IDMESH_BUILD_INTEGRATION_TESTS)
-    add_subdirectory(integration)
-endif()
+add_subdirectory(integration)
