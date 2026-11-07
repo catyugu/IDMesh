@@ -87,6 +87,44 @@ void partition_shards()
         std::filesystem::remove(path);
     }
 }
+void shared_quadratic_geometry()
+{
+    using idmesh::Index;
+    idmesh::MeshBuilder builder(2, 2);
+    for (const auto& point : std::array<std::array<double, 3>, 4> {{
+             {{0, 0, 0}}, {{1, 0, 0}}, {{0, 1, 0}}, {{1, 1, 0}}}})
+        builder.add_vertex(point);
+    const auto e01 = builder.add_geometry_node({0.5, 0, 0});
+    const auto e12 = builder.add_geometry_node({0.5, 0.5, 0});
+    const auto e20 = builder.add_geometry_node({0, 0.5, 0});
+    const auto e13 = builder.add_geometry_node({1, 0.5, 0});
+    const auto e32 = builder.add_geometry_node({0.5, 1, 0});
+    builder.add_quadratic_cell(idmesh::CellType::triangle,
+        std::array<Index, 3> {0, 1, 2},
+        std::array<Index, 3> {e01, e12, e20});
+    builder.add_quadratic_cell(idmesh::CellType::triangle,
+        std::array<Index, 3> {1, 3, 2},
+        std::array<Index, 3> {e13, e32, e12});
+    const auto mesh = std::move(builder).finalize();
+    const std::array<int, 2> owners {0, 1};
+    const auto prefix = (std::filesystem::temp_directory_path()
+        / "idmesh-shared-quadratic-geometry").string();
+    idmesh::write_partition_shards(mesh, owners, 1, prefix);
+    for (int rank = 0; rank < 2; ++rank) {
+        const auto path = prefix + "." + std::to_string(rank) + ".idm";
+        std::ifstream input(path);
+        const std::string contents {
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()};
+        require(contents.find("\nGEOMETRY_NODES 5\n") != std::string::npos,
+            "shared high-order nodes were not deduplicated");
+        require(contents.find("\nCELLS 2\n") != std::string::npos,
+            "quadratic ghost cell missing from shard");
+        input.close();
+        std::filesystem::remove(path);
+    }
+}
+
 void partial_topology_shards()
 {
     const auto full = make_mesh();
@@ -145,5 +183,6 @@ int main()
     return idmesh::test::run({
         {"partition shard pipeline", partition_shards},
         {"partial topology shards", partial_topology_shards},
+        {"shared quadratic geometry", shared_quadratic_geometry},
     });
 }
