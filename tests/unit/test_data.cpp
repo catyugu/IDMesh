@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include <idmesh/data.hpp>
 #include <idmesh/mesh.hpp>
 
@@ -15,25 +17,6 @@ namespace {
 
     using idmesh::Index;
     namespace data = idmesh::data;
-
-    void check(bool condition, const char* message)
-    {
-        if (!condition)
-            throw std::runtime_error(message);
-    }
-
-    template <class Error, class Operation>
-    void expect_error(Operation&& operation, const char* message)
-    {
-        bool caught = false;
-        try {
-            operation();
-        }
-        catch (const Error&) {
-            caught = true;
-        }
-        check(caught, message);
-    }
 
     idmesh::Mesh make_mesh(
         idmesh::TopologyLayout topology
@@ -372,10 +355,11 @@ namespace {
 
 int main()
 {
-    scalar_types();
-    dense_and_subset_data();
-    soa_and_strided_data();
-    owning_views();
-    strict_validation();
-    return 0;
+    return idmesh::test::run({
+        {"scalar types", scalar_types},
+        {"dense/subset data", dense_and_subset_data},
+        {"SoA/strided data", soa_and_strided_data},
+        {"owning views", owning_views},
+        {"strict validation", strict_validation},
+    });
 }

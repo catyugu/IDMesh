@@ -4,9 +4,17 @@ IDMesh uses its repository CI to verify native C++20 compilation,
 numerical examples, MPI multi-rank behavior and Kokkos's CPU execution
 backend. Source formatting is checked locally through the pre-commit hook.
 
+Tests are split into two CTest layers. `unit` tests are dependency-free,
+in-memory checks of local contracts and algorithms. `integration` tests exercise
+file-format pipelines, installed consumers and real backend runtimes, including
+multi-rank MPI and Kokkos execution. Both layers use the repository's small
+`tests/support/test.hpp` runner; no external C++ test framework is required.
+`IDMESH_BUILD_INTEGRATION_TESTS=OFF` keeps only the fast unit layer.
+
 | Area | Automated verification | Scope |
 | --- | --- | --- |
-| Serial core | Linux GCC, Windows MSVC, macOS Clang | reference cells, oriented incidence, Gmsh, VTK, Medit, geometric Jacobians |
+| Unit layer | Linux GCC, Windows MSVC, macOS Clang | reference-cell contracts, data primitives, analytic geometry and VTK common mappings |
+| Serial integration | Linux GCC, Windows MSVC, macOS Clang | Gmsh/VTK/Medit round-trips, manifests, partition shards and a fixed Gmsh -> field operation -> VTU -> read-back fixture |
 | Independent applications | `examples` CI job, three CTest examples | Basix orientation, conservative FVM flux, and mixed-cell FEM/FEEC exact sequence CG=0 / DC=0 |
 | Distributed MPI | OpenMPI with 2 and 3 ranks | rank-local shards, ghost-depth monotonicity, mixed Tet/Hex/Prism/Pyramid 3D topology, cross-rank identity/orientation and Vertex/Edge/Facet/Cell field exchanges |
 | Kokkos | Serial runtime | persistent topology/geometry mirrors and matrix-free diffusion over application-owned device storage |

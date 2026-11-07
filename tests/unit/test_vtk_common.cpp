@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include "vtk_common.hpp"
 
 #include <idmesh/data.hpp>
@@ -15,25 +17,6 @@ namespace {
     using idmesh::Index;
     namespace data = idmesh::data;
     namespace vtk = idmesh::detail::vtk;
-
-    void check(bool condition, const char* message)
-    {
-        if (!condition)
-            throw std::runtime_error(message);
-    }
-
-    template <class Error, class Operation>
-    void expect_error(Operation&& operation, const char* message)
-    {
-        bool caught = false;
-        try {
-            operation();
-        }
-        catch (const Error&) {
-            caught = true;
-        }
-        check(caught, message);
-    }
 
     idmesh::Mesh make_cell(
         idmesh::CellType type, Index nodes)
@@ -268,8 +251,9 @@ namespace {
 
 int main()
 {
-    cell_mappings();
-    point_numbering();
-    data_association();
-    return 0;
+    return idmesh::test::run({
+        {"cell mappings", cell_mappings},
+        {"point numbering", point_numbering},
+        {"data association", data_association},
+    });
 }

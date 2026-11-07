@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include <idmesh/data.hpp>
 #include <idmesh/mesh.hpp>
 #include <idmesh/vtk.hpp>
@@ -21,25 +23,6 @@ namespace {
     namespace data = idmesh::data;
     namespace vtk = idmesh::vtk;
     using idmesh::Index;
-
-    void check(bool condition, const char* message)
-    {
-        if (!condition)
-            throw std::runtime_error(message);
-    }
-
-    template <class Error, class Operation>
-    void expect_error(Operation&& operation, const char* message)
-    {
-        bool caught = false;
-        try {
-            operation();
-        }
-        catch (const Error&) {
-            caught = true;
-        }
-        check(caught, message);
-    }
 
     std::filesystem::path temporary(const char* name)
     {
@@ -350,36 +333,13 @@ namespace {
 
 int main()
 {
-    try {
-        std::cout << "legacy-ascii" << std::endl;
-        legacy_round_trip(
-            vtk::LegacyEncoding::ascii,
-            "idmesh-data-ascii.vtk");
-        std::cout << "legacy-binary" << std::endl;
-        legacy_round_trip(
-            vtk::LegacyEncoding::binary,
-            "idmesh-data-binary.vtk");
-        std::cout << "vtu-ascii" << std::endl;
-        vtu_round_trip(
-            vtk::VtuEncoding::ascii,
-            "idmesh-data-ascii.vtu");
-        std::cout << "vtu-inline" << std::endl;
-        vtu_round_trip(
-            vtk::VtuEncoding::inline_binary,
-            "idmesh-data-inline.vtu");
-        std::cout << "vtu-appended" << std::endl;
-        vtu_round_trip(
-            vtk::VtuEncoding::appended_raw,
-            "idmesh-data-appended.vtu");
-        std::cout << "vtu-u64" << std::endl;
-        vtu_uint64();
-        std::cout << "strict-rejections" << std::endl;
-        strict_rejections();
-        return 0;
-    }
-    catch (const std::exception& error) {
-        std::cerr << "VTK data IO test failure: "
-                  << error.what() << std::endl;
-        return 1;
-    }
+    return idmesh::test::run({
+        {"legacy ASCII", [] { legacy_round_trip(vtk::LegacyEncoding::ascii, "idmesh-data-ascii.vtk"); }},
+        {"legacy binary", [] { legacy_round_trip(vtk::LegacyEncoding::binary, "idmesh-data-binary.vtk"); }},
+        {"VTU ASCII", [] { vtu_round_trip(vtk::VtuEncoding::ascii, "idmesh-data-ascii.vtu"); }},
+        {"VTU inline binary", [] { vtu_round_trip(vtk::VtuEncoding::inline_binary, "idmesh-data-inline.vtu"); }},
+        {"VTU appended raw", [] { vtu_round_trip(vtk::VtuEncoding::appended_raw, "idmesh-data-appended.vtu"); }},
+        {"VTU UInt64", vtu_uint64},
+        {"strict rejections", strict_rejections},
+    });
 }

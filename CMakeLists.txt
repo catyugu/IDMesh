@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(IDMESH_BUILD_TESTS "Build IDMesh tests" ${PROJECT_IS_TOP_LEVEL})
+option(IDMESH_BUILD_INTEGRATION_TESTS "Build IDMesh integration tests" ${PROJECT_IS_TOP_LEVEL})
 option(IDMESH_BUILD_EXAMPLES "Build IDMesh examples" ${PROJECT_IS_TOP_LEVEL})
 option(IDMESH_TEST_BASIX "Validate example orientations with external Basix (test-only)" OFF)
 option(IDMESH_BUILD_BENCHMARKS "Build manually enabled developer performance benchmarks" OFF)

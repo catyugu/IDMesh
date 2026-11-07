@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include <idmesh/partition.hpp>
 
 #include <array>
@@ -9,12 +11,6 @@
 #include <utility>
 
 namespace {
-    void require(bool condition, const char* message)
-    {
-        if (!condition)
-            throw std::runtime_error(message);
-    }
-
     idmesh::Mesh make_mesh()
     {
         idmesh::MeshBuilder builder(2, 2);
@@ -31,7 +27,8 @@ namespace {
     }
 }
 
-int main()
+namespace {
+void partition_shards()
 {
     const auto mesh = make_mesh();
     const auto owners = idmesh::partition_graph(mesh, 2);
@@ -89,5 +86,12 @@ int main()
         input.close();
         std::filesystem::remove(path);
     }
-    return 0;
+}
+} // namespace
+
+int main()
+{
+    return idmesh::test::run({
+        {"partition shard pipeline", partition_shards},
+    });
 }

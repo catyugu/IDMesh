@@ -6,6 +6,7 @@
 #include <array>
 #include <bit>
 #include <charconv>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <iomanip>
@@ -525,6 +526,122 @@ namespace idmesh::detail::vtk {
             i = semi + 1;
         }
         return out;
+    }
+
+
+    XmlAttributes xml_attributes(std::string_view tag)
+    {
+        XmlAttributes result;
+        const auto space = tag.find_first_of(" \t\r\n");
+        if (space == std::string_view::npos)
+            return result;
+        std::size_t i = space;
+        while (i < tag.size()) {
+            while (i < tag.size()
+                && std::isspace(static_cast<unsigned char>(tag[i])))
+                ++i;
+            if (i >= tag.size() || tag[i] == '>' || tag[i] == '/')
+                break;
+            const auto key_begin = i;
+            while (i < tag.size()
+                && !std::isspace(static_cast<unsigned char>(tag[i]))
+                && tag[i] != '=')
+                ++i;
+            const std::string key(tag.substr(key_begin, i - key_begin));
+            while (i < tag.size()
+                && std::isspace(static_cast<unsigned char>(tag[i])))
+                ++i;
+            ::idmesh::detail::require_runtime(
+                i < tag.size() && tag[i] == '=',
+                "invalid VTK XML attribute");
+            ++i;
+            while (i < tag.size()
+                && std::isspace(static_cast<unsigned char>(tag[i])))
+                ++i;
+            ::idmesh::detail::require_runtime(
+                i < tag.size() && (tag[i] == '"' || tag[i] == '\''),
+                "invalid VTK XML attribute quoting");
+            const char quote = tag[i++];
+            const auto value_begin = i;
+            const auto value_end = tag.find(quote, i);
+            ::idmesh::detail::require_runtime(
+                value_end != std::string_view::npos,
+                "unterminated VTK XML attribute");
+            result.emplace(
+                key, xml_unescape(tag.substr(
+                         value_begin, value_end - value_begin)));
+            i = value_end + 1;
+        }
+        return result;
+    }
+
+    std::string_view xml_required_attribute(
+        const XmlAttributes& attributes, std::string_view name)
+    {
+        const auto it = attributes.find(std::string(name));
+        ::idmesh::detail::require_runtime(
+            it != attributes.end(),
+            "missing required VTK XML attribute");
+        return it->second;
+    }
+
+    std::string_view xml_opening_tag(
+        std::string_view xml, std::string_view name)
+    {
+        const std::string open = "<" + std::string(name);
+        const auto begin = xml.find(open);
+        ::idmesh::detail::require_runtime(
+            begin != std::string_view::npos,
+            "missing VTK XML element");
+        const auto end = xml.find('>', begin);
+        ::idmesh::detail::require_runtime(
+            end != std::string_view::npos,
+            "unterminated VTK XML element");
+        return xml.substr(begin, end - begin + 1);
+    }
+
+    std::string_view xml_element_body(
+        std::string_view xml, std::string_view name, bool required)
+    {
+        const std::string open = "<" + std::string(name);
+        const std::string close = "</" + std::string(name) + ">";
+        const auto begin = xml.find(open);
+        if (begin == std::string_view::npos) {
+            if (required)
+                throw std::runtime_error("missing VTK XML element");
+            return {};
+        }
+        const auto head_end = xml.find('>', begin);
+        const auto end = xml.find(close, head_end);
+        ::idmesh::detail::require_runtime(
+            head_end != std::string_view::npos
+                && end != std::string_view::npos,
+            "unterminated VTK XML element");
+        return xml.substr(head_end + 1, end - head_end - 1);
+    }
+
+    std::vector<XmlAttributes> xml_self_closing_tags(
+        std::string_view body, std::string_view name)
+    {
+        std::vector<XmlAttributes> result;
+        const std::string prefix = "<" + std::string(name);
+        std::size_t cursor = 0;
+        while (true) {
+            const auto begin = body.find(prefix, cursor);
+            if (begin == std::string_view::npos)
+                break;
+            const auto end = body.find('>', begin);
+            ::idmesh::detail::require_runtime(
+                end != std::string_view::npos,
+                "unterminated VTK XML tag");
+            const auto tag = body.substr(begin, end - begin + 1);
+            ::idmesh::detail::require_runtime(
+                end > begin && body[end - 1] == '/',
+                "expected self-closing VTK XML tag");
+            result.push_back(xml_attributes(tag));
+            cursor = end + 1;
+        }
+        return result;
     }
 
 } // namespace idmesh::detail::vtk
