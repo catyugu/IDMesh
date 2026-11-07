@@ -133,8 +133,7 @@ records, allowing interior work to overlap the communication interval.
 
 The replicated-input partition path remains available as a correctness baseline,
 but production-style rank-local loading is provided by the shard reader described
-below. The bundled graph partitioner is a dependency-free serial preprocessing
-baseline rather than a ParMETIS-quality distributed partitioner. The MPI backend duplicates and owns the communicator represented by `mpi::Context`; collective metadata and halo operations remain blocking.
+below. The bundled graph partitioner and shard writer are core, dependency-free serial preprocessing tools exposed by `idmesh/partition.hpp`; their quality is not claimed comparable to ParMETIS. The MPI backend duplicates and owns the communicator represented by `mpi::Context`; collective metadata and halo operations remain blocking.
 
 `idmesh_fvm` assembles a 3D two-tetra diffusion operator using
 `BuildOptions{TopologyLayout::cell_facets, RelationDirection::bidirectional}` (no Edge layer), checking conservative
@@ -214,9 +213,9 @@ Ghost cell-field communication plans use a separate exchange of global
 cell-ID requests with cell owners. The existing `ExchangePlan` then
 operates without accessing the original mesh or the registry.
 
-`partition_graph` performs balanced region growing on the
+`idmesh::partition_graph` performs balanced region growing on the
 Facet-adjacency cell dual graph, initializing well-separated seeds and
-using BFS frontiers. `write_partition_shards` expands a configurable
+using BFS frontiers. `idmesh::write_partition_shards` expands a configurable
 number of Ghost layers, then writes only required vertices and geometric
 nodes. This is a **serial preprocessing** route; partition quality and
 scalability are not claimed comparable to ParMETIS.
