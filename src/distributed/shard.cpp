@@ -142,8 +142,9 @@ namespace idmesh::detail::shard {
                     && (entity.dimension == 1 ? arity == 2
                         : arity == 3 || arity == 4),
                 "invalid shard entity identity header");
-            entity.vertices.resize(arity);
-            for (auto& vertex : entity.vertices) {
+            entity.arity = static_cast<std::uint8_t>(arity);
+            for (std::size_t j = 0; j < arity; ++j) {
+                auto& vertex = entity.vertices[j];
                 ::idmesh::detail::require_runtime(
                     static_cast<bool>(file >> vertex),
                     "truncated shard entity identity");

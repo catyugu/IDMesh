@@ -13,6 +13,7 @@
 #include <map>
 #include <mpi.h>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -72,12 +73,11 @@ namespace idmesh::mpi {
             std::vector<std::uint64_t> cell_ids;
             std::vector<int> cell_owners;
             for (const Cell& cell : input.cells) {
-                std::vector<Index> corners, extras;
-                const Index corner_count
-                    = cell_vertex_count(cell.type);
+                // A standard linear/quadratic cell has at most 27 geometry nodes.
+                std::array<Index, 27> nodes {};
+                const Index corner_count = cell_vertex_count(cell.type);
                 for (Index j = 0; j < corner_count; ++j)
-                    corners.push_back(
-                        vertices.at(cell.geometry[j]));
+                    nodes[j] = vertices.at(cell.geometry[j]);
                 for (std::size_t j = corner_count;
                      j < cell.geometry.size(); ++j) {
                     const auto id = cell.geometry[j];
@@ -86,8 +86,12 @@ namespace idmesh::mpi {
                     if (inserted)
                         it->second = builder.add_geometry_node(
                             input.geometry_nodes.at(id));
-                    extras.push_back(it->second);
+                    nodes[j] = it->second;
                 }
+                const std::span<const Index> corners(nodes.data(), corner_count);
+                const std::span<const Index> extras(
+                    nodes.data() + corner_count,
+                    cell.geometry.size() - corner_count);
                 const Index local = extras.empty()
                     ? builder.add_cell(cell.type, corners)
                     : builder.add_quadratic_cell(
@@ -110,16 +114,12 @@ namespace idmesh::mpi {
                         cells.at(label.entities[0]), label.value);
                 }
                 else {
-                    std::vector<Index> corners;
-                    corners.reserve(label.entities.size());
-                    for (auto id : label.entities) {
-                        ::idmesh::detail::require_runtime(
-                            vertices.contains(id),
-                            "label refers to missing shard vertex");
-                        corners.push_back(vertices.at(id));
-                    }
-                    builder.add_label(
-                        label.dimension, corners, label.value);
+                    std::array<Index, 4> corners {};
+                    for (std::size_t j = 0; j < label.entities.size(); ++j)
+                        corners[j] = vertices.at(label.entities[j]);
+                    builder.add_label(label.dimension,
+                        std::span(corners).first(label.entities.size()),
+                        label.value);
                 }
             }
             for (const auto& [key, name] : input.label_names)
@@ -170,7 +170,8 @@ namespace idmesh::mpi {
             for (const auto& entity : input.entities) {
                 const auto canonical
                     = ::idmesh::detail::canonicalize_entity<
-                        std::uint64_t>(entity.vertices);
+                        std::uint64_t>(
+                            std::span(entity.vertices).first(entity.arity));
                 Key key {
                     entity.dimension, canonical.signature};
                 ::idmesh::detail::require_runtime(
@@ -189,14 +190,17 @@ namespace idmesh::mpi {
                 for (Index entity = 0; entity < count; ++entity) {
                     const auto local_vertices
                         = mesh.entity_vertices(k, entity);
-                    std::vector<std::uint64_t> global_vertices;
-                    global_vertices.reserve(local_vertices.size());
-                    for (Index vertex : local_vertices)
-                        global_vertices.push_back(
-                            metadata.global_ids[0][vertex]);
+                    std::array<std::uint64_t, 4> global_vertices {};
+                    ::idmesh::detail::require_runtime(
+                        local_vertices.size() <= global_vertices.size(),
+                        "invalid standard-cell entity arity");
+                    for (std::size_t j = 0; j < local_vertices.size(); ++j)
+                        global_vertices[j]
+                            = metadata.global_ids[0][local_vertices[j]];
                     const auto canonical
                         = ::idmesh::detail::canonicalize_entity<
-                            std::uint64_t>(global_vertices);
+                            std::uint64_t>(std::span(global_vertices).first(
+                                local_vertices.size()));
                     const Key key {
                         k, canonical.signature};
                     const auto found = embedded.find(key);
