@@ -264,7 +264,7 @@ namespace idmesh::data {
         std::uint32_t components = 0;
         std::vector<std::byte> values;
 
-        ArrayView view() const;
+        IDMESH_API ArrayView view() const;
     };
 
     struct MeshData {
@@ -274,7 +274,7 @@ namespace idmesh::data {
         std::vector<Index> indices;
         Array values;
 
-        MeshDataView view() const;
+        IDMESH_API MeshDataView view() const;
     };
 
     struct State {
