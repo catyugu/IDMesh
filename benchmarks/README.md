@@ -141,12 +141,14 @@ isolates a deliberately label-heavy finalization workload.
 
 ## MPI halo measurements
 
-`.github/workflows/mpi-benchmark.yml` is a manual engineering comparison
-workflow. It builds two requested revisions on the same runner, warms both,
-then alternates their execution order across five repeats to reduce runner
-warm-up and frequency bias. Its output is diagnostic rather than a CI gate;
-publication-quality measurements still belong on a controlled host.
-
+`.github/workflows/mpi-benchmark.yml` is the single manual MPI engineering
+comparison workflow. It covers both the reusable host halo and MPI+Kokkos
+host-staging benchmarks. Host and Kokkos baselines are separate inputs because
+their historical comparison points differ; the candidate is shared. All cases
+run in one MPI container, warm both revisions, and alternate execution order
+across five repeats to reduce runner warm-up and frequency bias. Its output is
+diagnostic rather than a CI gate; publication-quality measurements still belong
+on a controlled host.
 
 When MPI is enabled, `idmesh_mpi_benchmark` measures the reusable host
 request path created by `make_request`. It reports `start` (pack +

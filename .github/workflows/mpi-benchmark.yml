@@ -1,12 +1,16 @@
-name: MPI benchmark
+name: MPI benchmarks
 
 on:
   workflow_dispatch:
     inputs:
-      baseline_ref:
-        description: Baseline commit, tag, or branch
+      host_baseline_ref:
+        description: Host halo baseline commit, tag, or branch
         required: true
         default: 2a63ccbde8565bc22ede22a5b69d13dbfacf006d
+      kokkos_baseline_ref:
+        description: MPI Kokkos baseline commit, tag, or branch
+        required: true
+        default: 51fc5b7a0295f3573e73d778a6be1fb7879abce8
       candidate_ref:
         description: Candidate commit, tag, or branch
         required: true
@@ -19,7 +23,7 @@ permissions:
 jobs:
   compare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     container:
       image: ghcr.io/catyugu/idmesh-ci-mpi@sha256:8b7239500b857f196f6a40e51841f461dd14c76fffffbe3c447d173e52eecdc9
       credentials:
@@ -29,30 +33,54 @@ jobs:
       OMPI_MCA_rmaps_base_oversubscribe: "1"
       OMPI_ALLOW_RUN_AS_ROOT: "1"
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.baseline_ref }}
-          path: baseline
+          ref: ${{ inputs.host_baseline_ref }}
+          path: host-baseline
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.kokkos_baseline_ref }}
+          path: kokkos-baseline
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.candidate_ref }}
           path: current
 
-      - name: Configure and build both revisions
+      - name: Build host baseline
         shell: bash
         run: |
           set -euxo pipefail
-          cmake -S baseline -B baseline/build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
-          cmake --build baseline/build --target idmesh_mpi_benchmark --parallel 2
-          cmake -S current -B current/build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
-          cmake --build current/build --target idmesh_mpi_benchmark --parallel 2
+          cmake -S host-baseline -B host-baseline/build -DCMAKE_BUILD_TYPE=Release \
+            -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF \
+            -DIDMESH_ENABLE_MPI=ON
+          cmake --build host-baseline/build --target idmesh_mpi_benchmark --parallel 2
 
-      - name: Run same-runner comparison
+      - name: Build MPI Kokkos baseline
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S kokkos-baseline -B kokkos-baseline/build -DCMAKE_BUILD_TYPE=Release \
+            -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF \
+            -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
+          cmake --build kokkos-baseline/build --target idmesh_mpi_kokkos_benchmark --parallel 2
+
+      - name: Build candidate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S current -B current/build -DCMAKE_BUILD_TYPE=Release \
+            -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF \
+            -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
+          cmake --build current/build \
+            --target idmesh_mpi_benchmark idmesh_mpi_kokkos_benchmark --parallel 2
+
+      - name: Compare host halo
         shell: bash
         run: |
           set -euo pipefail
-          : > benchmark.log
+          : > mpi-host.log
 
           run_once() {
             local revision="$1"
@@ -62,23 +90,66 @@ jobs:
             local ghosts="$5"
             local iterations="$6"
             local repeat="$7"
-            echo "CASE revision=${revision} side=${side} components=${components} ghosts=${ghosts} repeat=${repeat}" | tee -a benchmark.log
-            mpirun -n 2 --bind-to none "$exe" --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations "$iterations" | tee -a benchmark.log
+            echo "CASE revision=${revision} side=${side} components=${components} ghosts=${ghosts} repeat=${repeat}" | tee -a mpi-host.log
+            mpirun -n 2 --bind-to none "$exe" \
+              --side "$side" --components "$components" \
+              --ghost-layers "$ghosts" --iterations "$iterations" | tee -a mpi-host.log
           }
 
           for spec in "128 1 1 200" "256 8 1 200" "256 8 4 200"; do
             read -r side components ghosts iterations <<< "$spec"
 
-            mpirun -n 2 --bind-to none baseline/build/benchmarks/idmesh_mpi_benchmark --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations 50 >/dev/null
-            mpirun -n 2 --bind-to none current/build/benchmarks/idmesh_mpi_benchmark --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations 50 >/dev/null
+            mpirun -n 2 --bind-to none host-baseline/build/benchmarks/idmesh_mpi_benchmark \
+              --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations 50 >/dev/null
+            mpirun -n 2 --bind-to none current/build/benchmarks/idmesh_mpi_benchmark \
+              --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations 50 >/dev/null
 
             for repeat in 1 2 3 4 5; do
               if (( repeat % 2 )); then
-                run_once baseline baseline/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
+                run_once baseline host-baseline/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
                 run_once current current/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
               else
                 run_once current current/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
-                run_once baseline baseline/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
+                run_once baseline host-baseline/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
+              fi
+            done
+          done
+
+      - name: Compare MPI Kokkos host staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > mpi-kokkos.log
+
+          run_once() {
+            local revision="$1"
+            local side="$2"
+            local components="$3"
+            local ghosts="$4"
+            local iterations="$5"
+            local repeat="$6"
+            echo "CASE revision=${revision} side=${side} components=${components} ghosts=${ghosts} repeat=${repeat}" | tee -a mpi-kokkos.log
+            mpirun -n 2 --bind-to none "$revision/build/benchmarks/idmesh_mpi_kokkos_benchmark" \
+              --side "$side" --components "$components" \
+              --ghost-layers "$ghosts" --iterations "$iterations" | tee -a mpi-kokkos.log
+          }
+
+          for spec in "128 1 1 300" "256 8 1 300" "256 8 4 300"; do
+            read -r side components ghosts iterations <<< "$spec"
+
+            for revision in kokkos-baseline current; do
+              mpirun -n 2 --bind-to none "$revision/build/benchmarks/idmesh_mpi_kokkos_benchmark" \
+                --side "$side" --components "$components" \
+                --ghost-layers "$ghosts" --iterations 50 >/dev/null
+            done
+
+            for repeat in 1 2 3 4 5; do
+              if (( repeat % 2 )); then
+                run_once kokkos-baseline "$side" "$components" "$ghosts" "$iterations" "$repeat"
+                run_once current "$side" "$components" "$ghosts" "$iterations" "$repeat"
+              else
+                run_once current "$side" "$components" "$ghosts" "$iterations" "$repeat"
+                run_once kokkos-baseline "$side" "$components" "$ghosts" "$iterations" "$repeat"
               fi
             done
           done
@@ -86,5 +157,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mpi-benchmark-comparison
-          path: benchmark.log
+          path: |
+            mpi-host.log
+            mpi-kokkos.log
           retention-days: 30
