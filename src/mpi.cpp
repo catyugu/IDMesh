@@ -70,15 +70,13 @@ namespace idmesh::mpi {
     {
         if (!active)
             return;
-        for (int peer = 0; peer < plan.rank_count(); ++peer) {
-            std::size_t input = static_cast<std::size_t>(recv_offsets[peer]);
-            for (Index entity : plan.receive_indices(peer)) {
-                const auto output
-                    = static_cast<std::size_t>(entity) * bytes_per_entity;
-                std::copy_n(recv_buffer.data() + input, bytes_per_entity,
-                    records.data() + output);
-                input += bytes_per_entity;
-            }
+        for (std::size_t i = 0; i < plan.data_->recv_entities.size(); ++i) {
+            const Index entity = plan.data_->recv_entities[i];
+            const auto input = i * bytes_per_entity;
+            const auto output
+                = static_cast<std::size_t>(entity) * bytes_per_entity;
+            std::copy_n(recv_buffer.data() + input, bytes_per_entity,
+                records.data() + output);
         }
         records = {};
         active = false;
@@ -109,28 +107,28 @@ namespace idmesh::mpi {
             "exchange storage must contain one fixed-width record per local entity");
 
         data_->records = records;
-        for (int peer = 0; peer < data_->plan.rank_count(); ++peer) {
-            std::size_t output
-                = static_cast<std::size_t>(data_->send_offsets[peer]);
-            for (Index entity : data_->plan.send_indices(peer)) {
-                const auto input
-                    = static_cast<std::size_t>(entity)
-                    * data_->bytes_per_entity;
-                std::copy_n(records.data() + input,
-                    data_->bytes_per_entity,
-                    data_->send_buffer.data() + output);
-                output += data_->bytes_per_entity;
-            }
+        for (std::size_t i = 0;
+             i < data_->plan.data_->send_entities.size(); ++i) {
+            const Index entity = data_->plan.data_->send_entities[i];
+            const auto input
+                = static_cast<std::size_t>(entity)
+                * data_->bytes_per_entity;
+            const auto output = i * data_->bytes_per_entity;
+            std::copy_n(records.data() + input,
+                data_->bytes_per_entity,
+                data_->send_buffer.data() + output);
         }
 
         MPI_Request request = MPI_REQUEST_NULL;
-        ::idmesh::mpi::detail::check_mpi(
-            MPI_Ialltoallv(data_->send_buffer.data(), data_->send_counts.data(),
-                data_->send_offsets.data(), MPI_BYTE,
-                data_->recv_buffer.data(), data_->recv_counts.data(),
-                data_->recv_offsets.data(), MPI_BYTE, data_->plan.data_->comm,
-                &request),
-            "MPI_Ialltoallv");
+        if (!data_->plan.empty()) {
+            ::idmesh::mpi::detail::check_mpi(
+                MPI_Ineighbor_alltoallv(data_->send_buffer.data(),
+                    data_->send_counts.data(), data_->send_offsets.data(),
+                    MPI_BYTE, data_->recv_buffer.data(),
+                    data_->recv_counts.data(), data_->recv_offsets.data(),
+                    MPI_BYTE, data_->plan.data_->neighbor_comm, &request),
+                "MPI_Ineighbor_alltoallv");
+        }
         data_->request = request;
         data_->active = true;
     }
@@ -157,18 +155,13 @@ namespace idmesh::mpi {
     {
         if (!data_)
             return true;
-        for (const auto& r : data_->recv)
-            if (!r.empty())
-                return false;
-        for (const auto& s : data_->send)
-            if (!s.empty())
-                return false;
-        return true;
+        return data_->send_entities.empty()
+            && data_->recv_entities.empty();
     }
 
     int ExchangePlan::rank_count() const noexcept
     {
-        return data_ ? static_cast<int>(data_->send.size()) : 0;
+        return data_ ? data_->ranks : 0;
     }
 
     Index ExchangePlan::local_entity_count() const noexcept
@@ -180,14 +173,16 @@ namespace idmesh::mpi {
     {
         if (!data_ || peer < 0 || peer >= rank_count())
             throw std::out_of_range("invalid halo send peer");
-        return data_->send[peer];
+        return data_->peer_span(
+            data_->send_entities, data_->send_entity_offsets, peer);
     }
 
     std::span<const Index> ExchangePlan::receive_indices(int peer) const
     {
         if (!data_ || peer < 0 || peer >= rank_count())
             throw std::out_of_range("invalid halo receive peer");
-        return data_->recv[peer];
+        return data_->peer_span(
+            data_->recv_entities, data_->recv_entity_offsets, peer);
     }
 
     ExchangeRequest ExchangePlan::make_request(
@@ -205,14 +200,10 @@ namespace idmesh::mpi {
             request->send_counts, request->recv_counts,
             request->send_offsets, request->recv_offsets);
 
-        const auto send_total = request->send_offsets.empty()
-            ? std::size_t {0}
-            : static_cast<std::size_t>(request->send_offsets.back())
-                + static_cast<std::size_t>(request->send_counts.back());
-        const auto recv_total = request->recv_offsets.empty()
-            ? std::size_t {0}
-            : static_cast<std::size_t>(request->recv_offsets.back())
-                + static_cast<std::size_t>(request->recv_counts.back());
+        const auto send_total
+            = data_->send_entities.size() * bytes_per_entity;
+        const auto recv_total
+            = data_->recv_entities.size() * bytes_per_entity;
         request->send_buffer.resize(send_total);
         request->recv_buffer.resize(recv_total);
         return ExchangeRequest(std::move(request));

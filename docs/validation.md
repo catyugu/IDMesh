@@ -51,7 +51,9 @@ memory measurements and reproducible performance runs.
 on the Cell dual graph. It is useful as a dependency-free baseline.
 `write_partition_shards` is an offline serial exporter and needs the
 global source mesh once; **runtime** `read_partition_shard` only reads
-a Rank's local owned/ghost data and uses a distributed identity registry.
+a Rank's local owned/ghost data, uses a distributed identity registry, and
+builds flat sparse-neighbor halo plans backed by MPI distributed-graph
+communicators.
 Large multi-node weak scaling, ParMETIS-class partition quality, generic
 distributed Gmsh ingestion, dynamic repartitioning and GPU-aware MPI
 throughput are future work.

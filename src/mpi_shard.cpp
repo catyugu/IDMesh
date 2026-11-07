@@ -712,13 +712,12 @@ namespace idmesh::mpi {
             partition->owned_entities[k]
                 = std::move(layouts[k].owned);
             auto exchange = std::make_shared<ExchangePlan::Data>();
-            exchange->comm = comm;
             exchange->context_owner = context.data_;
-            exchange->send = std::move(layouts[k].send);
-            exchange->recv = std::move(layouts[k].recv);
             exchange->local_entities
                 = partition->mesh.entity_count(k);
-            exchange->finalize_layout();
+            exchange->initialize_layout(comm,
+                std::move(layouts[k].send),
+                std::move(layouts[k].recv));
             partition->exchanges[k]
                 = ExchangePlan(std::move(exchange));
         }
