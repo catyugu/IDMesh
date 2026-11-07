@@ -3,6 +3,7 @@
 #include "idmesh/export.hpp"
 
 #include "idmesh/mesh.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -25,9 +26,9 @@ namespace idmesh::mpi {
         ExchangeRequest(const ExchangeRequest&) = delete;
         ExchangeRequest& operator=(const ExchangeRequest&) = delete;
 
-        // Rebinds the preallocated request to a field and starts MPI_Ialltoallv.
-        // The field span must remain alive until wait() completes.
-        void start(std::span<double> values);
+        // Rebinds the preallocated request to packed fixed-width entity records.
+        // The byte span must remain alive until wait() completes.
+        void start(std::span<std::byte> records);
         void wait();
 
     private:
@@ -60,9 +61,9 @@ namespace idmesh::mpi {
     public:
         ExchangePlan() = default;
 
-        // Precomputes counts/displacements and allocates communication buffers
-        // once. Reuse with start()/wait() for fixed-width entity fields.
-        ExchangeRequest make_request(Index components = 1) const;
+        // Precomputes byte counts/displacements and communication buffers for
+        // fixed-width entity records. Reuse with start()/wait().
+        ExchangeRequest make_request(std::size_t bytes_per_entity) const;
         bool empty() const noexcept;
         int rank_count() const noexcept;
         Index local_entity_count() const noexcept;
