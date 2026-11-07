@@ -9,7 +9,7 @@ on:
       host_baseline_ref:
         description: Host halo baseline commit, tag, or branch
         required: true
-        default: 2a63ccbde8565bc22ede22a5b69d13dbfacf006d
+        default: 64c32ed40042948f4f40a273db71e1825e0fc723
       kokkos_baseline_ref:
         description: MPI Kokkos baseline commit, tag, or branch
         required: true
