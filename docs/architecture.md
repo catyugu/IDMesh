@@ -111,6 +111,22 @@ or other requested property, the adapter must reject the operation explicitly.
 Adapters must not silently project, resample, truncate, merge or reinterpret
 mesh-attached data.
 
+### VTK common representation
+
+The private VTK common layer centralizes classical unstructured-grid cell
+codes, Gmsh-to-VTK high-order node permutations, and VTK point numbering.
+Legacy VTK and future VTU writers therefore share the same exact cell
+representation. VTK point IDs are the contiguous IDMesh geometry-node IDs;
+topological Vertex IDs remain the prefix of that numbering.
+
+Mesh-attached data is classified through the same layer before any VTK writer
+serializes it. Dense geometry-node data maps to PointData, dense
+top-dimensional entity data maps to CellData, and whole-Mesh data maps to
+FieldData. Dense topological Vertex data maps to PointData only when the mesh
+has no additional high-order geometry nodes. Explicit subsets and data on
+intermediate entity dimensions are rejected because ordinary VTK
+PointData/CellData cannot preserve those associations exactly.
+
 ## IO capabilities and limitations
 
 - Gmsh MSH 2.2/4.1 ASCII: first- and second-order standard cells, physical
