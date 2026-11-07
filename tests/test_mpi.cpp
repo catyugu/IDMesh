@@ -62,10 +62,11 @@ namespace {
         std::vector<double> scalar(n, -1);
         for (Index i = 0; i < part.owned_cell_count(); ++i)
             scalar[i] = part.global_ids(d)[i] + 10;
-        part.exchange_plan().exchange(scalar);
+        auto pending = part.exchange_plan().begin_exchange(scalar);
+        pending.wait();
         for (Index i = 0; i < n; ++i)
             require(scalar[i] == part.global_ids(d)[i] + 10,
-                "second exchange plan invocation failed");
+                "nonblocking exchange plan invocation failed");
 
         for (Index k = 0; k < d; ++k) {
             require(part.global_ids(k).size() == part.mesh().entity_count(k),

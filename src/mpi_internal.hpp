@@ -45,6 +45,23 @@ namespace idmesh::mpi {
         mutable std::vector<double> host_recv_buffer;
     };
 
+    struct ExchangeRequest::Data {
+        std::shared_ptr<ExchangePlan::Data> plan;
+        std::span<double> values;
+        Index components = 1;
+        std::vector<int> send_counts;
+        std::vector<int> recv_counts;
+        std::vector<int> send_offsets;
+        std::vector<int> recv_offsets;
+        std::vector<double> send_buffer;
+        std::vector<double> recv_buffer;
+        MPI_Request request = MPI_REQUEST_NULL;
+        bool unpacked = false;
+
+        ~Data();
+        void unpack();
+    };
+
     namespace detail {
         void finalize_exchange_layout(ExchangePlan::Data& data);
     }

@@ -148,6 +148,50 @@ namespace idmesh::mpi {
 
     int Context::rank() const noexcept { return data_->rank; }
     int Context::size() const noexcept { return data_->size; }
+    ExchangeRequest::ExchangeRequest(std::shared_ptr<Data> data)
+        : data_(std::move(data))
+    {
+    }
+    ExchangeRequest::~ExchangeRequest() = default;
+    ExchangeRequest::ExchangeRequest(ExchangeRequest&&) noexcept = default;
+    ExchangeRequest& ExchangeRequest::operator=(ExchangeRequest&&) noexcept = default;
+
+    void ExchangeRequest::Data::unpack()
+    {
+        if (unpacked)
+            return;
+        for (int peer = 0; peer < static_cast<int>(plan->recv.size()); ++peer) {
+            std::size_t input = recv_offsets[peer];
+            for (Index cell : plan->recv[peer])
+                for (Index component = 0; component < components; ++component)
+                    values[static_cast<std::size_t>(cell) * components + component]
+                        = recv_buffer[input++];
+        }
+        unpacked = true;
+    }
+
+    ExchangeRequest::Data::~Data()
+    {
+        if (request == MPI_REQUEST_NULL)
+            return;
+        int finalized = 0;
+        if (MPI_Finalized(&finalized) != MPI_SUCCESS || finalized)
+            return;
+        if (MPI_Wait(&request, MPI_STATUS_IGNORE) == MPI_SUCCESS)
+            unpack();
+    }
+
+    void ExchangeRequest::wait()
+    {
+        ensure_initialized();
+        ::idmesh::detail::require_state(data_ != nullptr, "empty exchange request");
+        if (data_->request != MPI_REQUEST_NULL) {
+            ::idmesh::mpi::detail::check_mpi(
+                MPI_Wait(&data_->request, MPI_STATUS_IGNORE), "MPI_Wait");
+        }
+        data_->unpack();
+    }
+
     ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
         : data_(std::move(data))
     {
@@ -250,6 +294,51 @@ namespace idmesh::mpi {
                         = data_->host_recv_buffer[input++];
             }
         }
+    }
+
+    ExchangeRequest ExchangePlan::begin_exchange(
+        std::span<double> values, Index components) const
+    {
+        ensure_initialized();
+        ::idmesh::detail::require_state(data_ != nullptr, "empty exchange plan");
+        ::idmesh::detail::require_argument(
+            components > 0
+                && values.size() == std::size_t(data_->local_cells) * components,
+            "exchange field must have one fixed-width record per local cell");
+
+        auto request = std::make_shared<ExchangeRequest::Data>();
+        request->plan = data_;
+        request->values = values;
+        request->components = components;
+        scaled_layout(*data_, components,
+            request->send_counts, request->recv_counts,
+            request->send_offsets, request->recv_offsets);
+
+        const auto send_total = request->send_offsets.empty()
+            ? 0
+            : request->send_offsets.back() + request->send_counts.back();
+        const auto recv_total = request->recv_offsets.empty()
+            ? 0
+            : request->recv_offsets.back() + request->recv_counts.back();
+        request->send_buffer.resize(send_total);
+        request->recv_buffer.resize(recv_total);
+
+        for (int peer = 0; peer < rank_count(); ++peer) {
+            std::size_t output = request->send_offsets[peer];
+            for (Index cell : data_->send[peer])
+                for (Index component = 0; component < components; ++component)
+                    request->send_buffer[output++]
+                        = values[static_cast<std::size_t>(cell) * components + component];
+        }
+
+        ::idmesh::mpi::detail::check_mpi(
+            MPI_Ialltoallv(request->send_buffer.data(), request->send_counts.data(),
+                request->send_offsets.data(), MPI_DOUBLE,
+                request->recv_buffer.data(), request->recv_counts.data(),
+                request->recv_offsets.data(), MPI_DOUBLE, data_->comm,
+                &request->request),
+            "MPI_Ialltoallv");
+        return ExchangeRequest(std::move(request));
     }
 
     PartitionedMesh::PartitionedMesh(std::shared_ptr<Data> data)

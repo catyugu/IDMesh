@@ -19,6 +19,24 @@ namespace idmesh::mpi {
     };
 
     class PartitionedMesh;
+    class ExchangePlan;
+
+    class IDMESH_MPI_API ExchangeRequest {
+    public:
+        ~ExchangeRequest();
+        ExchangeRequest(ExchangeRequest&&) noexcept;
+        ExchangeRequest& operator=(ExchangeRequest&&) noexcept;
+        ExchangeRequest(const ExchangeRequest&) = delete;
+        ExchangeRequest& operator=(const ExchangeRequest&) = delete;
+
+        void wait();
+
+    private:
+        struct Data;
+        std::shared_ptr<Data> data_;
+        explicit ExchangeRequest(std::shared_ptr<Data> data);
+        friend class ExchangePlan;
+    };
 
     class IDMESH_MPI_API Context {
     public:
@@ -46,6 +64,10 @@ namespace idmesh::mpi {
         ExchangePlan() = default;
 
         void exchange(std::span<double> values, Index components = 1) const;
+        // Packs owned values immediately, starts a nonblocking collective, and
+        // unpacks ghost values in wait(). The span must remain alive until then.
+        ExchangeRequest begin_exchange(
+            std::span<double> values, Index components = 1) const;
         bool empty() const noexcept;
         int rank_count() const noexcept;
         Index local_cell_count() const noexcept;
@@ -64,6 +86,7 @@ namespace idmesh::mpi {
         std::shared_ptr<Data> data_;
         explicit ExchangePlan(std::shared_ptr<Data> data);
         friend class PartitionedMesh;
+        friend class ExchangeRequest;
         friend PartitionedMesh partition_replicated(
             const Context&, const Mesh&, Index);
         friend PartitionedMesh read_partition_shard(
