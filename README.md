@@ -99,6 +99,11 @@ auto owners = idmesh::partition_graph(mesh, parts);
 idmesh::write_partition_shards(mesh, owners, ghost_layers, "mesh");
 ```
 
+`write_partition_shards` accepts any valid per-Cell owner-rank vector, so
+third-party partitioners can be integrated without introducing their types or
+libraries into the IDMesh SDK. `partition_graph` is the dependency-free
+baseline implementation.
+
 The optional MPI backend reads those shards at runtime and exposes global IDs,
 owner ranks, owned-entity sets and reusable halo exchange for every materialized
 topology dimension.

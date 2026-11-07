@@ -17,7 +17,7 @@
 - [x] Geometry/field mirrors and device-aware communication with host-staging fallback.
 - [x] Communicator-scoped MPI contexts without exposing `mpi.h` in the SDK.
 - [x] Reusable nonblocking host halo exchange with persistent request buffers.
-- [ ] Multi-node weak scaling and external partitioner integration.
+- [ ] Multi-node weak scaling and external partitioner adapters/tooling.
 
 ## Milestone 3: advanced mesh coupling
 - Arbitrary polyhedral cells, nonmatching interface maps, periodic couplings and high-order curved geometry.
@@ -52,7 +52,8 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Independently read owned/ghost Cell and quadratic geometry shards on each MPI Rank.
 - [x] Distributed registry for unique shared entity IDs and ownership.
 - [x] Build halo exchange from explicit global-ID ghost requests without global mesh replication.
-- [ ] External ParMETIS/PT-Scotch partition quality and multi-node weak scaling.
+- [x] Keep external partitioners behind the plain Cell-owner-vector shard-writer boundary.
+- [ ] Add ParMETIS/PT-Scotch adapters/tooling and multi-node weak scaling when a concrete caller requires them.
 - [ ] Fully distributed parallel generation of shard files from a global parallel mesh format.
 
 ## GPU transport and numerical execution

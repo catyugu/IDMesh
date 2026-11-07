@@ -3,6 +3,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -57,6 +58,27 @@ int main()
                     && magic == "IDMESH_SHARD" && version == 2,
                 "invalid core shard output");
         }
+        std::filesystem::remove(path);
+    }
+
+    // The shard writer accepts ownership produced outside IDMesh. This is the
+    // external partitioner boundary; no third-party partitioner type enters
+    // the public SDK.
+    const std::array<int, 4> external_owners {0, 1, 1, 0};
+    const auto external_prefix = (std::filesystem::temp_directory_path()
+        / "idmesh-external-partition").string();
+    idmesh::write_partition_shards(
+        mesh, external_owners, 0, external_prefix);
+    for (int rank = 0; rank < 2; ++rank) {
+        const auto path
+            = external_prefix + "." + std::to_string(rank) + ".idm";
+        std::ifstream input(path);
+        const std::string contents(
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>());
+        require(contents.find("\nCELLS 2\n") != std::string::npos,
+            "externally supplied ownership was not honored");
+        input.close();
         std::filesystem::remove(path);
     }
     return 0;

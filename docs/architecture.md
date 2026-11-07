@@ -135,8 +135,11 @@ Vertex, Edge, Facet and Cell fields. `start` packs owner records and launches
 records, allowing independent work to overlap the communication interval.
 
 The bundled graph partitioner and shard writer are core, dependency-free serial
-preprocessing tools exposed by `idmesh/partition.hpp`; their quality is not
-claimed comparable to ParMETIS. The MPI backend duplicates and owns the
+preprocessing tools exposed by `idmesh/partition.hpp`. The shard writer takes
+a plain Cell-owner vector; that vector is the integration boundary for external
+partitioners such as METIS-family or PT-Scotch tooling, without exposing those
+libraries in the SDK. The built-in partitioner's quality is not claimed
+comparable to those packages. The MPI backend duplicates and owns the
 communicator represented by `mpi::Context`.
 
 `idmesh_fvm` assembles a 3D two-tetra diffusion operator using
