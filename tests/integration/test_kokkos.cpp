@@ -74,5 +74,25 @@ int main(int argc, char** argv)
         std::cerr << "Kokkos test: " << error.what() << '\n';
     }
     Kokkos::finalize();
+    // A new mirror must fail without using a finalized Kokkos runtime.
+    if (status == 0) {
+        idmesh::MeshBuilder builder(1, 1);
+        builder.add_vertex({0, 0, 0});
+        builder.add_vertex({1, 0, 0});
+        builder.add_cell(idmesh::CellType::segment,
+            std::array<idmesh::Index, 2> {0, 1});
+        const auto mesh = std::move(builder).finalize();
+        bool rejected = false;
+        try {
+            idmesh::kokkos::DeviceMesh invalid(mesh);
+        }
+        catch (const std::logic_error&) {
+            rejected = true;
+        }
+        if (!rejected) {
+            std::cerr << "Kokkos device mirror accepted a finalized runtime\n";
+            status = 1;
+        }
+    }
     return status;
 }

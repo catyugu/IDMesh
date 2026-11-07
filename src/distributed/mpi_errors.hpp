@@ -25,4 +25,18 @@ namespace idmesh::mpi::detail {
         }
         throw std::runtime_error(message);
     }
+
+    // MPI_Initialized stays true after MPI_Finalize, so both states matter.
+    inline void require_active()
+    {
+        int initialized = 0;
+        check_mpi(MPI_Initialized(&initialized), "MPI_Initialized");
+        if (!initialized)
+            throw std::logic_error("MPI must be initialized by the application");
+
+        int finalized = 0;
+        check_mpi(MPI_Finalized(&finalized), "MPI_Finalized");
+        if (finalized)
+            throw std::logic_error("MPI has already been finalized");
+    }
 } // namespace idmesh::mpi::detail

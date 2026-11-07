@@ -7,6 +7,8 @@
 #include <memory>
 
 namespace idmesh::kokkos {
+    // The application owns Kokkos initialization/finalization. Destroy every
+    // device mirror before calling Kokkos::finalize().
     // Persistent mirrors own memory in Kokkos::DefaultExecutionSpace::memory_space
     // without exposing Kokkos types in the installed SDK ABI. Returned pointers are
     // device-space addresses and may only be dereferenced when that memory space is

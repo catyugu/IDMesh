@@ -19,6 +19,7 @@ namespace idmesh::mpi::kokkos {
         require_gpu_aware
     };
 
+    // MPI and Kokkos must remain active for the lifetime of this object.
     class IDMESH_MPI_KOKKOS_API DeviceHaloPlan {
     public:
         DeviceHaloPlan(
@@ -34,7 +35,9 @@ namespace idmesh::mpi::kokkos {
 
         // Packs fixed-width records from caller-owned device memory, performs
         // any required D2H staging, then starts the sparse MPI neighborhood exchange. The device
-        // storage must remain alive until wait() completes.
+        // storage must remain alive until wait() or destruction completes.
+        // Destroying an active plan waits for MPI but discards received ghosts;
+        // only wait() unpacks into caller-owned device storage.
         void start(void* device_data, std::size_t byte_size,
             DeviceTransport mode = DeviceTransport::automatic);
         // Completes MPI, performs any required H2D staging, and unpacks ghosts.

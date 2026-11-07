@@ -196,6 +196,9 @@ shape families are rejected, pending a standard-preserving adapter.
 
 `-DIDMESH_ENABLE_MPI=ON` builds the `IDMesh::MPI` adapter without exposing
 `mpi.h` from public SDK headers. The application initializes/finalizes MPI.
+All communicator owners and outstanding requests must be destroyed before
+`MPI_Finalize()`. MPI-dependent operations reject an uninitialized or
+already-finalized runtime.
 Production distributed meshes are loaded rank-locally from partition shards.
 The v3 shard format has one private schema declaration shared by the serial
 writer and MPI reader. MPI-independent parsing is separate from local Mesh
@@ -208,7 +211,7 @@ an owned-first local range.
 
 `exchange_plan(dimension).make_request(bytes_per_entity)` allocates byte counts,
 displacements and packed buffers once. Repeated `start(records)` / `wait()`
-cycles perform no IDMesh-side host allocation. Records are opaque bytes, so the mesh layer does not prescribe a scalar or field type. The same transport applies to Vertex, Edge, Facet and Cell records. `start` packs owner records and launches `MPI_Ineighbor_alltoallv`; `wait()` completes the collective and unpacks ghost records, allowing independent work to overlap the communication interval.
+cycles perform no IDMesh-side host allocation. Records are opaque bytes, so the mesh layer does not prescribe a scalar or field type. The same transport applies to Vertex, Edge, Facet and Cell records. `start` packs owner records and launches `MPI_Ineighbor_alltoallv`; `wait()` completes the collective and unpacks ghost records, allowing independent work to overlap the communication interval. Only `wait()` applies received records to caller-owned memory. Destroying an active `ExchangeRequest` completes its MPI communication and discards the result without accessing the borrowed record span.
 
 The bundled graph partitioner and shard writer are core, dependency-free serial
 preprocessing tools exposed by `idmesh/partition.hpp`. The shard writer takes
@@ -333,7 +336,7 @@ remain future work.
 
 ## GPU fields and direct MPI transport
 
-The Kokkos backend owns only `DeviceMesh` and `DeviceRelation` mirrors while keeping Kokkos types out of the installed ABI. Application fields remain caller-owned. Discretization-specific operators are intentionally outside the mesh SDK. The combined MPI/Kokkos adapter packs opaque fixed-width records from caller-owned device storage and unpacks ghost records
+The Kokkos backend owns only `DeviceMesh` and `DeviceRelation` mirrors while keeping Kokkos types out of the installed ABI. Application fields remain caller-owned. The application initializes/finalizes Kokkos and must destroy all device mirrors and `DeviceHaloPlan` objects before `Kokkos::finalize()`. Discretization-specific operators are intentionally outside the mesh SDK. The combined MPI/Kokkos adapter packs opaque fixed-width records from caller-owned device storage and unpacks ghost records
 for fields on any materialized entity dimension using Kokkos kernels.
 
 `DeviceHaloPlan` stores the rank-index maps in device memory and
@@ -346,7 +349,7 @@ the plan's distributed-graph communicator.
 Applications may launch work that does not depend on Ghost values before
 calling `wait`; MPI progress during that interval depends on the MPI runtime.
 `wait` completes MPI, performs H2D staging when required, unpacks Ghost
-records, and fences completion. Direct GPU-aware transport keeps the packed
+records, and fences completion. Destroying an active `DeviceHaloPlan` waits for MPI completion but discards received bytes without modifying the caller's device field. Direct GPU-aware transport keeps the packed
 buffers resident on device; host staging owns persistent host mirrors and
 precomputed MPI counts/displacements. Steady-state start/wait performs no
 IDMesh-side allocation.
