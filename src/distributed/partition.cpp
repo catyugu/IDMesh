@@ -3,11 +3,8 @@
 #include "shard.hpp"
 
 #include <algorithm>
-#include <array>
-#include <cmath>
 #include <cstdint>
 #include <deque>
-#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -318,13 +315,7 @@ namespace idmesh {
                 }
             }
         }
-        for (auto& rank_halos : halos)
-            for (auto& layout : rank_halos)
-                for (auto& [peer, lists] : layout.peers) {
-                    (void)peer;
-                    std::sort(lists.send.begin(), lists.send.end());
-                    std::sort(lists.receive.begin(), lists.receive.end());
-                }
+        // Each per-peer list is already ordered by the sorted entity closure.
 
         for (int rank = 0; rank < parts; ++rank) {
             const auto& local = local_cells[rank];
