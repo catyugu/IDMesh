@@ -121,11 +121,11 @@ namespace idmesh::detail::vtk {
                     && array.tuples <= std::numeric_limits<std::size_t>::max()
                         / array.components,
                 "VTK scalar index or type mismatch");
-            const auto offset = (tuple * array.components + component) * width;
+            const auto scalar = tuple * array.components + component;
             ::idmesh::detail::require_runtime(
-                offset <= array.values.size()
-                    && width <= array.values.size() - offset,
+                scalar < array.values.size() / width,
                 "truncated VTK scalar array");
+            const auto offset = scalar * width;
             T result {};
             std::memcpy(&result, array.values.data() + offset, width);
             return result;
