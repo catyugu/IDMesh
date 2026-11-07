@@ -226,7 +226,7 @@ namespace idmesh::mpi {
 
         struct Key {
             Index dim = 0;
-            detail::EntitySignature<std::uint64_t> signature;
+            ::idmesh::detail::EntitySignature<std::uint64_t> signature;
 
             bool operator<(const Key& other) const
             {
@@ -476,7 +476,7 @@ namespace idmesh::mpi {
                         global_vertices.push_back(
                             local_to_global_vertex[vertex]);
                     auto canonical
-                        = detail::canonicalize_entity<std::uint64_t>(
+                        = ::idmesh::detail::canonicalize_entity<std::uint64_t>(
                             global_vertices);
                     Key key {k, std::move(canonical.signature)};
                     const int service
