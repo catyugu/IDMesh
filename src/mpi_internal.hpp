@@ -1,5 +1,6 @@
 #pragma once
 #include "idmesh/mpi.hpp"
+#include "mpi_errors.hpp"
 #include <mpi.h>
 #include <climits>
 #include <cstddef>

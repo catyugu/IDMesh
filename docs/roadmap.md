@@ -41,7 +41,7 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Persistent Kokkos topology/geometry mirrors with typed raw device descriptors (Serial CI).
 - [x] Standalone FVM conservation/normal and FEEC incidence examples.
 - [x] Scalable rank-local shard input and dependency-free graph-based partitioning baseline.
-- [x] GPU-backed field buffers and device-aware halo exchange with host staging fallback.
+- [x] Caller-owned device buffers and device-aware halo exchange with host staging fallback.
 - [x] Nonblocking device-aware halo exchange with reusable staging/request state.
 - [ ] Physical CUDA/HIP validation of overlap and direct GPU-aware MPI.
 - [x] Add executable Basix C++-backed Nedelec DOF-transformation integration tests and CI.
