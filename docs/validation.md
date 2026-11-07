@@ -15,9 +15,9 @@ multi-rank MPI and Kokkos execution. Both layers use the repository's small
 | Unit layer | Linux GCC, Windows MSVC, macOS Clang | reference-cell contracts, data primitives, analytic geometry and VTK common mappings |
 | Serial integration | Linux GCC, Windows MSVC, macOS Clang | Gmsh/VTK/Medit round-trips, manifests, partition shards and a fixed Gmsh -> field operation -> VTU -> read-back fixture |
 | Independent applications | `examples` CI job, three CTest examples | Basix orientation, conservative FVM flux, and mixed-cell FEM/FEEC exact sequence CG=0 / DC=0 |
-| Distributed MPI | OpenMPI with 2 and 3 ranks | rank-local shards, ghost-depth monotonicity, mixed Tet/Hex/Prism/Pyramid 3D topology, cross-rank identity/orientation and Vertex/Edge/Facet/Cell field exchanges |
-| Kokkos | Serial runtime | persistent topology/geometry mirrors and matrix-free diffusion over application-owned device storage |
-| MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | type-agnostic all-dimension device pack/unpack over caller-owned storage, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
+| Distributed MPI | OpenMPI with 2 and 3 ranks | rank-local shards, ghost-depth monotonicity, mixed Tet/Hex/Prism/Pyramid 3D topology, cross-rank identity/orientation, Vertex/Edge/Facet/Cell field exchanges, abandoned host requests and pre/post-finalize MPI guards |
+| Kokkos | Serial runtime | persistent topology/geometry mirrors, matrix-free diffusion over application-owned device storage, and post-finalize construction rejection |
+| MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | type-agnostic all-dimension device pack/unpack over caller-owned storage, abandoned device requests, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
 | External FE | Basix-backed Nedelec transformation CI | rotation/reflection group relations and shared-facet consistency |
 | Package consumers | CMake installed-package tests | core, MPI, Kokkos and combined adapters |
 

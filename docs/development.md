@@ -138,3 +138,13 @@ GitHub's standard Ubuntu runners cannot validate physical CUDA/HIP
 execution. For a public repo, do not expose a persistent self-hosted
 GPU machine to untrusted pull request workflows. Prefer an isolated,
 ephemeral, manually approved GPU runner.
+
+## Runtime ownership
+
+Applications initialize and finalize MPI and Kokkos themselves. All
+`Context`, `PartitionedMesh`, `ExchangePlan`, `ExchangeRequest`,
+`DeviceMesh`, `DeviceRelation` and `DeviceHaloPlan` instances must be
+destroyed before the corresponding runtime is finalized. A started halo
+exchange updates caller-owned ghosts only when `wait()` completes;
+destroying an active request completes transport and discards received data.
+Backend operations reject finalized runtimes when they can report an error.
