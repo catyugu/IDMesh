@@ -171,8 +171,10 @@ computed from the same expressions using forward-mode scalar differentiation.
 The collapsed pyramid coordinate chart has a singular derivative at its apex
 (z=1); evaluate_geometry rejects Jacobian evaluation at that point.
 
-All reference node arrays use Gmsh ordering; the VTK adapter explicitly
-permutes Tet10, Hex20/27, Wedge15/18 and Pyramid13. Cartesian tensor cells
+Reference nodes and geometry shape functions are evaluated directly in
+Gmsh node order. Only the VTK adapter owns the Gmsh-to-VTK node-order
+permutation tables for Tet10, Hex20/27, Wedge15/18 and Pyramid13/14.
+Cartesian tensor cells
 use [-1,1] coordinates. Simplices use nonnegative barycentric coordinates
 whose sum is at most 1. Prism combines a unit reference triangle with
 z in [-1,1]; pyramid has base [-1,1]^2 at z=0 and apex at (0,0,1).

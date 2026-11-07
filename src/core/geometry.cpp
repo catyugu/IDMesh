@@ -1,5 +1,4 @@
 #include "idmesh/geometry.hpp"
-#include "second_order.hpp"
 
 #include <algorithm>
 #include <array>
@@ -82,7 +81,7 @@ namespace idmesh {
             return c;
         }
 
-        std::vector<Vec> vtk_reference_nodes(CellType type, Index count)
+        std::vector<Vec> gmsh_reference_nodes(CellType type, Index count)
         {
             using CT = CellType;
             std::vector<Vec> p;
@@ -107,7 +106,7 @@ namespace idmesh {
             case CT::tetrahedron:
                 p = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
                 if (count == 10) {
-                    for (auto edge : std::array<std::array<int, 2>, 6> {{{0, 1}, {1, 2}, {2, 0}, {0, 3}, {1, 3}, {2, 3}}})
+                    for (auto edge : std::array<std::array<int, 2>, 6> {{{0, 1}, {1, 2}, {2, 0}, {0, 3}, {2, 3}, {1, 3}}})
                         p.push_back(midpoint(p[edge[0]], p[edge[1]]));
                 }
                 break;
@@ -115,13 +114,13 @@ namespace idmesh {
                 p = {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
                     {-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}};
                 if (count > 8) {
-                    for (auto edge : std::array<std::array<int, 2>, 12> {{{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4},
-                             {0, 4}, {1, 5}, {2, 6}, {3, 7}}})
+                    for (auto edge : std::array<std::array<int, 2>, 12> {{{0, 1}, {3, 0}, {0, 4}, {1, 2}, {1, 5}, {2, 3}, {2, 6}, {3, 7},
+                             {4, 5}, {7, 4}, {5, 6}, {6, 7}}})
                         p.push_back(midpoint(p[edge[0]], p[edge[1]]));
                 }
                 if (count == 27) {
-                    for (auto face : std::array<std::array<int, 4>, 6> {{{0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7},
-                             {0, 1, 2, 3}, {4, 5, 6, 7}}}) {
+                    for (auto face : std::array<std::array<int, 4>, 6> {{{0, 1, 2, 3}, {2, 3, 7, 6}, {0, 1, 5, 4}, {1, 2, 6, 5},
+                             {3, 0, 4, 7}, {4, 5, 6, 7}}}) {
                         const std::array<Vec, 4> vertices {
                             p[face[0]], p[face[1]], p[face[2]], p[face[3]]};
                         p.push_back(center(vertices));
@@ -133,8 +132,8 @@ namespace idmesh {
                 p = {{0, 0, -1}, {1, 0, -1}, {0, 1, -1},
                     {0, 0, 1}, {1, 0, 1}, {0, 1, 1}};
                 if (count > 6) {
-                    for (auto edge : std::array<std::array<int, 2>, 9> {{{0, 1}, {1, 2}, {2, 0}, {3, 4}, {4, 5}, {5, 3},
-                             {0, 3}, {1, 4}, {2, 5}}})
+                    for (auto edge : std::array<std::array<int, 2>, 9> {{{0, 1}, {2, 0}, {0, 3}, {1, 2}, {1, 4}, {2, 5},
+                             {3, 4}, {5, 3}, {4, 5}}})
                         p.push_back(midpoint(p[edge[0]], p[edge[1]]));
                 }
                 if (count == 18)
@@ -143,7 +142,7 @@ namespace idmesh {
             case CT::pyramid:
                 p = {{-1, -1, 0}, {1, -1, 0}, {1, 1, 0}, {-1, 1, 0}, {0, 0, 1}};
                 if (count > 5) {
-                    for (auto edge : std::array<std::array<int, 2>, 8> {{{0, 1}, {1, 2}, {2, 3}, {3, 0}, {0, 4}, {1, 4}, {2, 4}, {3, 4}}})
+                    for (auto edge : std::array<std::array<int, 2>, 8> {{{0, 1}, {3, 0}, {0, 4}, {1, 2}, {1, 4}, {2, 3}, {2, 4}, {3, 4}}})
                         p.push_back(midpoint(p[edge[0]], p[edge[1]]));
                 }
                 if (count == 14)
@@ -199,7 +198,7 @@ namespace idmesh {
                 u[1] * v[1]};
         }
 
-        std::vector<Jet> shape_vtk(CellType type, Index count,
+        std::vector<Jet> shape_gmsh(CellType type, Index count,
             std::array<Jet, 3> q)
         {
             const auto x = q[0], y = q[1], z = q[2];
@@ -244,10 +243,10 @@ namespace idmesh {
                     b[3] * (Jet(2) * b[3] - Jet(1)),
                     Jet(4) * b[0] * b[1], Jet(4) * b[1] * b[2],
                     Jet(4) * b[2] * b[0], Jet(4) * b[0] * b[3],
-                    Jet(4) * b[1] * b[3], Jet(4) * b[2] * b[3]};
+                    Jet(4) * b[2] * b[3], Jet(4) * b[1] * b[3]};
             }
             case CellType::hexahedron: {
-                const auto nodes = vtk_reference_nodes(type, count);
+                const auto nodes = gmsh_reference_nodes(type, count);
                 if (count == 8 || count == 20) {
                     for (Index i = 0; i < count; ++i) {
                         const auto a = nodes[i];
@@ -277,6 +276,10 @@ namespace idmesh {
             }
             case CellType::prism: {
                 const auto lin = triangle_linear(x, y);
+                // Gmsh orders horizontal and vertical edges by corner.
+                constexpr std::array<Index, 3> bottom_edges {6, 9, 7};
+                constexpr std::array<Index, 3> top_edges {12, 14, 13};
+                constexpr std::array<Index, 3> vertical_edges {8, 10, 11};
                 if (count == 6) {
                     for (int i = 0; i < 3; ++i) {
                         result[i] = lin[i] * (Jet(1) - z) / Jet(2);
@@ -290,9 +293,9 @@ namespace idmesh {
                         for (int i = 0; i < 3; ++i) {
                             result[i] = tri[i] * (Jet(1) - z) / Jet(2) - lin[i] * middle / Jet(2);
                             result[i + 3] = tri[i] * (Jet(1) + z) / Jet(2) - lin[i] * middle / Jet(2);
-                            result[i + 12] = lin[i] * middle;
-                            result[i + 6] = tri[i + 3] * (Jet(1) - z) / Jet(2);
-                            result[i + 9] = tri[i + 3] * (Jet(1) + z) / Jet(2);
+                            result[vertical_edges[i]] = lin[i] * middle;
+                            result[bottom_edges[i]] = tri[i + 3] * (Jet(1) - z) / Jet(2);
+                            result[top_edges[i]] = tri[i + 3] * (Jet(1) + z) / Jet(2);
                         }
                     }
                     else {
@@ -300,9 +303,9 @@ namespace idmesh {
                         for (int i = 0; i < 3; ++i) {
                             result[i] = tri[i] * l[0];
                             result[i + 3] = tri[i] * l[2];
-                            result[i + 12] = tri[i] * l[1];
-                            result[i + 6] = tri[i + 3] * l[0];
-                            result[i + 9] = tri[i + 3] * l[2];
+                            result[vertical_edges[i]] = tri[i] * l[1];
+                            result[bottom_edges[i]] = tri[i + 3] * l[0];
+                            result[top_edges[i]] = tri[i + 3] * l[2];
                             result[i + 15] = tri[i + 3] * l[1];
                         }
                     }
@@ -320,22 +323,24 @@ namespace idmesh {
                     result[4] = z;
                 }
                 else {
+                    constexpr std::array<Index, 4> base_edges {5, 8, 10, 6};
+                    constexpr std::array<Index, 4> side_edges {7, 9, 11, 12};
                     if (count == 13) {
                         const auto base = quad_serendipity(u, v);
                         for (int i = 0; i < 8; ++i)
-                            result[i < 4 ? i : i + 1] = (Jet(1) - z) * (Jet(1) - Jet(2) * z) * base[i];
+                            result[i < 4 ? i : base_edges[i - 4]] = (Jet(1) - z) * (Jet(1) - Jet(2) * z) * base[i];
                     }
                     else {
                         const auto base = quad_tensor(u, v);
                         for (int i = 0; i < 4; ++i)
                             result[i] = (Jet(1) - z) * (Jet(1) - Jet(2) * z) * base[i];
                         for (int i = 4; i < 8; ++i)
-                            result[i + 1] = (Jet(1) - z) * (Jet(1) - Jet(2) * z) * base[i];
+                            result[base_edges[i - 4]] = (Jet(1) - z) * (Jet(1) - Jet(2) * z) * base[i];
                         result[13] = (Jet(1) - z) * (Jet(1) - Jet(2) * z) * base[8];
                     }
                     const auto c = quad_linear(u, v);
                     for (int i = 0; i < 4; ++i)
-                        result[9 + i] = Jet(4) * z * (Jet(1) - z) * c[i];
+                        result[side_edges[i]] = Jet(4) * z * (Jet(1) - z) * c[i];
                     result[4] = z * (Jet(2) * z - Jet(1));
                 }
                 return result;
@@ -379,14 +384,7 @@ namespace idmesh {
 
     std::vector<std::array<double, 3>> reference_geometry_nodes(CellType type, Index count)
     {
-        auto vtk = vtk_reference_nodes(type, count);
-        const auto mapping = detail::vtk_from_gmsh(type, count);
-        if (mapping.empty())
-            return vtk;
-        std::vector<Vec> gmsh(count);
-        for (Index i = 0; i < count; ++i)
-            gmsh[mapping[i]] = vtk[i];
-        return gmsh;
+        return gmsh_reference_nodes(type, count);
     }
 
     GeometryEvaluation evaluate_geometry(const Mesh& mesh, Index cell,
@@ -397,14 +395,13 @@ namespace idmesh {
         const auto type = mesh.cell_types()[cell];
         check_domain(type, reference);
         const auto ids = mesh.cell_geometry_nodes(cell);
-        const auto perm = detail::vtk_from_gmsh(type, static_cast<Index>(ids.size()));
         const auto vars = std::array<Jet, 3> {
             Jet::variable(reference[0], 0), Jet::variable(reference[1], 1),
             Jet::variable(reference[2], 2)};
-        const auto shape = shape_vtk(type, static_cast<Index>(ids.size()), vars);
+        const auto shape = shape_gmsh(type, static_cast<Index>(ids.size()), vars);
         GeometryEvaluation result;
         for (Index i = 0; i < ids.size(); ++i) {
-            const auto position = mesh.geometry_node_position(ids[perm.empty() ? i : perm[i]]);
+            const auto position = mesh.geometry_node_position(ids[i]);
             for (Index a = 0; a < mesh.geometric_dimension(); ++a) {
                 result.point[a] += position[a] * shape[i].v;
                 for (Index b = 0; b < mesh.dimension(); ++b)
