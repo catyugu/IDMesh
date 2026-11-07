@@ -253,21 +253,20 @@ namespace idmesh {
         ::idmesh::detail::require_argument(
             parts >= 1 && static_cast<std::uint64_t>(parts) <= n,
             "invalid shard rank count");
-        std::vector<std::vector<Index>> owned(parts);
+        std::vector<std::vector<Index>> local_cells(parts);
         for (Index cell = 0; cell < n; ++cell)
-            owned[owners[cell]].push_back(cell);
-        for (const auto& cells : owned)
+            local_cells[owners[cell]].push_back(cell);
+        for (const auto& cells : local_cells)
             ::idmesh::detail::require_argument(
                 !cells.empty(),
                 "every exported shard must own cells");
 
         const auto identity = complete_identity_topology(source);
         const auto graph = dual_graph(identity);
-        std::vector<std::vector<Index>> local_cells(parts);
         for (int rank = 0; rank < parts; ++rank) {
             std::vector<bool> seen(n);
             std::vector<Index> frontier;
-            for (Index cell : owned[rank]) {
+            for (Index cell : local_cells[rank]) {
                 seen[cell] = true;
                 frontier.push_back(cell);
             }
@@ -287,7 +286,6 @@ namespace idmesh {
                 frontier = std::move(next);
             }
             std::sort(ghosts.begin(), ghosts.end());
-            local_cells[rank] = owned[rank];
             local_cells[rank].insert(local_cells[rank].end(),
                 ghosts.begin(), ghosts.end());
         }
