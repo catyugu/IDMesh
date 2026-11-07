@@ -149,13 +149,161 @@ namespace {
 
     struct Identity {
         std::uint64_t vertex[4] {};
+        std::uint64_t ordered_vertex[4] {};
         std::uint64_t global = 0;
         Index dimension = 0;
         Index arity = 0;
         int owner = -1;
     };
 
-    void test_shard(const idmesh::mpi::Context& context,
+    struct Incidence {
+        std::uint64_t upper = 0;
+        std::uint64_t lower = 0;
+        Index dimension = 0;
+        int coefficient = 0;
+        std::uint16_t rotation = 0;
+        bool reversed = false;
+    };
+
+    template <class T>
+    std::vector<T> gather_records(
+        const std::vector<T>& here, int size)
+    {
+        const int bytes = static_cast<int>(here.size() * sizeof(T));
+        std::vector<int> counts(size), displacements(size);
+        MPI_Allgather(
+            &bytes, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+        int total = 0;
+        for (int peer = 0; peer < size; ++peer) {
+            displacements[peer] = total;
+            total += counts[peer];
+        }
+        require(total % sizeof(T) == 0, "invalid record gather size");
+        std::vector<T> all(total / sizeof(T));
+        MPI_Allgatherv(here.data(), bytes, MPI_BYTE,
+            all.data(), counts.data(), displacements.data(), MPI_BYTE,
+            MPI_COMM_WORLD);
+        return all;
+    }
+
+    void check_shared_identity(
+        const idmesh::mpi::PartitionedMesh& partition, int size)
+    {
+        const Index dim = partition.mesh().dimension();
+        std::vector<Identity> here;
+        for (Index k = 0; k < dim; ++k) {
+            if (!partition.mesh().has_entities(k))
+                continue;
+            for (Index entity = 0;
+                 entity < partition.mesh().entity_count(k); ++entity) {
+                Identity record {};
+                record.dimension = k;
+                record.global = partition.global_ids(k)[entity];
+                record.owner = partition.owner_ranks(k)[entity];
+                const auto vertices
+                    = partition.mesh().entity_vertices(k, entity);
+                record.arity = static_cast<Index>(vertices.size());
+                for (std::size_t j = 0; j < vertices.size(); ++j) {
+                    const auto global
+                        = partition.global_ids(0)[vertices[j]];
+                    record.vertex[j] = global;
+                    record.ordered_vertex[j] = global;
+                }
+                std::sort(
+                    record.vertex, record.vertex + record.arity);
+                here.push_back(record);
+            }
+        }
+
+        const auto all = gather_records(here, size);
+        using Key = std::pair<Index, std::vector<std::uint64_t>>;
+        std::map<Key, std::pair<std::uint64_t, int>> identities;
+        std::map<std::pair<Index, std::uint64_t>, Key> reverse;
+        std::map<std::pair<Index, std::uint64_t>,
+            std::vector<std::uint64_t>> ordered;
+        std::size_t shared = 0;
+        for (const auto& record : all) {
+            Key key {record.dimension,
+                std::vector<std::uint64_t>(
+                    record.vertex, record.vertex + record.arity)};
+            auto [existing, inserted] = identities.try_emplace(
+                key, record.global, record.owner);
+            require(inserted
+                    || existing->second
+                        == std::pair {record.global, record.owner},
+                "shared entity identity/owner mismatch across ranks");
+            if (!inserted)
+                ++shared;
+
+            const auto name
+                = std::pair {record.dimension, record.global};
+            auto [back, unique] = reverse.try_emplace(name, key);
+            require(unique || back->second == key,
+                "global entity-ID collision");
+
+            std::vector<std::uint64_t> canonical(
+                record.ordered_vertex,
+                record.ordered_vertex + record.arity);
+            auto [order, first]
+                = ordered.try_emplace(name, canonical);
+            require(first || order->second == canonical,
+                "canonical entity orientation differs across ranks");
+        }
+        require(shared > 0, "distributed test has no shared subentities");
+    }
+
+    void check_shared_incidence(
+        const idmesh::mpi::PartitionedMesh& partition, int size)
+    {
+        const Index dim = partition.mesh().dimension();
+        std::vector<Incidence> here;
+        for (Index from = 1; from <= dim; ++from) {
+            if (!partition.mesh().has_entities(from)
+                || !partition.mesh().has_relation(from, from - 1))
+                continue;
+            const auto relation
+                = partition.mesh().relation(from, from - 1);
+            for (Index upper = 0; upper < relation.rows; ++upper) {
+                const auto row = relation[upper];
+                require(row.coefficients.size() == row.targets.size()
+                        && row.orientations.size() == row.targets.size(),
+                    "oriented boundary metadata missing");
+                for (std::size_t i = 0; i < row.targets.size(); ++i) {
+                    here.push_back({
+                        partition.global_ids(from)[upper],
+                        partition.global_ids(from - 1)[row.targets[i]],
+                        from,
+                        row.coefficients[i],
+                        row.orientations[i].rotation,
+                        row.orientations[i].reversed});
+                }
+            }
+        }
+
+        const auto all = gather_records(here, size);
+        using Key
+            = std::tuple<Index, std::uint64_t, std::uint64_t>;
+        using Value = std::tuple<int, std::uint16_t, bool>;
+        std::map<Key, Value> incidences;
+        std::size_t repeated = 0;
+        for (const auto& record : all) {
+            const Key key {
+                record.dimension, record.upper, record.lower};
+            const Value value {record.coefficient,
+                record.rotation, record.reversed};
+            auto [existing, inserted]
+                = incidences.try_emplace(key, value);
+            require(inserted || existing->second == value,
+                "boundary sign/orientation differs across ranks");
+            if (!inserted)
+                ++repeated;
+        }
+        require(repeated > 0,
+            "distributed test has no repeated shared incidences");
+    }
+
+    std::vector<std::uint64_t> test_shard(
+        const idmesh::mpi::Context& context,
         const std::string& prefix, int rank, int size, Index ghost_depth)
     {
         std::optional<idmesh::Mesh> root;
@@ -194,49 +342,9 @@ namespace {
             if (partition.mesh().has_entities(k))
                 check_entity_exchange(partition, k, rank);
 
-        // Check local canonicalization of every materialized Edge or Vertex
-        // by its global-key -> global-entity-ID mapping on all MPI ranks.
-        std::vector<Identity> here;
-        for (Index k = 0; k < dim; ++k) {
-            for (Index e = 0; e < partition.mesh().entity_count(k); ++e) {
-                Identity record {};
-                record.dimension = k;
-                record.global = partition.global_ids(k)[e];
-                record.owner = partition.owner_ranks(k)[e];
-                const auto vertices = partition.mesh().entity_vertices(k, e);
-                record.arity = static_cast<Index>(vertices.size());
-                for (std::size_t j = 0; j < vertices.size(); ++j)
-                    record.vertex[j] = partition.global_ids(0)[vertices[j]];
-                std::sort(record.vertex, record.vertex + record.arity);
-                here.push_back(record);
-            }
-        }
-        const int bytes = static_cast<int>(here.size() * sizeof(Identity));
-        std::vector<int> counts(size), displacements(size);
-        MPI_Allgather(&bytes, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
-        int total = 0;
-        for (int p = 0; p < size; ++p) {
-            displacements[p] = total;
-            total += counts[p];
-        }
-        require(total % sizeof(Identity) == 0, "invalid identity gather");
-        std::vector<Identity> all(total / sizeof(Identity));
-        MPI_Allgatherv(here.data(), bytes, MPI_BYTE,
-            all.data(), counts.data(), displacements.data(), MPI_BYTE,
-            MPI_COMM_WORLD);
-        using Key = std::pair<Index, std::vector<std::uint64_t>>;
-        std::map<Key, std::pair<std::uint64_t, int>> identities;
-        std::map<std::pair<Index, std::uint64_t>, Key> reverse;
-        for (const auto& record : all) {
-            Key key {record.dimension, std::vector<std::uint64_t>(record.vertex, record.vertex + record.arity)};
-            auto [existing, inserted] = identities.try_emplace(
-                key, record.global, record.owner);
-            require(inserted || existing->second == std::pair {record.global, record.owner},
-                "shared entity mismatch across rank-local shards");
-            const auto name = std::pair {record.dimension, record.global};
-            auto [back, unique] = reverse.try_emplace(name, key);
-            require(unique || back->second == key, "global entity-ID collision");
-        }
+        check_shared_identity(partition, size);
+        check_shared_incidence(partition, size);
+
         const auto labels = partition.mesh().labels();
         (void)labels;
         if (std::any_of(partition.global_ids(dim).begin(),
@@ -250,6 +358,11 @@ namespace {
                 "quadratic geometry lost in rank-local shard");
         }
 
+        std::vector<std::uint64_t> local_cells(
+            partition.global_ids(dim).begin(),
+            partition.global_ids(dim).end());
+        std::sort(local_cells.begin(), local_cells.end());
+
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0) {
             for (int p = 0; p < size; ++p)
@@ -257,13 +370,14 @@ namespace {
                     prefix + "." + std::to_string(p) + ".idm");
         }
         MPI_Barrier(MPI_COMM_WORLD);
+        return local_cells;
     }
 
     void test_complete_3d(const idmesh::mpi::Context& context,
         const std::string& prefix, int rank, int size)
     {
         if (rank == 0) {
-            const auto mesh = source_3d();
+            const auto mesh = source_3d_mixed();
             const auto assignments = idmesh::partition_graph(mesh, size);
             idmesh::write_partition_shards(mesh, assignments, 1, prefix);
         }
@@ -282,6 +396,24 @@ namespace {
             "complete 3D topology was not materialized");
         for (Index k = 0; k <= 3; ++k)
             check_entity_exchange(partition, k, rank);
+        check_shared_identity(partition, size);
+        check_shared_incidence(partition, size);
+
+        unsigned local_types = 0;
+        for (const auto type : partition.mesh().cell_types())
+            local_types |= 1u << static_cast<unsigned>(type);
+        unsigned global_types = 0;
+        MPI_Allreduce(&local_types, &global_types, 1,
+            MPI_UNSIGNED, MPI_BOR, MPI_COMM_WORLD);
+        for (const auto type : {
+                 idmesh::CellType::tetrahedron,
+                 idmesh::CellType::hexahedron,
+                 idmesh::CellType::prism,
+                 idmesh::CellType::pyramid})
+            require((global_types
+                        & (1u << static_cast<unsigned>(type)))
+                    != 0,
+                "mixed 3D distributed fixture lost a cell family");
 
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
@@ -306,8 +438,20 @@ int main(int argc, char** argv)
         const auto base = (std::filesystem::temp_directory_path()
             / ("idmesh-parallel-" + std::to_string(size)))
                               .string();
-        test_shard(context, base, rank, size, 1);
-        test_shard(context, base, rank, size, 2);
+        const auto depth1
+            = test_shard(context, base + "-g1", rank, size, 1);
+        const auto depth2
+            = test_shard(context, base + "-g2", rank, size, 2);
+        require(std::includes(
+                    depth2.begin(), depth2.end(),
+                    depth1.begin(), depth1.end()),
+            "two-layer ghost cells are not a superset of one-layer ghosts");
+        int local_growth = depth2.size() > depth1.size() ? 1 : 0;
+        int any_growth = 0;
+        MPI_Allreduce(&local_growth, &any_growth, 1,
+            MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        require(any_growth != 0,
+            "second ghost layer did not add any cell");
         test_complete_3d(context, base + "-3d", rank, size);
         if (rank == 0)
             std::cout << "MPI shard: graph cuts, rank-local loading, all-dimension "
