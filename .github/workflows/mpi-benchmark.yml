@@ -1,10 +1,16 @@
 name: MPI benchmark
 
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/mpi-benchmark.yml]
   workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Baseline commit, tag, or branch
+        required: true
+        default: 2a63ccbde8565bc22ede22a5b69d13dbfacf006d
+      candidate_ref:
+        description: Candidate commit, tag, or branch
+        required: true
+        default: main
 
 permissions:
   contents: read
@@ -26,10 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 2a63ccbde8565bc22ede22a5b69d13dbfacf006d
+          ref: ${{ inputs.baseline_ref }}
           path: baseline
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.candidate_ref }}
           path: current
 
       - name: Configure and build both revisions

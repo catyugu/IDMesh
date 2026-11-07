@@ -141,6 +141,13 @@ isolates a deliberately label-heavy finalization workload.
 
 ## MPI halo measurements
 
+`.github/workflows/mpi-benchmark.yml` is a manual engineering comparison
+workflow. It builds two requested revisions on the same runner, warms both,
+then alternates their execution order across five repeats to reduce runner
+warm-up and frequency bias. Its output is diagnostic rather than a CI gate;
+publication-quality measurements still belong on a controlled host.
+
+
 When MPI is enabled, `idmesh_mpi_benchmark` measures the reusable host
 request path created by `make_request` and the already-packed
 `ExchangePlan::exchange_packed` transport baseline. It reports `start`
