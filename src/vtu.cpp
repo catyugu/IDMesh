@@ -9,7 +9,9 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
@@ -437,7 +439,22 @@ namespace idmesh::vtk {
         std::int64_t signed_integer(
             const data::Array& array, std::size_t tuple)
         {
-            if (array.type == data::ScalarType::uint64) {
+            switch (array.type) {
+            case data::ScalarType::int8:
+                return scalar_at<std::int8_t>(array, tuple);
+            case data::ScalarType::uint8:
+                return scalar_at<std::uint8_t>(array, tuple);
+            case data::ScalarType::int16:
+                return scalar_at<std::int16_t>(array, tuple);
+            case data::ScalarType::uint16:
+                return scalar_at<std::uint16_t>(array, tuple);
+            case data::ScalarType::int32:
+                return scalar_at<std::int32_t>(array, tuple);
+            case data::ScalarType::uint32:
+                return scalar_at<std::uint32_t>(array, tuple);
+            case data::ScalarType::int64:
+                return scalar_at<std::int64_t>(array, tuple);
+            case data::ScalarType::uint64: {
                 const auto value
                     = scalar_at<std::uint64_t>(array, tuple);
                 ::idmesh::detail::require_runtime(
@@ -446,20 +463,12 @@ namespace idmesh::vtk {
                     "VTU integer out of int64 range");
                 return static_cast<std::int64_t>(value);
             }
-            const auto value = nonnegative_integer(array, tuple);
-            if (array.type == data::ScalarType::int8)
-                return scalar_at<std::int8_t>(array, tuple);
-            if (array.type == data::ScalarType::int16)
-                return scalar_at<std::int16_t>(array, tuple);
-            if (array.type == data::ScalarType::int32)
-                return scalar_at<std::int32_t>(array, tuple);
-            if (array.type == data::ScalarType::int64)
-                return scalar_at<std::int64_t>(array, tuple);
-            ::idmesh::detail::require_runtime(
-                value <= static_cast<std::uint64_t>(
-                    std::numeric_limits<std::int64_t>::max()),
-                "VTU integer out of int64 range");
-            return static_cast<std::int64_t>(value);
+            case data::ScalarType::float32:
+            case data::ScalarType::float64:
+                throw std::runtime_error(
+                    "VTU integer metadata has floating type");
+            }
+            throw std::runtime_error("invalid VTU scalar type");
         }
 
         double floating_value(
@@ -693,6 +702,11 @@ namespace idmesh::vtk {
         }
 
         const auto piece_tag = opening_tag(xml, "Piece");
+        const auto next_piece = xml.find(
+            "<Piece", xml.find("<Piece") + 1);
+        ::idmesh::detail::require_runtime(
+            next_piece == std::string::npos,
+            "multi-Piece VTU is not supported");
         const auto piece_attrs = parse_attributes(piece_tag);
         const auto point_count_u64 = parse_u64(
             required_attribute(piece_attrs, "NumberOfPoints"));
