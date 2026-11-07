@@ -1,7 +1,7 @@
 #include "vtk_common.hpp"
 
 #include "contracts.hpp"
-#include "core/second_order.hpp"
+#include "node_order.hpp"
 
 #include <algorithm>
 #include <limits>

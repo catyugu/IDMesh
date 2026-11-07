@@ -121,26 +121,67 @@ namespace {
             }
         }
     }
+    void gmsh_node_order()
+    {
+        using CT = idmesh::CellType;
+        struct Case {
+            CT type;
+            Index nodes;
+            Index index;
+            Vec reference;
+        };
+        // Independent spot checks: these indices differ from VTK ordering.
+        const std::array cases {
+            Case {CT::tetrahedron, 10, 8, {0, .5, .5}},
+            Case {CT::tetrahedron, 10, 9, {.5, 0, .5}},
+            Case {CT::hexahedron, 20, 9, {-1, 0, -1}},
+            Case {CT::hexahedron, 20, 10, {-1, -1, 0}},
+            Case {CT::hexahedron, 27, 20, {0, 0, -1}},
+            Case {CT::hexahedron, 27, 21, {0, 1, 0}},
+            Case {CT::hexahedron, 27, 23, {1, 0, 0}},
+            Case {CT::prism, 15, 7, {0, .5, -1}},
+            Case {CT::prism, 15, 8, {0, 0, 0}},
+            Case {CT::prism, 18, 15, {.5, 0, 0}},
+            Case {CT::pyramid, 13, 6, {-1, 0, 0}},
+            Case {CT::pyramid, 13, 7, {-.5, -.5, .5}},
+            Case {CT::pyramid, 14, 13, {0, 0, 0}}};
+        for (const auto& test : cases) {
+            const auto nodes = idmesh::reference_geometry_nodes(test.type, test.nodes);
+            for (int i = 0; i < 3; ++i)
+                close(nodes[test.index][i], test.reference[i], 1e-12,
+                    "incorrect Gmsh reference-node ordering");
+        }
+    }
     void curvature()
     {
-        const auto t = idmesh::CellType::quadrilateral;
-        auto curved = make(t, 9, true);
-        auto linear = make(t, 9);
-        const auto p = interior(t);
-        auto a = idmesh::evaluate_geometry(curved, 0, p);
-        auto b = idmesh::evaluate_geometry(linear, 0, p);
-        check(std::abs(a.point[1] - b.point[1]) > 1e-4,
-            "quadratic perturbation did not curve mapping");
+        const std::array cases {
+            std::pair {idmesh::CellType::quadrilateral, 9u},
+            std::pair {idmesh::CellType::tetrahedron, 10u},
+            std::pair {idmesh::CellType::hexahedron, 20u},
+            std::pair {idmesh::CellType::hexahedron, 27u},
+            std::pair {idmesh::CellType::prism, 15u},
+            std::pair {idmesh::CellType::prism, 18u},
+            std::pair {idmesh::CellType::pyramid, 13u},
+            std::pair {idmesh::CellType::pyramid, 14u}};
         constexpr double h = 1e-6;
-        for (int j = 0; j < 2; ++j) {
-            auto p1 = p, p2 = p;
-            p1[j] += h;
-            p2[j] -= h;
-            auto q1 = idmesh::evaluate_geometry(curved, 0, p1);
-            auto q2 = idmesh::evaluate_geometry(curved, 0, p2);
-            for (int i = 0; i < 3; ++i)
-                close((q1.point[i] - q2.point[i]) / (2 * h), a.jacobian[i][j], 5e-8,
-                    "curved Jacobian finite difference");
+        for (const auto& [type, nodes] : cases) {
+            auto curved = make(type, nodes, true);
+            auto linear = make(type, nodes);
+            const auto p = interior(type);
+            auto a = idmesh::evaluate_geometry(curved, 0, p);
+            auto b = idmesh::evaluate_geometry(linear, 0, p);
+            check(std::abs(a.point[1] - b.point[1]) > 1e-4,
+                "quadratic perturbation did not curve mapping");
+            for (Index j = 0; j < idmesh::cell_dimension(type); ++j) {
+                auto p1 = p, p2 = p;
+                p1[j] += h;
+                p2[j] -= h;
+                auto q1 = idmesh::evaluate_geometry(curved, 0, p1);
+                auto q2 = idmesh::evaluate_geometry(curved, 0, p2);
+                for (int i = 0; i < 3; ++i)
+                    close((q1.point[i] - q2.point[i]) / (2 * h), a.jacobian[i][j], 5e-8,
+                        "curved Jacobian finite difference");
+            }
         }
     }
     void invalid()
@@ -168,6 +209,7 @@ int main()
 {
     return idmesh::test::run({
         {"all reference cells", all_orders},
+        {"Gmsh reference-node order", gmsh_node_order},
         {"curved geometry", curvature},
         {"invalid inputs", invalid},
     });
