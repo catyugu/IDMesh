@@ -124,7 +124,7 @@ namespace idmesh::detail::vtk {
     std::vector<Index> to_vtk_order(
         CellType type, std::span<const Index> gmsh_nodes)
     {
-        const auto permutation = detail::vtk_from_gmsh(
+        const auto permutation = ::idmesh::detail::vtk_from_gmsh(
             type, static_cast<Index>(gmsh_nodes.size()));
         if (permutation.empty())
             return {gmsh_nodes.begin(), gmsh_nodes.end()};
@@ -141,7 +141,7 @@ namespace idmesh::detail::vtk {
     std::vector<Index> to_gmsh_order(
         CellType type, std::span<const Index> vtk_nodes)
     {
-        const auto permutation = detail::vtk_from_gmsh(
+        const auto permutation = ::idmesh::detail::vtk_from_gmsh(
             type, static_cast<Index>(vtk_nodes.size()));
         if (permutation.empty())
             return {vtk_nodes.begin(), vtk_nodes.end()};
