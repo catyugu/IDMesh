@@ -1,21 +1,15 @@
 name: Cleanup temporary agent branches
-
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]
 permissions:
   contents: write
-
 jobs:
   cleanup:
-    if: github.event.head_commit.message == 'chore: cleanup temporary agent branches'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Delete temporary branches
-        run: |
-          git push origin --delete             agent/entity-halo-refactor             agent/entity-halo-refactor-v2             agent/shard-v3-experiment             agent/distributed-preprocessing
+        run: git push origin --delete agent/entity-halo-refactor agent/entity-halo-refactor-v2 agent/shard-v3-experiment agent/distributed-preprocessing
