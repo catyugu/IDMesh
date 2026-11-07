@@ -16,6 +16,7 @@ target_include_directories(idmesh_vtk_common_test PRIVATE ${PROJECT_SOURCE_DIR}/
 idmesh_stage_runtime(idmesh_vtk_common_test)
 add_test(NAME idmesh.vtk_common COMMAND idmesh_vtk_common_test)
 idmesh_add_core_test(idmesh_vtk_data_io_test test_vtk_data_io.cpp idmesh.vtk_data_io)
+idmesh_add_core_test(idmesh_vtk_manifest_test test_vtk_manifest.cpp idmesh.vtk_manifest)
 idmesh_add_core_test(idmesh_geometry_test test_geometry.cpp idmesh.geometry)
 idmesh_add_core_test(idmesh_quadratic_io_test test_quadratic_io.cpp idmesh.quadratic_io)
 idmesh_add_core_test(idmesh_partition_test test_partition.cpp idmesh.partition)
