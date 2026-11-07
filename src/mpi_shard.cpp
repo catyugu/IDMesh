@@ -557,7 +557,13 @@ namespace idmesh::mpi {
             }
 
             std::vector<std::set<std::pair<int, Index>>>
-                seen_send(dim + 1), seen_receive(dim + 1);
+                seen_send(dim + 1);
+            std::vector<std::vector<int>> receive_from(dim + 1);
+            for (Index k = 0; k <= dim; ++k)
+                if (mesh.has_entities(k))
+                    receive_from[k].assign(
+                        mesh.entity_count(k), -1);
+
             for (const auto& halo : input.halos) {
                 if (!mesh.has_entities(halo.dimension))
                     continue;
@@ -586,10 +592,12 @@ namespace idmesh::mpi {
                             && metadata.owner_ranks[halo.dimension]
                                    [found->second]
                                 == halo.peer
-                            && seen_receive[halo.dimension]
-                                   .emplace(halo.peer, found->second)
-                                   .second,
+                            && receive_from[halo.dimension]
+                                   [found->second]
+                                == -1,
                         "invalid shard halo receive entity");
+                    receive_from[halo.dimension][found->second]
+                        = halo.peer;
                     layout.receive[halo.peer].push_back(
                         found->second);
                 }
@@ -602,14 +610,10 @@ namespace idmesh::mpi {
                      entity < mesh.entity_count(k); ++entity) {
                     const int owner
                         = metadata.owner_ranks[k][entity];
-                    const bool received = std::any_of(
-                        seen_receive[k].begin(),
-                        seen_receive[k].end(),
-                        [entity](const auto& item) {
-                            return item.second == entity;
-                        });
+                    const int expected
+                        = owner == rank ? -1 : owner;
                     ::idmesh::detail::require_runtime(
-                        received == (owner != rank),
+                        receive_from[k][entity] == expected,
                         "shard halo receive coverage mismatch");
                 }
             }
