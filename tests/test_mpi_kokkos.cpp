@@ -4,6 +4,8 @@
 #include <mpi.h>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -32,25 +34,33 @@ namespace {
         Index dimension, idmesh::mpi::kokkos::DeviceTransport mode)
     {
         const auto count = partition.mesh().entity_count(dimension);
-        idmesh::kokkos::DeviceField field(count, 2);
-        std::vector<double> initial(std::size_t(count) * 2, -19);
+        using Value = std::uint64_t;
+        Kokkos::View<Value*> field(
+            "idmesh_test_caller_owned_field", std::size_t(count) * 2);
+        auto host = Kokkos::create_mirror_view(field);
+        for (std::size_t i = 0; i < host.extent(0); ++i)
+            host(i) = ~Value {0};
         for (Index entity : partition.owned_entities(dimension)) {
             const auto id = partition.global_ids(dimension)[entity];
-            initial[entity * 2] = double(2 * id + dimension + 1);
-            initial[entity * 2 + 1] = double(3 * id + dimension + 7);
+            host(entity * 2) = 2 * id + dimension + 1;
+            host(entity * 2 + 1) = 3 * id + dimension + 7;
         }
-        field.upload(initial);
+        Kokkos::deep_copy(field, host);
+
+        const auto bytes_per_entity = 2 * sizeof(Value);
         idmesh::mpi::kokkos::DeviceHaloPlan plan(
-            partition.exchange_plan(dimension), 2);
-        plan.start(field, mode);
+            partition.exchange_plan(dimension), bytes_per_entity);
+        const auto byte_size = field.extent(0) * sizeof(Value);
+        plan.start(field.data(), byte_size, mode);
         plan.wait();
-        plan.start(field, mode);
+        plan.start(field.data(), byte_size, mode);
         plan.wait();
-        const auto values = field.download();
+
+        Kokkos::deep_copy(host, field);
         for (Index entity = 0; entity < count; ++entity) {
             const auto id = partition.global_ids(dimension)[entity];
-            if (values[entity * 2] != double(2 * id + dimension + 1)
-                || values[entity * 2 + 1] != double(3 * id + dimension + 7))
+            if (host(entity * 2) != 2 * id + dimension + 1
+                || host(entity * 2 + 1) != 3 * id + dimension + 7)
                 throw std::runtime_error("Kokkos device entity halo exchange mismatch");
         }
     }
@@ -90,15 +100,22 @@ int main(int argc, char** argv)
         }
 
         const Index dimension = partition.mesh().dimension();
+        constexpr std::size_t values_per_entity = 2;
+        using ProbeValue = std::uint64_t;
         idmesh::mpi::kokkos::DeviceHaloPlan probe(
-            partition.exchange_plan(dimension), 2);
+            partition.exchange_plan(dimension),
+            values_per_entity * sizeof(ProbeValue));
         {
-            idmesh::kokkos::DeviceField field(
-                partition.mesh().entity_count(dimension), 2);
-            probe.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+            Kokkos::View<ProbeValue*> field(
+                "idmesh_test_probe",
+                std::size_t(partition.mesh().entity_count(dimension))
+                    * values_per_entity);
+            const auto bytes = field.extent(0) * sizeof(ProbeValue);
+            probe.start(field.data(), bytes,
+                idmesh::mpi::kokkos::DeviceTransport::host_staging);
             bool rejected = false;
             try {
-                probe.start(field,
+                probe.start(field.data(), bytes,
                     idmesh::mpi::kokkos::DeviceTransport::host_staging);
             }
             catch (const std::logic_error&) {
@@ -114,11 +131,14 @@ int main(int argc, char** argv)
                 idmesh::mpi::kokkos::DeviceTransport::require_gpu_aware);
         }
         else {
-            idmesh::kokkos::DeviceField field(
-                partition.mesh().entity_count(dimension), 2);
+            Kokkos::View<ProbeValue*> field(
+                "idmesh_test_direct_probe",
+                std::size_t(partition.mesh().entity_count(dimension))
+                    * values_per_entity);
+            const auto bytes = field.extent(0) * sizeof(ProbeValue);
             bool rejected = false;
             try {
-                probe.start(field,
+                probe.start(field.data(), bytes,
                     idmesh::mpi::kokkos::DeviceTransport::require_gpu_aware);
             }
             catch (const std::runtime_error&) {

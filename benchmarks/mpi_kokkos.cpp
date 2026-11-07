@@ -119,19 +119,27 @@ int main(int argc, char** argv)
         const auto& exchange = partition.exchange_plan(dimension);
 
         const auto local_cells = exchange.local_entity_count();
-        idmesh::kokkos::DeviceField field(local_cells, args.components);
-        std::vector<double> host(
-            static_cast<std::size_t>(local_cells) * args.components, -1.0);
+        Kokkos::View<double*> field(
+            "idmesh_benchmark_field",
+            static_cast<std::size_t>(local_cells) * args.components);
+        auto host = Kokkos::create_mirror_view(field);
+        for (std::size_t i = 0; i < host.extent(0); ++i)
+            host(i) = -1.0;
         for (Index entity : partition.owned_entities(dimension))
             for (Index component = 0; component < args.components; ++component)
-                host[static_cast<std::size_t>(entity) * args.components + component]
+                host(static_cast<std::size_t>(entity) * args.components + component)
                     = static_cast<double>(context.rank())
                     + 0.001 * static_cast<double>(entity)
                     + 0.000001 * static_cast<double>(component);
-        field.upload(host);
+        Kokkos::deep_copy(field, host);
 
-        idmesh::mpi::kokkos::DeviceHaloPlan halo(exchange, args.components);
-        halo.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+        const auto bytes_per_entity
+            = std::size_t(args.components) * sizeof(double);
+        const auto field_bytes = field.extent(0) * sizeof(double);
+        idmesh::mpi::kokkos::DeviceHaloPlan halo(
+            exchange, bytes_per_entity);
+        halo.start(field.data(), field_bytes,
+            idmesh::mpi::kokkos::DeviceTransport::host_staging);
         halo.wait();
         MPI_Barrier(MPI_COMM_WORLD);
 
@@ -140,7 +148,8 @@ int main(int argc, char** argv)
             MPI_Barrier(MPI_COMM_WORLD);
             const auto total_begin = Clock::now();
             auto begin = total_begin;
-            halo.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+            halo.start(field.data(), field_bytes,
+                idmesh::mpi::kokkos::DeviceTransport::host_staging);
             auto end = Clock::now();
             start_timing.samples.push_back(milliseconds(begin, end));
 

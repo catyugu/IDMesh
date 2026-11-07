@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -136,8 +137,9 @@ int main(int argc, char** argv)
             receive_records += plan.receive_indices(peer).size();
         }
 
-        auto reusable = plan.make_request(args.components);
-        reusable.start(field);
+        auto reusable
+            = plan.make_request(std::size_t(args.components) * sizeof(double));
+        reusable.start(std::as_writable_bytes(std::span(field)));
         reusable.wait();
         MPI_Barrier(MPI_COMM_WORLD);
 
@@ -147,7 +149,7 @@ int main(int argc, char** argv)
             MPI_Barrier(MPI_COMM_WORLD);
             const auto total_begin = Clock::now();
             auto begin = total_begin;
-            reusable.start(field);
+            reusable.start(std::as_writable_bytes(std::span(field)));
             auto end = Clock::now();
             start_phase.samples.push_back(milliseconds(begin, end));
             begin = end;
