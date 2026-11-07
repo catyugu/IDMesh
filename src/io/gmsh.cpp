@@ -1,5 +1,5 @@
 #include "contracts.hpp"
-#include "idmesh/mesh.hpp"
+#include "idmesh/io.hpp"
 
 #include <algorithm>
 #include <array>

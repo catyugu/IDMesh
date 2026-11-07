@@ -76,15 +76,20 @@ Use `BuildOptions{TopologyLayout::cell_vertices, RelationDirection::downward}` f
 
 ## Mesh I/O and geometry
 
-The core API provides:
+Mesh-only I/O is declared in `idmesh/io.hpp`:
 
 ```cpp
+#include <idmesh/io.hpp>
+
 auto mesh = idmesh::read_gmsh("model.msh");
 auto vtk  = idmesh::read_vtk_legacy("model.vtk");
 auto medit = idmesh::read_medit("model.mesh");
 ```
 
 Gmsh import preserves supported labels and second-order geometry.
+For field/state-aware VTK, VTU and PVD/PVTU I/O, include `idmesh/vtk.hpp`.
+`idmesh/mesh.hpp` only declares mesh topology and construction; code using
+mesh-only file adapters must include `idmesh/io.hpp`.
 Reference-to-physical geometry evaluation is available through
 `idmesh/geometry.hpp`.
 

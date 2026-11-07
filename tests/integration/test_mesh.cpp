@@ -1,6 +1,6 @@
 #include "test.hpp"
 
-#include "idmesh/mesh.hpp"
+#include "idmesh/io.hpp"
 #include <algorithm>
 #include <array>
 #include <filesystem>

@@ -84,6 +84,12 @@ Only `include/idmesh/` is part of the installed public API. The
 `export.hpp` header owns all DLL/shared-library export definitions.
 Implementation-private helpers live in `src/`.
 
+`idmesh/mesh.hpp` defines topology and builders; `idmesh/io.hpp` exposes
+mesh-only Gmsh/Medit/legacy VTK adapters; `idmesh/vtk.hpp` exposes
+field/state-aware VTK/VTU/PVD/PVTU APIs. Code that previously obtained mesh
+read/write declarations indirectly through `mesh.hpp` must now include
+`io.hpp`. Existing function names, link symbols and SDK targets are unchanged.
+
 Invalid caller arguments use `std::invalid_argument`; bad indices use
 `std::out_of_range`; invalid object state uses `std::logic_error`;
 size limits use `std::length_error`. Invalid file content, I/O failures

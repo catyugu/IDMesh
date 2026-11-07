@@ -1,7 +1,7 @@
 #include "test.hpp"
 
 #include <idmesh/data.hpp>
-#include <idmesh/mesh.hpp>
+#include <idmesh/io.hpp>
 #include <idmesh/vtk.hpp>
 
 #include <algorithm>
