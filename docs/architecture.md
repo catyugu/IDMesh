@@ -142,6 +142,16 @@ PointData/CellData cannot preserve those associations exactly.
   FieldData to whole-Mesh values/state metadata. Compression, multiple Pieces,
   sparse selections, intermediate-entity fields, and lower-dimensional labels
   are rejected rather than reinterpreted.
+- PVD collections: manifest read/write plus a serial VTU-series convenience API.
+  The convenience writer requires finite, strictly increasing StateView times,
+  emits sibling VTU files with relative paths, and writes the PVD last. The
+  convenience reader accepts one serial .vtu (group="", part=0) per timestep;
+  generic PVD manifest IO retains group/part metadata without interpreting it.
+- PVTU `PUnstructuredGrid`: manifest/schema read/write for point arrays,
+  cell arrays, point-coordinate type, GhostLevel, and Piece Source entries.
+  PVTU is metadata only: piece files remain independent VTU datasets. Whole-Mesh
+  fields and state time/cycle have no PVTU schema representation and are
+  rejected by the schema helper instead of being dropped.
 - Medit ASCII `.mesh`: import/export for seven linear cell types, vertex
   references and lower-dimensional labeled elements. Binary `.meshb` and
   high-order Medit sections are outside the present implementation.

@@ -33,7 +33,8 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Verify the supported high-order Gmsh imports and linear-format IO round-trips on all supported platforms.
 - [x] Implement analytic order-1/2 geometry interpolation and Jacobians for all standard cell families.
 - [x] Add supported native VTK quadratic types and Medit P2 (line/triangle/tetrahedron).
-- [ ] Add custom Medit Ordering descriptors, extended pyramid14 VTK Lagrange encoding, and VTK time-series/PVTU manifests.
+- [x] Add VTK PVD time-series and PVTU parallel manifests.
+- [ ] Add custom Medit Ordering descriptors and extended pyramid14 VTK Lagrange encoding.
 
 ## Milestone 2 incremental implementation
 - [x] Rank-local MPI partition loading and deterministic global entity identity.
