@@ -40,15 +40,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.host_baseline_ref }}
+          ref: ${{ inputs.host_baseline_ref || '64c32ed40042948f4f40a273db71e1825e0fc723' }}
           path: host-baseline
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.kokkos_baseline_ref }}
+          ref: ${{ inputs.kokkos_baseline_ref || 'a05490255113893b4982a2e4770c49a4f1f8da1d' }}
           path: kokkos-baseline
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.candidate_ref }}
+          ref: ${{ inputs.candidate_ref || github.sha }}
           path: current
 
       - name: Build host baseline

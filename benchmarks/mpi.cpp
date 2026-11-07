@@ -128,13 +128,10 @@ int main(int argc, char** argv)
         for (unsigned iteration = 0; iteration < args.iterations; ++iteration) {
             fill_field(field, context.rank(), args.components);
             MPI_Barrier(MPI_COMM_WORLD);
-            auto begin = Clock::now();
-            fill_field(field, context.rank(), args.components);
-            MPI_Barrier(MPI_COMM_WORLD);
             const auto total_begin = Clock::now();
-            begin = total_begin;
+            auto begin = total_begin;
             reusable.start(field);
-            end = Clock::now();
+            auto end = Clock::now();
             start_phase.samples.push_back(milliseconds(begin, end));
             begin = end;
             reusable.wait();
