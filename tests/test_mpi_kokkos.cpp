@@ -38,8 +38,10 @@ namespace {
         }
         field.upload(initial);
         idmesh::mpi::kokkos::DeviceHaloPlan plan(partition.exchange_plan(), 2);
-        plan.exchange(field, mode);
-        plan.exchange(field, mode);
+        plan.start(field, mode);
+        plan.wait();
+        plan.start(field, mode);
+        plan.wait();
         const auto values = field.download();
         for (idmesh::Index i = 0; i < count; ++i) {
             const auto id = partition.global_ids(partition.mesh().dimension())[i];
@@ -62,6 +64,22 @@ int main(int argc, char** argv)
         check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::host_staging);
         check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::automatic);
         idmesh::mpi::kokkos::DeviceHaloPlan probe(partition.exchange_plan(), 2);
+        {
+            idmesh::kokkos::DeviceField field(partition.mesh().entity_count(
+                                                  partition.mesh().dimension()),
+                2);
+            probe.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+            bool rejected = false;
+            try {
+                probe.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+            }
+            catch (const std::logic_error&) {
+                rejected = true;
+            }
+            if (!rejected)
+                throw std::runtime_error("second active device halo start was accepted");
+            probe.wait();
+        }
         if (probe.direct_device_transport_available()) {
             // On a GPU-aware MPI runner this exercises direct device buffers.
             check_exchange(partition, idmesh::mpi::kokkos::DeviceTransport::require_gpu_aware);
@@ -72,7 +90,7 @@ int main(int argc, char** argv)
                 2);
             bool rejected = false;
             try {
-                probe.exchange(field, idmesh::mpi::kokkos::DeviceTransport::require_gpu_aware);
+                probe.start(field, idmesh::mpi::kokkos::DeviceTransport::require_gpu_aware);
             }
             catch (const std::runtime_error&) {
                 rejected = true;
@@ -81,7 +99,7 @@ int main(int argc, char** argv)
                 throw std::runtime_error("unsupported direct GPU-aware MPI was accepted");
         }
         if (context.rank() == 0)
-            std::cout << "MPI+Kokkos: packed device field halo (staging/auto) OK\n";
+            std::cout << "MPI+Kokkos: nonblocking device halo (staging/auto) OK\n";
     }
     catch (const std::exception& e) {
         std::cerr << "MPI+Kokkos test failure: " << e.what() << '\n';

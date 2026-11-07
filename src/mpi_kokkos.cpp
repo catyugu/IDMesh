@@ -1,9 +1,12 @@
 #include "idmesh/mpi_kokkos.hpp"
 #include "contracts.hpp"
+#include "mpi_errors.hpp"
+#include "mpi_internal.hpp"
 
 #include <Kokkos_Core.hpp>
 #include <climits>
 #include <cstdint>
+#include <mpi.h>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -90,6 +93,23 @@ namespace idmesh::mpi::kokkos {
         DeviceBuffer receive_buffer;
         HostBuffer host_send_buffer;
         HostBuffer host_receive_buffer;
+        MPI_Request request = MPI_REQUEST_NULL;
+        double* field_data = nullptr;
+        bool active = false;
+        bool staged = false;
+
+        ~Data()
+        {
+            if (!active || request == MPI_REQUEST_NULL)
+                return;
+            int initialized = 0;
+            int finalized = 0;
+            if (MPI_Initialized(&initialized) != MPI_SUCCESS || !initialized)
+                return;
+            if (MPI_Finalized(&finalized) != MPI_SUCCESS || finalized)
+                return;
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
+        }
     };
 
     DeviceHaloPlan::DeviceHaloPlan(const ExchangePlan& plan, Index components)
@@ -126,8 +146,8 @@ namespace idmesh::mpi::kokkos {
         const auto receive_values = receive.size() * components;
         data_->send_buffer = DeviceBuffer("idmesh_device_halo_send", send_values);
         data_->receive_buffer = DeviceBuffer("idmesh_device_halo_receive", receive_values);
-        // create_mirror_view aliases host-accessible device storage and allocates
-        // staging storage only when the execution memory is not host accessible.
+        // Host-accessible execution spaces alias device storage; CUDA/HIP allocate
+        // persistent staging buffers exactly once here.
         data_->host_send_buffer = Kokkos::create_mirror_view(data_->send_buffer);
         data_->host_receive_buffer = Kokkos::create_mirror_view(data_->receive_buffer);
         Execution().fence();
@@ -149,30 +169,16 @@ namespace idmesh::mpi::kokkos {
             && data_->plan.direct_memory_supported(memory);
     }
 
-    void DeviceHaloPlan::exchange(idmesh::kokkos::DeviceField& field,
-        DeviceTransport mode) const
+    void DeviceHaloPlan::start(idmesh::kokkos::DeviceField& field,
+        DeviceTransport mode)
     {
-        if (field.entity_count() != data_->cells
-            || field.component_count() != data_->components)
-            throw std::invalid_argument("halo field shape does not match plan");
-
-        const auto components = data_->components;
-        const auto nsend = data_->sending;
-        const auto nrecv = data_->receiving;
-        auto send_ids = data_->send_cells;
-        auto receive_ids = data_->receive_cells;
-        auto send_data = data_->send_buffer;
-        auto receive_data = data_->receive_buffer;
-        auto* field_data = field.data();
-
-        Kokkos::parallel_for("idmesh_device_halo_pack",
-            Kokkos::RangePolicy<Execution>(0, static_cast<Index>(nsend * components)),
-            KOKKOS_LAMBDA(const Index i) {
-                const Index cell = send_ids(i / components);
-                const Index component = i % components;
-                send_data(i) = field_data[cell * components + component];
-            });
-        Execution().fence();
+        ::idmesh::detail::require_state(data_ != nullptr, "empty device halo plan");
+        ::idmesh::detail::require_state(!data_->active,
+            "device halo exchange is already active");
+        ::idmesh::detail::require_argument(
+            field.entity_count() == data_->cells
+                && field.component_count() == data_->components,
+            "halo field shape does not match plan");
 
         const auto memory = current_memory_kind();
         const bool direct = memory == DeviceMemoryKind::host
@@ -182,29 +188,78 @@ namespace idmesh::mpi::kokkos {
             throw std::runtime_error("no GPU-aware MPI available for device halo");
         const bool use_direct = mode != DeviceTransport::host_staging && direct;
 
-        if (use_direct) {
-            data_->plan.exchange_packed(send_data.data(), receive_data.data(),
-                data_->send_counts, data_->receive_counts,
-                data_->send_offsets, data_->receive_offsets, memory);
-        }
-        else {
+        const auto components = data_->components;
+        const auto nsend = data_->sending;
+        auto send_ids = data_->send_cells;
+        auto send_data = data_->send_buffer;
+        auto* field_data = field.data();
+
+        Kokkos::parallel_for("idmesh_device_halo_pack",
+            Kokkos::RangePolicy<Execution>(
+                0, static_cast<Index>(nsend * components)),
+            KOKKOS_LAMBDA(const Index i) {
+                const Index cell = send_ids(i / components);
+                const Index component = i % components;
+                send_data(i) = field_data[cell * components + component];
+            });
+        // MPI may consume the packed buffer immediately after Ialltoallv.
+        Execution().fence();
+
+        const void* send_pointer = send_data.data();
+        void* receive_pointer = data_->receive_buffer.data();
+        if (!use_direct) {
             Kokkos::deep_copy(data_->host_send_buffer, send_data);
-            data_->plan.exchange_packed(
-                data_->host_send_buffer.data(), data_->host_receive_buffer.data(),
-                data_->send_counts, data_->receive_counts,
-                data_->send_offsets, data_->receive_offsets,
-                DeviceMemoryKind::host);
-            Kokkos::deep_copy(receive_data, data_->host_receive_buffer);
+            send_pointer = data_->host_send_buffer.data();
+            receive_pointer = data_->host_receive_buffer.data();
         }
 
+        MPI_Request request = MPI_REQUEST_NULL;
+        ::idmesh::mpi::detail::check_mpi(
+            MPI_Ialltoallv(send_pointer, data_->send_counts.data(),
+                data_->send_offsets.data(), MPI_DOUBLE,
+                receive_pointer, data_->receive_counts.data(),
+                data_->receive_offsets.data(), MPI_DOUBLE,
+                data_->plan.data_->comm, &request),
+            "MPI_Ialltoallv");
+        data_->request = request;
+        data_->field_data = field_data;
+        data_->staged = !use_direct;
+        data_->active = true;
+    }
+
+    void DeviceHaloPlan::wait()
+    {
+        ::idmesh::detail::require_state(data_ != nullptr, "empty device halo plan");
+        if (!data_->active)
+            return;
+
+        if (data_->request != MPI_REQUEST_NULL) {
+            ::idmesh::mpi::detail::check_mpi(
+                MPI_Wait(&data_->request, MPI_STATUS_IGNORE), "MPI_Wait");
+        }
+
+        if (data_->staged)
+            Kokkos::deep_copy(data_->receive_buffer, data_->host_receive_buffer);
+
+        const auto components = data_->components;
+        const auto nrecv = data_->receiving;
+        auto receive_ids = data_->receive_cells;
+        auto receive_data = data_->receive_buffer;
+        auto* field_data = data_->field_data;
+
         Kokkos::parallel_for("idmesh_device_halo_unpack",
-            Kokkos::RangePolicy<Execution>(0, static_cast<Index>(nrecv * components)),
+            Kokkos::RangePolicy<Execution>(
+                0, static_cast<Index>(nrecv * components)),
             KOKKOS_LAMBDA(const Index i) {
                 const Index cell = receive_ids(i / components);
                 const Index component = i % components;
                 field_data[cell * components + component] = receive_data(i);
             });
         Execution().fence();
+
+        data_->field_data = nullptr;
+        data_->staged = false;
+        data_->active = false;
     }
 
 } // namespace idmesh::mpi::kokkos

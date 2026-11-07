@@ -114,21 +114,33 @@ int main(int argc, char** argv)
         field.upload(host);
 
         idmesh::mpi::kokkos::DeviceHaloPlan halo(exchange, args.components);
-        halo.exchange(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+        halo.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+        halo.wait();
         MPI_Barrier(MPI_COMM_WORLD);
 
-        Timing timing;
+        Timing start_timing, wait_timing, total_timing;
         for (unsigned iteration = 0; iteration < args.iterations; ++iteration) {
             MPI_Barrier(MPI_COMM_WORLD);
-            const auto begin = Clock::now();
-            halo.exchange(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
-            const auto end = Clock::now();
-            timing.samples.push_back(milliseconds(begin, end));
+            const auto total_begin = Clock::now();
+            auto begin = total_begin;
+            halo.start(field, idmesh::mpi::kokkos::DeviceTransport::host_staging);
+            auto end = Clock::now();
+            start_timing.samples.push_back(milliseconds(begin, end));
+
+            begin = end;
+            halo.wait();
+            end = Clock::now();
+            wait_timing.samples.push_back(milliseconds(begin, end));
+            total_timing.samples.push_back(milliseconds(total_begin, end));
         }
 
-        double local = timing.median();
-        double slowest = 0.0;
-        MPI_Reduce(&local, &slowest, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        double start_local = start_timing.median();
+        double wait_local = wait_timing.median();
+        double total_local = total_timing.median();
+        double start_slowest = 0.0, wait_slowest = 0.0, total_slowest = 0.0;
+        MPI_Reduce(&start_local, &start_slowest, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&wait_local, &wait_slowest, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&total_local, &total_slowest, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
         std::size_t send_records = 0, receive_records = 0;
         for (int peer = 0; peer < exchange.rank_count(); ++peer) {
@@ -146,12 +158,15 @@ int main(int argc, char** argv)
         if (context.rank() == 0) {
             std::cout << std::fixed << std::setprecision(6)
                       << "ranks,side,cells,components,ghost_layers,iterations,"
-                         "host_staging_ms_p50_max,send_bytes_per_exchange,"
-                         "receive_bytes_per_exchange\n"
+                         "host_staging_start_ms_p50_max,"
+                         "host_staging_wait_ms_p50_max,"
+                         "host_staging_total_ms_p50_max,"
+                         "send_bytes_per_exchange,receive_bytes_per_exchange\n"
                       << context.size() << ',' << args.side << ','
                       << source.entity_count(source.dimension()) << ','
                       << args.components << ',' << args.ghost_layers << ','
-                      << args.iterations << ',' << slowest << ','
+                      << args.iterations << ',' << start_slowest << ','
+                      << wait_slowest << ',' << total_slowest << ','
                       << send_total << ',' << receive_total << '\n';
         }
         status = 0;

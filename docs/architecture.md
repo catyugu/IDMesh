@@ -242,10 +242,14 @@ Ghost records using Kokkos kernels.
 supports `automatic`, `host_staging`, and `require_gpu_aware` transports.
 When using Open MPI, capability is queried via
 `MPIX_Query_cuda_support` / `MPIX_Query_rocm_support`, when present.
-Direct transport fences the device pack kernel before entering MPI and
-the unpack kernel after MPI. Host staging owns persistent host mirrors and
-precomputed MPI counts/displacements in `DeviceHaloPlan`; steady-state
-exchange performs pack, deep copies, MPI transport and unpack without
+`DeviceHaloPlan::start` packs owned records, fences the pack dependency,
+performs D2H staging when required, and launches `MPI_Ialltoallv`.
+Applications may launch work that does not depend on Ghost values before
+calling `wait`; MPI progress during that interval depends on the MPI runtime.
+`wait` completes MPI, performs H2D staging when required, unpacks Ghost
+records, and fences completion. Direct GPU-aware transport keeps the packed
+buffers resident on device; host staging owns persistent host mirrors and
+precomputed MPI counts/displacements. Steady-state start/wait performs no
 IDMesh-side allocation.
 
 The default CMake backend is `SERIAL`. The optional CUDA/HIP modes

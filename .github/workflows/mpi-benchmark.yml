@@ -10,7 +10,7 @@ on:
       kokkos_baseline_ref:
         description: MPI Kokkos baseline commit, tag, or branch
         required: true
-        default: 51fc5b7a0295f3573e73d778a6be1fb7879abce8
+        default: a05490255113893b4982a2e4770c49a4f1f8da1d
       candidate_ref:
         description: Candidate commit, tag, or branch
         required: true

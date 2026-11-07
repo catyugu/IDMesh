@@ -29,10 +29,15 @@ namespace idmesh::mpi::kokkos {
 
         Index component_count() const noexcept;
         bool direct_device_transport_available() const;
-        // Blocking collective. Device packing/unpacking use Kokkos kernels.
-        // Call after MPI_Init and Kokkos::initialize and before finalization.
-        void exchange(idmesh::kokkos::DeviceField& field,
-            DeviceTransport mode = DeviceTransport::automatic) const;
+
+        // Packs the current field, performs any required D2H staging, then
+        // starts MPI_Ialltoallv. The field storage must remain alive until
+        // wait() completes. Owned-field work may run between start and wait.
+        void start(idmesh::kokkos::DeviceField& field,
+            DeviceTransport mode = DeviceTransport::automatic);
+        // Completes MPI, performs any required H2D staging, and unpacks ghosts.
+        // Calling wait() with no active exchange is a no-op.
+        void wait();
 
     private:
         struct Data;

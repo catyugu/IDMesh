@@ -83,10 +83,6 @@ namespace idmesh::mpi {
         struct Data;
         std::shared_ptr<Data> data_;
         explicit ExchangePlan(std::shared_ptr<Data> data);
-        void exchange_packed(const void* send, void* receive,
-            std::span<const int> send_counts, std::span<const int> receive_counts,
-            std::span<const int> send_offsets, std::span<const int> receive_offsets,
-            DeviceMemoryKind memory) const;
         friend class PartitionedMesh;
         friend class ExchangeRequest;
         friend class kokkos::DeviceHaloPlan;
