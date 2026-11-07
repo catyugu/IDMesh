@@ -73,9 +73,9 @@ int main()
         const auto path
             = external_prefix + "." + std::to_string(rank) + ".idm";
         std::ifstream input(path);
-        const std::string contents(
+        const std::string contents {
             std::istreambuf_iterator<char>(input),
-            std::istreambuf_iterator<char>());
+            std::istreambuf_iterator<char>()};
         require(contents.find("\nCELLS 2\n") != std::string::npos,
             "externally supplied ownership was not honored");
         input.close();

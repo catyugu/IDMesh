@@ -181,9 +181,10 @@ Partition construction assigns local corner-vertex IDs in ascending source
 global-vertex order, independently of owned/ghost cell discovery order.
 Because entity canonicalization compares vertex IDs, this order-preserving
 renumbering makes the canonical edge direction and facet vertex cycle
-identical after mapping to global IDs on every Rank. The MPI regression test
-compares all shared local entity vertex sequences and Cell-to-Facet
-permutation/sign codes against the common source mesh on 2 and 3 ranks.
+identical after mapping to global IDs on every Rank. The MPI regression test compares shared canonical entity vertex sequences and
+consecutive boundary sign/permutation metadata across ranks on 2- and 3-rank
+partitions, including a connected Tet/Hex/Prism/Pyramid 3D mesh. It also checks
+that two Ghost layers contain the one-layer local Cell set.
 
 ## Rank-local distributed mesh reading and graph partitioning
 
