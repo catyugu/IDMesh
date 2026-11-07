@@ -20,7 +20,8 @@
 - [ ] Multi-node weak scaling and external partitioner adapters/tooling.
 
 ## Milestone 3: advanced mesh coupling
-- Arbitrary polyhedral cells, nonmatching interface maps, periodic couplings and high-order curved geometry.
+- Nonmatching interface maps, periodic couplings and high-order curved geometry for the existing standard reference-cell families.
+- Do not add arbitrary polygons or polyhedra; restrict face topology to edges, triangles and quadrilaterals.
 - Profile-based alternative layouts and GPU topology construction.
 
 ## Non-goals

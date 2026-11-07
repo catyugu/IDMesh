@@ -7,11 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <vector>
+#include <stdexcept>
 
 namespace idmesh::detail {
 
-    template <class Id, std::size_t Inline = 4>
+    // Only standard reference-cell edges and faces are supported (arity 1..4).
+    template <class Id>
     class EntitySignature {
     public:
         EntitySignature() = default;
@@ -23,28 +24,22 @@ namespace idmesh::detail {
 
         void assign(std::span<const Id> values)
         {
-            size_ = values.size();
-            if (values.size() <= Inline) {
-                large_.clear();
-                std::copy(values.begin(), values.end(), small_.begin());
-            }
-            else {
-                large_.assign(values.begin(), values.end());
-            }
+            if (values.size() > vertices_.size())
+                throw std::invalid_argument("entity signature exceeds four vertices");
+            std::copy(values.begin(), values.end(), vertices_.begin());
+            size_ = static_cast<std::uint8_t>(values.size());
         }
 
         std::span<const Id> view() const noexcept
         {
-            return size_ <= Inline
-                ? std::span<const Id>(small_.data(), size_)
-                : std::span<const Id>(large_.data(), large_.size());
+            return {vertices_.data(), size_};
         }
 
         std::size_t size() const noexcept { return size_; }
         bool empty() const noexcept { return size_ == 0; }
-        const Id* begin() const noexcept { return view().data(); }
-        const Id* end() const noexcept { return view().data() + view().size(); }
-        Id operator[](std::size_t i) const noexcept { return view()[i]; }
+        const Id* begin() const noexcept { return vertices_.data(); }
+        const Id* end() const noexcept { return vertices_.data() + size_; }
+        Id operator[](std::size_t i) const noexcept { return vertices_[i]; }
 
         bool operator==(const EntitySignature& other) const noexcept
         {
@@ -58,9 +53,8 @@ namespace idmesh::detail {
         }
 
     private:
-        std::array<Id, Inline> small_ {};
-        std::vector<Id> large_;
-        std::size_t size_ = 0;
+        std::array<Id, 4> vertices_ {};
+        std::uint8_t size_ = 0;
     };
 
     template <class Id>
@@ -73,6 +67,8 @@ namespace idmesh::detail {
     CanonicalEntity<Id> canonicalize_entity(std::span<const Id> local)
     {
         CanonicalEntity<Id> result;
+        if (local.size() > 4)
+            throw std::invalid_argument("nonstandard entity signature arity");
         if (local.empty())
             return result;
         if (local.size() == 1) {
@@ -101,28 +97,21 @@ namespace idmesh::detail {
             }
         }
 
-        // Standard-cell facets have at most four vertices. Keep their
-        // canonicalization allocation-free; retain the larger-key fallback
-        // for omitted-layer labels.
-        std::array<Id, 4> small {};
-        std::vector<Id> large(local.size() > small.size() ? local.size() : 0);
-        std::span<Id> canonical = local.size() <= small.size()
-            ? std::span<Id>(small).first(local.size())
-            : std::span<Id>(large);
+        std::array<Id, 4> canonical {};
         for (std::size_t i = 0; i < local.size(); ++i) {
             const auto position = reversed
                 ? (first + local.size() - i) % local.size()
                 : (first + i) % local.size();
             canonical[i] = local[position];
         }
-        result.signature.assign(canonical);
+        result.signature.assign(std::span(canonical).first(local.size()));
         result.orientation = {static_cast<std::uint16_t>(first), reversed};
         return result;
     }
 
-    template <class Id, std::size_t Inline>
+    template <class Id>
     std::size_t hash_entity_signature(
-        const EntitySignature<Id, Inline>& signature) noexcept
+        const EntitySignature<Id>& signature) noexcept
     {
         std::size_t hash = sizeof(std::size_t) == 8
             ? std::size_t {14695981039346656037ULL}

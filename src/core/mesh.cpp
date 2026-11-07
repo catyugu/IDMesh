@@ -37,14 +37,6 @@ namespace idmesh {
                 local.data(), local_vertices.size()));
         }
 
-        Loop polygon_edge(
-            std::span<const Index> vertices, std::size_t edge)
-        {
-            const std::array<Index, 2> endpoints {
-                vertices[edge], vertices[(edge + 1) % vertices.size()]};
-            return Loop(endpoints);
-        }
-
         struct RelationData {
             bool present = false;
             Index rows = 0;
@@ -503,15 +495,16 @@ namespace idmesh {
         detail::require_argument(dimension < data_->dimension_, "use add_cell_label for top-dimensional labels");
         const bool arity = dimension == 0 ? vertices.size() == 1
             : dimension == 1              ? vertices.size() == 2
-                                          : vertices.size() >= 3;
+                                          : vertices.size() == 3 || vertices.size() == 4;
         detail::require_argument(arity, "invalid labeled entity arity");
-        std::vector<Index> sorted(vertices.begin(), vertices.end());
-        for (Index vertex : sorted)
+        std::array<Index, 4> sorted {};
+        std::copy(vertices.begin(), vertices.end(), sorted.begin());
+        for (Index vertex : vertices)
             detail::require_argument(vertex < data_->coordinates_.size(),
                 "invalid labeled entity vertex");
-        std::sort(sorted.begin(), sorted.end());
-        detail::require_argument(
-            std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(),
+        const auto end = sorted.begin() + vertices.size();
+        std::sort(sorted.begin(), end);
+        detail::require_argument(std::adjacent_find(sorted.begin(), end) == end,
             "duplicate labeled entity vertex");
         detail::require_length(data_->label_assignment_vertices_.size() < std::size_t(invalid_index) - vertices.size(),
             "label connectivity overflow");
@@ -686,8 +679,9 @@ namespace idmesh {
                 for (Index f = 0; f < entities[2].size(); ++f) {
                     const auto vertices = entities[2][f]->view();
                     for (std::size_t edge = 0; edge < vertices.size(); ++edge) {
-                        const auto endpoints = polygon_edge(vertices, edge);
-                        attach(2, 1, f, register_entity(1, endpoints.view()));
+                        const std::array<Index, 2> endpoints {
+                            vertices[edge], vertices[(edge + 1) % vertices.size()]};
+                        attach(2, 1, f, register_entity(1, endpoints));
                     }
                 }
             }
