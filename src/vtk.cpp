@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -265,7 +266,7 @@ namespace idmesh {
 
         struct OutputCell {
             int code = 0;
-            std::vector<Index> nodes;
+            std::vector<Index> points;
             int tag = 0;
             bool top = false;
         };
@@ -330,7 +331,6 @@ namespace idmesh {
             out << "FIELD FieldData "
                 << fields.size() << '\n';
             for (const auto& field : fields) {
-                validate_legacy_name(field.name);
                 const auto type
                     = detail::vtk::legacy_scalar_name(
                         field.values.type);
@@ -551,7 +551,7 @@ namespace idmesh {
                 const auto info
                     = detail::vtk::cell_info(codes[i]);
                 detail::require_runtime(
-                    info.points == cells[i].points.size(),
+                    info.nodes == cells[i].points.size(),
                     "invalid VTK cell node count");
                 cells[i].type = info.type;
                 cells[i].dimension = info.dimension;
