@@ -37,6 +37,57 @@ namespace idmesh::mpi {
     } // namespace
 
     namespace {
+        void finalize_exchange_layout_impl(ExchangePlan::Data& data)
+        {
+            const int peers = static_cast<int>(data.send.size());
+            data.send_records.resize(peers);
+            data.recv_records.resize(peers);
+            data.send_record_offsets.resize(peers);
+            data.recv_record_offsets.resize(peers);
+
+            int send_offset = 0;
+            int recv_offset = 0;
+            for (int peer = 0; peer < peers; ++peer) {
+                ::idmesh::detail::require_length(
+                    data.send[peer].size() <= static_cast<std::size_t>(INT_MAX)
+                        && data.recv[peer].size() <= static_cast<std::size_t>(INT_MAX),
+                    "halo peer record count exceeds MPI int range");
+                data.send_records[peer] = static_cast<int>(data.send[peer].size());
+                data.recv_records[peer] = static_cast<int>(data.recv[peer].size());
+                data.send_record_offsets[peer] = send_offset;
+                data.recv_record_offsets[peer] = recv_offset;
+                ::idmesh::detail::require_length(
+                    send_offset <= INT_MAX - data.send_records[peer]
+                        && recv_offset <= INT_MAX - data.recv_records[peer],
+                    "halo record displacement overflow");
+                send_offset += data.send_records[peer];
+                recv_offset += data.recv_records[peer];
+            }
+        }
+
+        void scaled_layout(const ExchangePlan::Data& data, Index components,
+            std::vector<int>& send_counts, std::vector<int>& recv_counts,
+            std::vector<int>& send_offsets, std::vector<int>& recv_offsets)
+        {
+            const int peers = static_cast<int>(data.send.size());
+            send_counts.resize(peers);
+            recv_counts.resize(peers);
+            send_offsets.resize(peers);
+            recv_offsets.resize(peers);
+            for (int peer = 0; peer < peers; ++peer) {
+                ::idmesh::detail::require_argument(
+                    data.send_records[peer] <= INT_MAX / components
+                        && data.recv_records[peer] <= INT_MAX / components
+                        && data.send_record_offsets[peer] <= INT_MAX / components
+                        && data.recv_record_offsets[peer] <= INT_MAX / components,
+                    "halo exchange exceeds MPI count/displacement limits");
+                send_counts[peer] = data.send_records[peer] * static_cast<int>(components);
+                recv_counts[peer] = data.recv_records[peer] * static_cast<int>(components);
+                send_offsets[peer] = data.send_record_offsets[peer] * static_cast<int>(components);
+                recv_offsets[peer] = data.recv_record_offsets[peer] * static_cast<int>(components);
+            }
+        }
+
         bool query_direct_device_memory(DeviceMemoryKind memory)
         {
             if (memory == DeviceMemoryKind::host)
@@ -53,6 +104,13 @@ namespace idmesh::mpi {
         }
 
     } // namespace
+
+    namespace detail {
+        void finalize_exchange_layout(ExchangePlan::Data& data)
+        {
+            finalize_exchange_layout_impl(data);
+        }
+    } // namespace detail
 
     Context::Context(std::shared_ptr<Data> data)
         : data_(std::move(data))
@@ -140,21 +198,8 @@ namespace idmesh::mpi {
         ::idmesh::detail::require_argument(data_ != nullptr && components > 0, "invalid packed halo exchange");
         if (!direct_memory_supported(memory))
             throw std::runtime_error("MPI is not GPU aware for the requested memory space");
-        const int peers = rank_count();
-        std::vector<int> sc(peers), rc(peers), sd(peers), rd(peers);
-        std::size_t send_size = 0, receive_size = 0;
-        for (int peer = 0; peer < peers; ++peer) {
-            const auto sending = data_->send[peer].size() * components;
-            const auto receiving = data_->recv[peer].size() * components;
-            ::idmesh::detail::require_argument(sending <= INT_MAX && receiving <= INT_MAX && send_size <= static_cast<std::size_t>(INT_MAX) - sending && receive_size <= static_cast<std::size_t>(INT_MAX) - receiving,
-                "packed halo exchange exceeds MPI count/displacement limits");
-            sc[peer] = static_cast<int>(sending);
-            rc[peer] = static_cast<int>(receiving);
-            sd[peer] = static_cast<int>(send_size);
-            rd[peer] = static_cast<int>(receive_size);
-            send_size += sending;
-            receive_size += receiving;
-        }
+        std::vector<int> sc, rc, sd, rd;
+        scaled_layout(*data_, components, sc, rc, sd, rd);
         ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(send, sc.data(), sd.data(), MPI_DOUBLE,
                                              receive, rc.data(), rd.data(), MPI_DOUBLE, data_->comm),
             "MPI_Alltoallv");
@@ -166,39 +211,43 @@ namespace idmesh::mpi {
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange plan");
         ::idmesh::detail::require_argument(components > 0 && values.size() == std::size_t(data_->local_cells) * components,
             "exchange field must have one fixed-width record per local cell");
+        std::lock_guard lock(data_->host_mutex);
         const auto size = static_cast<int>(data_->send.size());
-        std::vector<int> sc(size), rc(size), sd(size), rd(size);
-        for (int peer = 0; peer < size; ++peer) {
-            ::idmesh::detail::require_argument(data_->send[peer].size() <= INT_MAX / components && data_->recv[peer].size() <= INT_MAX / components,
-                "exchange count exceeds MPI int range");
-            sc[peer] = static_cast<int>(data_->send[peer].size() * components);
-            rc[peer] = static_cast<int>(data_->recv[peer].size() * components);
-            if (peer > 0) {
-                ::idmesh::detail::require_argument(sd[peer - 1] <= INT_MAX - sc[peer - 1] && rd[peer - 1] <= INT_MAX - rc[peer - 1],
-                    "MPI exchange displacement overflow");
-                sd[peer] = sd[peer - 1] + sc[peer - 1];
-                rd[peer] = rd[peer - 1] + rc[peer - 1];
-            }
+        if (data_->host_components != components) {
+            scaled_layout(*data_, components,
+                data_->host_send_counts, data_->host_recv_counts,
+                data_->host_send_offsets, data_->host_recv_offsets);
+            data_->host_components = components;
         }
-        const auto sendTotal = sd.back() + sc.back();
-        const auto recvTotal = rd.back() + rc.back();
-        std::vector<double> sendBuffer(sendTotal), recvBuffer(recvTotal);
+        const auto send_total = data_->host_send_offsets.empty()
+            ? 0
+            : data_->host_send_offsets.back() + data_->host_send_counts.back();
+        const auto recv_total = data_->host_recv_offsets.empty()
+            ? 0
+            : data_->host_recv_offsets.back() + data_->host_recv_counts.back();
+        data_->host_send_buffer.resize(send_total);
+        data_->host_recv_buffer.resize(recv_total);
+
         for (int peer = 0; peer < size; ++peer) {
-            std::size_t output = sd[peer];
+            std::size_t output = data_->host_send_offsets[peer];
             for (auto cell : data_->send[peer]) {
                 for (Index j = 0; j < components; ++j)
-                    sendBuffer[output++] = values[std::size_t(cell) * components + j];
+                    data_->host_send_buffer[output++]
+                        = values[std::size_t(cell) * components + j];
             }
         }
-        ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(sendBuffer.data(), sc.data(), sd.data(), MPI_DOUBLE,
-                                             recvBuffer.data(), rc.data(), rd.data(), MPI_DOUBLE,
-                                             data_->comm),
+        ::idmesh::mpi::detail::check_mpi(
+            MPI_Alltoallv(data_->host_send_buffer.data(), data_->host_send_counts.data(),
+                data_->host_send_offsets.data(), MPI_DOUBLE,
+                data_->host_recv_buffer.data(), data_->host_recv_counts.data(),
+                data_->host_recv_offsets.data(), MPI_DOUBLE, data_->comm),
             "MPI_Alltoallv");
         for (int peer = 0; peer < size; ++peer) {
-            std::size_t input = rd[peer];
+            std::size_t input = data_->host_recv_offsets[peer];
             for (auto cell : data_->recv[peer]) {
                 for (Index j = 0; j < components; ++j)
-                    values[std::size_t(cell) * components + j] = recvBuffer[input++];
+                    values[std::size_t(cell) * components + j]
+                        = data_->host_recv_buffer[input++];
             }
         }
     }
@@ -425,6 +474,7 @@ namespace idmesh::mpi {
                 if (owner(id) == peer)
                     exchange->recv[peer].push_back(local_cells.at(id));
         }
+        detail::finalize_exchange_layout(*exchange);
         partition->exchange = ExchangePlan(std::move(exchange));
         return PartitionedMesh(std::move(partition));
     }

@@ -1,6 +1,7 @@
 #pragma once
 #include "idmesh/mpi.hpp"
 #include <mpi.h>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -24,10 +25,29 @@ namespace idmesh::mpi {
     struct ExchangePlan::Data {
         std::vector<std::vector<Index>> send;
         std::vector<std::vector<Index>> recv;
+        std::vector<int> send_records;
+        std::vector<int> recv_records;
+        std::vector<int> send_record_offsets;
+        std::vector<int> recv_record_offsets;
         Index local_cells = 0;
         MPI_Comm comm = MPI_COMM_NULL;
         std::shared_ptr<void> context_owner;
+
+        // Reused only by the convenience host exchange path. Packed exchange
+        // remains allocation-local and does not share mutable transport state.
+        mutable std::mutex host_mutex;
+        mutable Index host_components = 0;
+        mutable std::vector<int> host_send_counts;
+        mutable std::vector<int> host_recv_counts;
+        mutable std::vector<int> host_send_offsets;
+        mutable std::vector<int> host_recv_offsets;
+        mutable std::vector<double> host_send_buffer;
+        mutable std::vector<double> host_recv_buffer;
     };
+
+    namespace detail {
+        void finalize_exchange_layout(ExchangePlan::Data& data);
+    }
 
     struct PartitionedMesh::Data {
         explicit Data(Mesh value)
