@@ -7,6 +7,7 @@ endfunction()
 
 idmesh_add_core_test(idmesh_test test_mesh.cpp idmesh.topology)
 idmesh_add_core_test(idmesh_contracts_test test_contracts.cpp idmesh.contracts)
+idmesh_add_core_test(idmesh_data_test test_data.cpp idmesh.data)
 idmesh_add_core_test(idmesh_formats_test test_formats.cpp idmesh.formats)
 idmesh_add_core_test(idmesh_geometry_test test_geometry.cpp idmesh.geometry)
 idmesh_add_core_test(idmesh_quadratic_io_test test_quadratic_io.cpp idmesh.quadratic_io)

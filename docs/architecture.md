@@ -76,6 +76,41 @@ linear meshes reuse their existing cell-to-vertex arrays and allocate no
 separate geometry-connectivity CSR. Geometry
 interpolation is now provided by the optional geometry evaluation API; finite-element field shape functions and DOF transformations remain responsibilities of the discretization layer.
 
+## Mesh-attached data primitives
+
+`idmesh/data.hpp` defines a format-independent description of numerical data
+attached to an immutable Mesh. The model is deliberately orthogonal:
+
+- `DataLocation` answers where tuples live: a materialized entity dimension,
+  geometry nodes, or the whole Mesh.
+- `DataSelectionView` selects either every location or a strictly increasing
+  explicit subset.
+- `ArrayView` describes typed tuples through scalar-component descriptors.
+  Component descriptors may share one backing span for interleaved/AoS storage
+  or use independent spans for SoA storage. Numerical values remain
+  application-owned.
+- `MeshDataView` combines name, location, selection and values.
+  `EntitySetView` is the corresponding named entity subset without values.
+- `StateView` groups fields with optional physical time and cycle metadata.
+
+Topological Vertex data (`entities(0)`) and geometry-node data are distinct.
+For a quadratic Cell, a Vertex field therefore has one tuple per corner while a
+geometry-node field has one tuple per interpolation node. IDMesh does not
+implicitly interpolate between them.
+
+Validation is strict. Tuple counts must match the selected locations; explicit
+indices must be sorted, unique and in range; data cannot target an omitted
+topology dimension; and strided component storage must fully contain every
+referenced scalar. The data model describes sampled mesh-attached values only.
+Finite-element function spaces, basis coefficients and DOF transformations
+remain outside this layer.
+
+Format adapters must preserve this semantic boundary. If a target format cannot
+represent a location, selection, scalar type, component layout, geometry order
+or other requested property, the adapter must reject the operation explicitly.
+Adapters must not silently project, resample, truncate, merge or reinterpret
+mesh-attached data.
+
 ## IO capabilities and limitations
 
 - Gmsh MSH 2.2/4.1 ASCII: first- and second-order standard cells, physical
