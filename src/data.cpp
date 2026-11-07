@@ -188,4 +188,51 @@ namespace idmesh::data {
             validate(mesh, field);
     }
 
+    ArrayView Array::view() const
+    {
+        const auto bytes = scalar_size(type);
+        ::idmesh::detail::require_argument(
+            components > 0,
+            "owned data array requires components");
+        ::idmesh::detail::require_argument(
+            tuples <= std::numeric_limits<std::size_t>::max()
+                    / components
+                && tuples * components
+                    <= std::numeric_limits<std::size_t>::max()
+                        / bytes,
+            "owned data array size overflows");
+        ::idmesh::detail::require_argument(
+            values.size() == tuples * components * bytes,
+            "owned data array byte count mismatch");
+
+        ArrayView result;
+        result.type = type;
+        result.tuples = tuples;
+        const auto storage
+            = std::span<const std::byte>(
+                values.data(), values.size());
+        const auto stride
+            = static_cast<std::size_t>(components) * bytes;
+        result.components.reserve(components);
+        for (std::uint32_t component = 0;
+             component < components; ++component) {
+            result.components.push_back(
+                {storage,
+                    static_cast<std::size_t>(component) * bytes,
+                    stride});
+        }
+        return result;
+    }
+
+    MeshDataView MeshData::view() const
+    {
+        const DataSelectionView selected
+            = selection == SelectionKind::all
+            ? all()
+            : select(indices);
+        return {
+            name, location, selected, values.view()};
+    }
+
+
 } // namespace idmesh::data

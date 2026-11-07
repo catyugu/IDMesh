@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -253,6 +254,38 @@ namespace idmesh::data {
         std::optional<double> time;
         std::optional<std::int64_t> cycle;
         std::span<const MeshDataView> fields;
+    };
+
+    // Owning read-side representation. Values are canonical tuple-major,
+    // interleaved scalars so format readers do not expose file-backed storage.
+    struct Array {
+        ScalarType type = ScalarType::float64;
+        std::size_t tuples = 0;
+        std::uint32_t components = 0;
+        std::vector<std::byte> values;
+
+        IDMESH_API ArrayView view() const;
+    };
+
+    struct MeshData {
+        std::string name;
+        DataLocation location;
+        SelectionKind selection = SelectionKind::all;
+        std::vector<Index> indices;
+        Array values;
+
+        IDMESH_API MeshDataView view() const;
+    };
+
+    struct State {
+        std::optional<double> time;
+        std::optional<std::int64_t> cycle;
+        std::vector<MeshData> fields;
+    };
+
+    struct Dataset {
+        Mesh mesh;
+        State state;
     };
 
     // Number of addressable locations before applying a selection.

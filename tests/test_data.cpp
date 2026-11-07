@@ -186,6 +186,41 @@ namespace {
         data::validate(mesh, strided);
     }
 
+    void owning_views()
+    {
+        data::Array array;
+        array.type = data::ScalarType::float64;
+        array.tuples = 2;
+        array.components = 2;
+        const std::array<double, 4> values {1, 2, 3, 4};
+        const auto bytes = std::as_bytes(std::span(values));
+        array.values.assign(bytes.begin(), bytes.end());
+
+        const auto view = array.view();
+        check(view.tuples == 2
+                && view.components.size() == 2,
+            "owned array view shape");
+        data::validate_array(view);
+
+        data::MeshData field;
+        field.name = "pair";
+        field.location = data::entities(1);
+        field.selection = data::SelectionKind::indices;
+        field.indices = {0, 1};
+        field.values = std::move(array);
+        const auto mesh = make_mesh();
+        data::validate(mesh, field.view());
+
+        data::Array malformed;
+        malformed.type = data::ScalarType::float64;
+        malformed.tuples = 1;
+        malformed.components = 2;
+        malformed.values.resize(sizeof(double));
+        expect_error<std::invalid_argument>(
+            [&] { (void)malformed.view(); },
+            "malformed owned array accepted");
+    }
+
     void strict_validation()
     {
         const auto mesh = make_mesh();
@@ -340,6 +375,7 @@ int main()
     scalar_types();
     dense_and_subset_data();
     soa_and_strided_data();
+    owning_views();
     strict_validation();
     return 0;
 }

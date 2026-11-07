@@ -3,6 +3,10 @@
 #include "contracts.hpp"
 #include "second_order.hpp"
 
+#include <algorithm>
+#include <limits>
+#include <map>
+#include <set>
 #include <stdexcept>
 
 namespace idmesh::detail::vtk {
@@ -230,5 +234,157 @@ namespace idmesh::detail::vtk {
         }
         throw std::invalid_argument("invalid VTK data location");
     }
+
+    ImportedMesh build_imported_mesh(
+        std::vector<std::array<double, 3>> points,
+        std::span<const ImportedCell> cells,
+        BuildOptions options)
+    {
+        Index dimension = 0;
+        for (const auto& cell : cells)
+            dimension = std::max(
+                dimension, cell.dimension);
+        ::idmesh::detail::require_runtime(
+            dimension >= 1, "VTK has no mesh cells");
+
+        std::set<Index> corner_points;
+        for (const auto& cell : cells) {
+            const Index corners
+                = cell.dimension == 0
+                ? 1
+                : cell_vertex_count(cell.type);
+            ::idmesh::detail::require_runtime(
+                cell.points.size() >= corners,
+                "VTK cell has too few corner points");
+            for (Index i = 0; i < corners; ++i)
+                corner_points.insert(cell.points[i]);
+        }
+
+        MeshBuilder builder(dimension, 3);
+        std::map<Index, Index> corner_ids;
+        for (Index point : corner_points) {
+            ::idmesh::detail::require_runtime(
+                point < points.size(),
+                "VTK point ID out of range");
+            corner_ids[point]
+                = builder.add_vertex(points[point]);
+        }
+
+        const Index corner_count
+            = static_cast<Index>(corner_ids.size());
+        std::map<Index, Index> extra_ids;
+        std::vector<Index> point_to_geometry(
+            points.size(), invalid_index);
+        for (const auto& [point, vertex] : corner_ids)
+            point_to_geometry[point] = vertex;
+
+        for (const auto& cell : cells) {
+            if (cell.dimension != dimension)
+                continue;
+            const auto gmsh = to_gmsh_order(
+                cell.type, cell.points);
+            std::vector<Index> vertices, extras;
+            for (Index i = 0;
+                 i < cell_vertex_count(cell.type); ++i)
+                vertices.push_back(
+                    corner_ids.at(gmsh[i]));
+            for (Index i = cell_vertex_count(cell.type);
+                 i < gmsh.size(); ++i) {
+                const Index point = gmsh[i];
+                ::idmesh::detail::require_runtime(
+                    point < points.size(),
+                    "VTK geometry point out of range");
+                auto [it, inserted]
+                    = extra_ids.try_emplace(
+                        point, invalid_index);
+                if (inserted) {
+                    it->second
+                        = builder.add_geometry_node(
+                            points[point]);
+                    point_to_geometry[point]
+                        = corner_count + it->second;
+                }
+                extras.push_back(it->second);
+            }
+            const Index id = extras.empty()
+                ? builder.add_cell(
+                      cell.type, vertices)
+                : builder.add_quadratic_cell(
+                      cell.type, vertices, extras);
+            if (cell.tag != 0)
+                builder.add_cell_label(id, cell.tag);
+        }
+
+        bool lower = false;
+        for (const auto& cell : cells) {
+            if (cell.dimension >= dimension)
+                continue;
+            lower = true;
+            if (cell.tag == 0)
+                continue;
+            std::vector<Index> vertices;
+            const Index corners
+                = cell.dimension == 0
+                ? 1
+                : cell_vertex_count(cell.type);
+            for (Index i = 0; i < corners; ++i)
+                vertices.push_back(
+                    corner_ids.at(cell.points[i]));
+            builder.add_label(
+                cell.dimension, vertices, cell.tag);
+        }
+
+        auto mesh = std::move(builder).finalize(options);
+        ::idmesh::detail::require_runtime(
+            mesh.geometry_node_count() == points.size(),
+            "VTK contains unused or unrepresentable points");
+        return {std::move(mesh),
+            std::move(point_to_geometry), lower};
+    }
+
+    data::Array reorder_point_array(
+        data::Array input,
+        std::span<const Index> point_to_geometry)
+    {
+        ::idmesh::detail::require_runtime(
+            input.tuples == point_to_geometry.size(),
+            "VTK PointData tuple count mismatch");
+        const auto width
+            = data::scalar_size(input.type);
+        const auto tuple_bytes
+            = static_cast<std::size_t>(
+                  input.components) * width;
+        data::Array output {
+            input.type, input.tuples,
+            input.components,
+            std::vector<std::byte>(
+                input.values.size())};
+        std::vector<bool> seen(input.tuples);
+        for (Index point = 0;
+             point < point_to_geometry.size(); ++point) {
+            const Index target
+                = point_to_geometry[point];
+            ::idmesh::detail::require_runtime(
+                target < output.tuples
+                    && !seen[target],
+                "VTK point-to-geometry mapping is not bijective");
+            seen[target] = true;
+            std::copy_n(
+                input.values.data()
+                    + static_cast<std::size_t>(point)
+                        * tuple_bytes,
+                tuple_bytes,
+                output.values.data()
+                    + static_cast<std::size_t>(target)
+                        * tuple_bytes);
+        }
+        ::idmesh::detail::require_runtime(
+            std::all_of(
+                seen.begin(), seen.end(),
+                [](bool value) { return value; }),
+            "VTK has points not represented by IDMesh geometry");
+        return output;
+    }
+
 
 } // namespace idmesh::detail::vtk

@@ -131,10 +131,17 @@ PointData/CellData cannot preserve those associations exactly.
 
 - Gmsh MSH 2.2/4.1 ASCII: first- and second-order standard cells, physical
   memberships for dimensions 0 through d, physical names, and geometry nodes.
-- VTK legacy ASCII `UNSTRUCTURED_GRID`: import/export for seven linear cell
-  types, optional lower-dimensional labeled elements, integer `physical_tag`
-  scalar arrays. Other VTK variants and quadratic cells require separate
-  ordering adapters.
+- VTK legacy `UNSTRUCTURED_GRID`: ASCII and big-endian BINARY read/write,
+  seven standard linear cells plus supported native quadratic cell codes,
+  `physical_tag` labels, dense PointData/CellData/FieldData, and single-state
+  time/cycle metadata. Portable fixed-width 64-bit integer fields are rejected
+  in legacy files.
+- VTU XML `UnstructuredGrid`: single-Piece ASCII, inline base64 binary, and
+  uncompressed appended-raw read/write with all fixed-width scalar types.
+  PointData maps to geometry nodes, CellData to top-dimensional entities, and
+  FieldData to whole-Mesh values/state metadata. Compression, multiple Pieces,
+  sparse selections, intermediate-entity fields, and lower-dimensional labels
+  are rejected rather than reinterpreted.
 - Medit ASCII `.mesh`: import/export for seven linear cell types, vertex
   references and lower-dimensional labeled elements. Binary `.meshb` and
   high-order Medit sections are outside the present implementation.
@@ -160,7 +167,7 @@ use [-1,1] coordinates. Simplices use nonnegative barycentric coordinates
 whose sum is at most 1. Prism combines a unit reference triangle with
 z in [-1,1]; pyramid has base [-1,1]^2 at z=0 and apex at (0,0,1).
 
-High-order VTK legacy ASCII uses native cell codes (21-29, 32) where
+High-order VTK legacy and VTU use native cell codes (21-29, 32) where
 supported. Pyramid14 has no matching classical VTK type and is explicitly
 rejected. Medit ASCII uses `EdgesP2`, `TrianglesP2`, `TetrahedraP2`
 with direct node order. Medit custom P2 ordering sections and other P2
