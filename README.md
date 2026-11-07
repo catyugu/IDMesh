@@ -125,12 +125,11 @@ Enable Kokkos:
 cmake -S . -B build-kokkos -DIDMESH_ENABLE_KOKKOS=ON
 ```
 
-Consumers can link `IDMesh::Kokkos` and use device-resident mesh, relation and field buffers exposed through typed raw device pointers without exposing Kokkos template types in the SDK ABI.
+Consumers can link `IDMesh::Kokkos` and use device-resident mesh and relation mirrors exposed through typed raw device pointers without exposing Kokkos template types in the SDK ABI.
 
 When MPI is enabled, create an `idmesh::mpi::Context` from the world communicator
 or an application subcommunicator and pass it explicitly to distributed mesh operations.
-When both MPI and Kokkos are enabled, `IDMesh::MPIKokkos` provides device-aware halo
-transport with a host-staging fallback.
+When both MPI and Kokkos are enabled, `IDMesh::MPIKokkos` provides type-agnostic device-aware halo transport over caller-owned device storage, with a host-staging fallback.
 
 ## Documentation
 

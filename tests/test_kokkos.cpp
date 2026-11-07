@@ -67,18 +67,8 @@ int main(int argc, char** argv)
         if (x_sum != 55.0)
             throw std::runtime_error("device geometry coordinates mismatch");
 
-        idmesh::kokkos::DeviceField field(2, 2);
-        const std::array<double, 4> values {1., 2., 3., 4.};
-        field.upload(values);
-        if (field.entity_count() != 2 || field.component_count() != 2 || field.size() != 4
-            || field.data() == nullptr)
-            throw std::runtime_error("invalid device field descriptor");
-        const auto downloaded = field.download();
-        if (!std::equal(downloaded.begin(), downloaded.end(), values.begin()))
-            throw std::runtime_error("device field upload/download mismatch");
-
         status = 0;
-        std::cout << "Kokkos: raw device topology, geometry and field descriptors OK\n";
+        std::cout << "Kokkos: raw device topology and geometry descriptors OK\n";
     }
     catch (const std::exception& error) {
         std::cerr << "Kokkos test: " << error.what() << '\n';

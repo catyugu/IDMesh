@@ -201,7 +201,7 @@ mpiexec -n 4 ./build-mpi-bench/benchmarks/idmesh_mpi_benchmark \
 
 Run the benchmark on controlled hosts for publication-quality comparisons.
 
-When both MPI and Kokkos are enabled, `idmesh_mpi_kokkos_benchmark` forces
+When both MPI and Kokkos are enabled, `idmesh_mpi_kokkos_benchmark` uses caller-owned Kokkos storage, forces
 `DeviceTransport::host_staging` and measures nonblocking `start`, `wait`,
 and their no-overlap total. The `DeviceHaloPlan` itself is constructed before
 timing, so the reported latency excludes one-time rank-index mirrors, MPI layout

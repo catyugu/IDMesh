@@ -1,4 +1,5 @@
 #include "contracts.hpp"
+#include "entity_signature.hpp"
 #include "idmesh/mpi.hpp"
 #include "mpi_errors.hpp"
 #include "mpi_internal.hpp"
@@ -224,22 +225,24 @@ namespace idmesh::mpi {
         }
 
         struct Key {
-            std::array<std::uint64_t, 4> ids {};
-            std::uint8_t dim = 0;
-            std::uint8_t arity = 0;
+            Index dim = 0;
+            ::idmesh::detail::EntitySignature<std::uint64_t> signature;
 
-            auto tie() const { return std::tie(dim, arity, ids); }
-            bool operator<(const Key& other) const { return tie() < other.tie(); }
+            bool operator<(const Key& other) const
+            {
+                if (dim != other.dim)
+                    return dim < other.dim;
+                return signature < other.signature;
+            }
         };
 
         struct RegistryMessage {
-            Key key {};
+            Key key;
             std::uint64_t global_id = 0;
             Index local_entity = invalid_index;
             int requester = -1;
             int proposed_owner = -1;
         };
-        static_assert(std::is_trivially_copyable_v<RegistryMessage>);
 
         std::uint64_t hash_key(const Key& key)
         {
@@ -251,10 +254,83 @@ namespace idmesh::mpi {
                 }
             };
             mix(key.dim);
-            mix(key.arity);
-            for (std::size_t i = 0; i < key.arity; ++i)
-                mix(key.ids[i]);
+            mix(key.signature.size());
+            for (std::uint64_t id : key.signature)
+                mix(id);
             return hash;
+        }
+
+        std::vector<RegistryMessage> exchange_registry_messages(
+            MPI_Comm comm,
+            const std::vector<std::vector<RegistryMessage>>& sends,
+            std::uint64_t* sent_bytes = nullptr,
+            std::uint64_t* received_bytes = nullptr)
+        {
+            std::vector<std::vector<std::uint64_t>> words(sends.size());
+            for (std::size_t peer = 0; peer < sends.size(); ++peer) {
+                auto& output = words[peer];
+                for (const auto& message : sends[peer]) {
+                    output.push_back(message.key.dim);
+                    output.push_back(message.key.signature.size());
+                    output.insert(output.end(),
+                        message.key.signature.begin(),
+                        message.key.signature.end());
+                    output.push_back(message.global_id);
+                    output.push_back(message.local_entity);
+                    output.push_back(
+                        static_cast<std::uint64_t>(message.requester));
+                    output.push_back(
+                        static_cast<std::uint64_t>(message.proposed_owner));
+                }
+            }
+
+            const auto received = exchange_records(
+                comm, words, sent_bytes, received_bytes);
+            std::vector<RegistryMessage> result;
+            for (std::size_t peer = 0; peer < received.counts.size(); ++peer) {
+                std::size_t position
+                    = static_cast<std::size_t>(received.offsets[peer]);
+                const std::size_t end = position
+                    + static_cast<std::size_t>(received.counts[peer]);
+                while (position < end) {
+                    ::idmesh::detail::require_runtime(
+                        end - position >= 6,
+                        "truncated distributed entity signature");
+                    const auto dim_value = received.values[position++];
+                    const auto arity_value = received.values[position++];
+                    ::idmesh::detail::require_runtime(
+                        dim_value <= 3 && arity_value > 0
+                            && arity_value < invalid_index
+                            && arity_value <= end - position - 4,
+                        "invalid distributed entity signature");
+                    const auto arity
+                        = static_cast<std::size_t>(arity_value);
+
+                    RegistryMessage message;
+                    message.key.dim = static_cast<Index>(dim_value);
+                    message.key.signature.assign(
+                        std::span<const std::uint64_t>(
+                            received.values.data() + position, arity));
+                    position += arity;
+                    message.global_id = received.values[position++];
+                    const auto local_entity = received.values[position++];
+                    const auto requester = received.values[position++];
+                    const auto proposed_owner = received.values[position++];
+                    ::idmesh::detail::require_runtime(
+                        local_entity < invalid_index
+                            && requester <= static_cast<std::uint64_t>(INT_MAX)
+                            && proposed_owner
+                                <= static_cast<std::uint64_t>(INT_MAX),
+                        "distributed entity registry value out of range");
+                    message.local_entity
+                        = static_cast<Index>(local_entity);
+                    message.requester = static_cast<int>(requester);
+                    message.proposed_owner
+                        = static_cast<int>(proposed_owner);
+                    result.push_back(std::move(message));
+                }
+            }
+            return result;
         }
 
         struct EntityRequest {
@@ -394,16 +470,15 @@ namespace idmesh::mpi {
                 for (Index entity = 0;
                      entity < mesh.entity_count(k); ++entity) {
                     const auto local = mesh.entity_vertices(k, entity);
-                    Key key;
-                    key.dim = static_cast<std::uint8_t>(k);
-                    key.arity = static_cast<std::uint8_t>(local.size());
-                    ::idmesh::detail::require_argument(
-                        key.arity > 0 && key.arity <= 4,
-                        "invalid shared entity arity");
-                    for (std::size_t j = 0; j < local.size(); ++j)
-                        key.ids[j] = local_to_global_vertex[local[j]];
-                    std::sort(
-                        key.ids.begin(), key.ids.begin() + key.arity);
+                    std::vector<std::uint64_t> global_vertices;
+                    global_vertices.reserve(local.size());
+                    for (Index vertex : local)
+                        global_vertices.push_back(
+                            local_to_global_vertex[vertex]);
+                    auto canonical
+                        = ::idmesh::detail::canonicalize_entity<std::uint64_t>(
+                            global_vertices);
+                    Key key {k, std::move(canonical.signature)};
                     const int service
                         = static_cast<int>(hash_key(key) % size);
                     requests[service].push_back(
@@ -411,7 +486,8 @@ namespace idmesh::mpi {
                 }
             }
 
-            const auto received = exchange_records(comm, requests,
+            const auto received = exchange_registry_messages(
+                comm, requests,
                 profile ? &profile->registry_send_bytes : nullptr,
                 profile ? &profile->registry_receive_bytes : nullptr);
             if (profile)
@@ -421,7 +497,7 @@ namespace idmesh::mpi {
             const auto resolve_begin
                 = profile ? Clock::now() : Clock::time_point {};
             std::map<Key, std::vector<RegistryMessage>> groups;
-            for (const auto& item : received.values)
+            for (const auto& item : received)
                 groups[item.key].push_back(item);
 
             std::vector<unsigned long long> local_unique(dim), prefix(dim);
@@ -443,7 +519,7 @@ namespace idmesh::mpi {
             std::vector<std::uint64_t> next(dim);
             for (const auto& [key, members] : groups) {
                 const std::uint64_t global = key.dim == 0
-                    ? key.ids[0]
+                    ? key.signature[0]
                     : static_cast<std::uint64_t>(prefix[key.dim])
                         + next[key.dim]++;
                 int min_owner = size;
@@ -467,14 +543,15 @@ namespace idmesh::mpi {
 
             const auto reply_begin
                 = profile ? Clock::now() : Clock::time_point {};
-            const auto answers = exchange_records(comm, replies,
+            const auto answers = exchange_registry_messages(
+                comm, replies,
                 profile ? &profile->registry_send_bytes : nullptr,
                 profile ? &profile->registry_receive_bytes : nullptr);
 
             std::vector<std::vector<bool>> assigned(dim);
             for (Index k = 0; k < dim; ++k)
                 assigned[k].resize(metadata.global_ids[k].size());
-            for (const auto& answer : answers.values) {
+            for (const auto& answer : answers) {
                 const auto k = answer.key.dim;
                 const auto entity = answer.local_entity;
                 ::idmesh::detail::require_runtime(

@@ -5,8 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <span>
-#include <vector>
 
 namespace idmesh::kokkos {
     // Persistent mirrors own memory in Kokkos::DefaultExecutionSpace::memory_space
@@ -35,23 +33,6 @@ namespace idmesh::kokkos {
         const double* geometry_x() const noexcept;
         const double* geometry_y() const noexcept;
         const double* geometry_z() const noexcept;
-
-    private:
-        struct Data;
-        std::shared_ptr<Data> data_;
-    };
-
-    class IDMESH_KOKKOS_API DeviceField {
-    public:
-        explicit DeviceField(Index entities, Index components = 1);
-
-        Index entity_count() const noexcept;
-        Index component_count() const noexcept;
-        std::size_t size() const noexcept;
-        void upload(std::span<const double> values);
-        std::vector<double> download() const;
-        double* data() noexcept;
-        const double* data() const noexcept;
 
     private:
         struct Data;

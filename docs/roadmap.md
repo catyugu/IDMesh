@@ -57,8 +57,8 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [ ] Fully distributed parallel generation of shard files from a global parallel mesh format.
 
 ## GPU transport and numerical execution
-- [x] DeviceField with explicit Host upload/download.
-- [x] Keep device field/topology transport in the mesh SDK; discretization-specific kernels live above it.
+- [x] Keep application field ownership outside the mesh SDK; host/device halo transport operates on opaque fixed-width records.
+- [x] Keep topology transport in the mesh SDK; discretization-specific kernels live above it.
 - [x] ExchangePlan-scoped direct device-memory capability query and safe failure on unsupported memory spaces.
 - [x] Packed Kokkos device Halo plan, including automatic host staging fallback.
 - [ ] Verify CUDA/HIP kernels on physical GPUs using the reusable GPU hardware workflow.

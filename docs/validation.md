@@ -9,8 +9,8 @@ backend. Source formatting is checked locally through the pre-commit hook.
 | Serial core | Linux GCC, Windows MSVC, macOS Clang | reference cells, oriented incidence, Gmsh, VTK, Medit, geometric Jacobians |
 | Independent applications | `examples` CI job, three CTest examples | Basix orientation, conservative FVM flux, and mixed-cell FEM/FEEC exact sequence CG=0 / DC=0 |
 | Distributed MPI | OpenMPI with 2 and 3 ranks | rank-local shards, ghost-depth monotonicity, mixed Tet/Hex/Prism/Pyramid 3D topology, cross-rank identity/orientation and Vertex/Edge/Facet/Cell field exchanges |
-| Kokkos | Serial runtime | persistent topology/geometry, device-owned Cell fields and matrix-free diffusion |
-| MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | all-dimension device pack/unpack, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
+| Kokkos | Serial runtime | persistent topology/geometry mirrors and matrix-free diffusion over application-owned device storage |
+| MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | type-agnostic all-dimension device pack/unpack over caller-owned storage, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
 | External FE | Basix-backed Nedelec transformation CI | rotation/reflection group relations and shared-facet consistency |
 | Package consumers | CMake installed-package tests | core, MPI, Kokkos and combined adapters |
 

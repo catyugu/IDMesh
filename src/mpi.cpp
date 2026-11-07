@@ -3,6 +3,8 @@
 #include "mpi_errors.hpp"
 #include "mpi_internal.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <mpi.h>
@@ -69,13 +71,16 @@ namespace idmesh::mpi {
         if (!active)
             return;
         for (int peer = 0; peer < plan.rank_count(); ++peer) {
-            std::size_t input = recv_offsets[peer];
-            for (Index entity : plan.receive_indices(peer))
-                for (Index component = 0; component < components; ++component)
-                    values[static_cast<std::size_t>(entity) * components + component]
-                        = recv_buffer[input++];
+            std::size_t input = static_cast<std::size_t>(recv_offsets[peer]);
+            for (Index entity : plan.receive_indices(peer)) {
+                const auto output
+                    = static_cast<std::size_t>(entity) * bytes_per_entity;
+                std::copy_n(recv_buffer.data() + input, bytes_per_entity,
+                    records.data() + output);
+                input += bytes_per_entity;
+            }
         }
-        values = {};
+        records = {};
         active = false;
     }
 
@@ -91,33 +96,39 @@ namespace idmesh::mpi {
             unpack();
     }
 
-    void ExchangeRequest::start(std::span<double> values)
+    void ExchangeRequest::start(std::span<std::byte> records)
     {
         ensure_initialized();
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange request");
         ::idmesh::detail::require_state(!data_->active,
             "exchange request is already active");
         ::idmesh::detail::require_argument(
-            values.size()
-                == std::size_t(data_->plan.local_entity_count()) * data_->components,
-            "exchange field must have one fixed-width record per local entity");
+            records.size()
+                == std::size_t(data_->plan.local_entity_count())
+                    * data_->bytes_per_entity,
+            "exchange storage must contain one fixed-width record per local entity");
 
-        data_->values = values;
+        data_->records = records;
         for (int peer = 0; peer < data_->plan.rank_count(); ++peer) {
-            std::size_t output = data_->send_offsets[peer];
-            for (Index entity : data_->plan.send_indices(peer))
-                for (Index component = 0; component < data_->components; ++component)
-                    data_->send_buffer[output++]
-                        = values[static_cast<std::size_t>(entity) * data_->components
-                            + component];
+            std::size_t output
+                = static_cast<std::size_t>(data_->send_offsets[peer]);
+            for (Index entity : data_->plan.send_indices(peer)) {
+                const auto input
+                    = static_cast<std::size_t>(entity)
+                    * data_->bytes_per_entity;
+                std::copy_n(records.data() + input,
+                    data_->bytes_per_entity,
+                    data_->send_buffer.data() + output);
+                output += data_->bytes_per_entity;
+            }
         }
 
         MPI_Request request = MPI_REQUEST_NULL;
         ::idmesh::mpi::detail::check_mpi(
             MPI_Ialltoallv(data_->send_buffer.data(), data_->send_counts.data(),
-                data_->send_offsets.data(), MPI_DOUBLE,
+                data_->send_offsets.data(), MPI_BYTE,
                 data_->recv_buffer.data(), data_->recv_counts.data(),
-                data_->recv_offsets.data(), MPI_DOUBLE, data_->plan.data_->comm,
+                data_->recv_offsets.data(), MPI_BYTE, data_->plan.data_->comm,
                 &request),
             "MPI_Ialltoallv");
         data_->request = request;
@@ -179,26 +190,29 @@ namespace idmesh::mpi {
         return data_->recv[peer];
     }
 
-    ExchangeRequest ExchangePlan::make_request(Index components) const
+    ExchangeRequest ExchangePlan::make_request(
+        std::size_t bytes_per_entity) const
     {
         ensure_initialized();
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange plan");
-        ::idmesh::detail::require_argument(components > 0,
-            "exchange component count must be positive");
+        ::idmesh::detail::require_argument(bytes_per_entity > 0,
+            "exchange record size must be positive");
 
         auto request = std::make_unique<ExchangeRequest::Data>();
         request->plan = *this;
-        request->components = components;
-        data_->scaled_layout(components,
+        request->bytes_per_entity = bytes_per_entity;
+        data_->scaled_layout(bytes_per_entity,
             request->send_counts, request->recv_counts,
             request->send_offsets, request->recv_offsets);
 
         const auto send_total = request->send_offsets.empty()
-            ? 0
-            : request->send_offsets.back() + request->send_counts.back();
+            ? std::size_t {0}
+            : static_cast<std::size_t>(request->send_offsets.back())
+                + static_cast<std::size_t>(request->send_counts.back());
         const auto recv_total = request->recv_offsets.empty()
-            ? 0
-            : request->recv_offsets.back() + request->recv_counts.back();
+            ? std::size_t {0}
+            : static_cast<std::size_t>(request->recv_offsets.back())
+                + static_cast<std::size_t>(request->recv_counts.back());
         request->send_buffer.resize(send_total);
         request->recv_buffer.resize(recv_total);
         return ExchangeRequest(std::move(request));

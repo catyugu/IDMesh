@@ -16,7 +16,7 @@ IDMesh is a C++20, immutable mesh topology kernel for 1D–3D mixed-cell, unstru
 - The graded incidence DAG cannot skip a dimension: in 3D, requesting edges requires faces. Invalid layer configurations are rejected by finalize(). Direct Cell-to-Vertex and Facet-to-Vertex connectivity is retained as geometry connectivity, not a boundary operator.
 - The builder is mutable; a finalized Mesh is immutable and exposes zero-copy read-only views. Finalization performs structural validation; the explicit `Mesh::validate()` API additionally checks exhaustive algebraic invariants such as boundary-of-boundary cancellation. Dynamic mesh edits, AMR and remeshing are outside the current design.
 - Geometric coordinates are independent of entity topology. First- and supported second-order geometry are stored separately from topological corner entities.
-- Sparse integer labels are independent of topology materialization. Bound labels borrow entity connectivity; labels on omitted layers retain compact canonical vertex keys.
+- Sparse integer labels are independent of topology materialization. Bound labels borrow entity connectivity; labels on omitted layers retain variable-arity canonical cyclic vertex signatures.
 - The base CMake target and installed public headers contain no third-party API types. A separate optional Kokkos backend owns Kokkos execution/runtime dependencies.
 
 ## SDK and failure contracts
@@ -127,12 +127,9 @@ Lower-dimensional entities retain canonical local numbering; ownership is
 therefore represented by `owned_entities(dimension)` rather than by requiring
 an owned-first local range.
 
-`exchange_plan(dimension).make_request(components)` allocates counts,
-displacements and packed buffers once. Repeated `start(field)` / `wait()`
-cycles perform no IDMesh-side host allocation. The same transport applies to
-Vertex, Edge, Facet and Cell fields. `start` packs owner records and launches
-`MPI_Ialltoallv`; `wait()` completes the collective and unpacks ghost
-records, allowing independent work to overlap the communication interval.
+`exchange_plan(dimension).make_request(bytes_per_entity)` allocates byte counts,
+displacements and packed buffers once. Repeated `start(records)` / `wait()`
+cycles perform no IDMesh-side host allocation. Records are opaque bytes, so the mesh layer does not prescribe a scalar or field type. The same transport applies to Vertex, Edge, Facet and Cell records. `start` packs owner records and launches `MPI_Ialltoallv`; `wait()` completes the collective and unpacks ghost records, allowing independent work to overlap the communication interval.
 
 The bundled graph partitioner and shard writer are core, dependency-free serial
 preprocessing tools exposed by `idmesh/partition.hpp`. The shard writer takes
@@ -210,8 +207,7 @@ Each Rank reads only its local shard. Top-dimensional cells are sorted
 into owned cells followed by Ghost cells. Corner vertices receive local
 IDs sorted by external global vertex identity, so their canonical edge
 and facet orientations agree across ranks. Every materialized subentity
-is registered by `(dimension, sorted global corner key)` with a
-distributed hash-sharded registry. The registry assigns unique
+is registered by the same `(dimension, canonical cyclic corner signature)` used by the serial topology builder, through a distributed hash-sharded registry. The registry assigns unique
 dimension-local 64-bit global IDs and chooses the minimum owning Rank
 among incident cells. Requests and answers use bounded MPI_Alltoallv,
 with storage proportional to local entities plus the Rank's hash
@@ -239,18 +235,14 @@ integer-count limits.
 
 ## GPU fields and direct MPI transport
 
-The Kokkos backend owns `DeviceMesh`, `DeviceRelation` and
-`DeviceField` storage while keeping Kokkos types out of the installed
-ABI. Discretization-specific operators are intentionally outside the mesh
-SDK; applications can build them from mirrored topology/geometry and device
-fields. The combined MPI/Kokkos adapter packs owner records and unpacks ghost records
+The Kokkos backend owns only `DeviceMesh` and `DeviceRelation` mirrors while keeping Kokkos types out of the installed ABI. Application fields remain caller-owned. Discretization-specific operators are intentionally outside the mesh SDK. The combined MPI/Kokkos adapter packs opaque fixed-width records from caller-owned device storage and unpacks ghost records
 for fields on any materialized entity dimension using Kokkos kernels.
 
 `DeviceHaloPlan` stores the rank-index maps in device memory and
 supports `automatic`, `host_staging`, and `require_gpu_aware` transports.
 When using Open MPI, capability is queried via
 `MPIX_Query_cuda_support` / `MPIX_Query_rocm_support`, when present.
-`DeviceHaloPlan::start` packs owned records, fences the pack dependency,
+`DeviceHaloPlan::start(device_data, byte_size)` packs caller-owned records, fences the pack dependency,
 performs D2H staging when required, and launches `MPI_Ialltoallv`.
 Applications may launch work that does not depend on Ghost values before
 calling `wait`; MPI progress during that interval depends on the MPI runtime.

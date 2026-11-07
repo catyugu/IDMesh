@@ -4,6 +4,7 @@
 
 #include "idmesh/kokkos.hpp"
 #include "idmesh/mpi.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -20,20 +21,21 @@ namespace idmesh::mpi::kokkos {
 
     class IDMESH_MPI_KOKKOS_API DeviceHaloPlan {
     public:
-        DeviceHaloPlan(const ExchangePlan& plan, Index components = 1);
+        DeviceHaloPlan(
+            const ExchangePlan& plan, std::size_t bytes_per_entity);
         ~DeviceHaloPlan();
         DeviceHaloPlan(DeviceHaloPlan&&) noexcept;
         DeviceHaloPlan& operator=(DeviceHaloPlan&&) noexcept;
         DeviceHaloPlan(const DeviceHaloPlan&) = delete;
         DeviceHaloPlan& operator=(const DeviceHaloPlan&) = delete;
 
-        Index component_count() const noexcept;
+        std::size_t bytes_per_entity() const noexcept;
         bool direct_device_transport_available() const;
 
-        // Packs the current field, performs any required D2H staging, then
-        // starts MPI_Ialltoallv. The field storage must remain alive until
-        // wait() completes. Owned-field work may run between start and wait.
-        void start(idmesh::kokkos::DeviceField& field,
+        // Packs fixed-width records from caller-owned device memory, performs
+        // any required D2H staging, then starts MPI_Ialltoallv. The device
+        // storage must remain alive until wait() completes.
+        void start(void* device_data, std::size_t byte_size,
             DeviceTransport mode = DeviceTransport::automatic);
         // Completes MPI, performs any required H2D staging, and unpacks ghosts.
         // Calling wait() with no active exchange is a no-op.

@@ -1,5 +1,6 @@
 #include "idmesh/mesh.hpp"
 #include "contracts.hpp"
+#include "entity_signature.hpp"
 #include "reference_cell.hpp"
 
 #include <algorithm>
@@ -15,109 +16,33 @@
 namespace idmesh {
     namespace {
 
-        // Standard intermediate entities have at most four corner vertices.
-        // Keep construction keys inline so facet/edge canonicalization performs
-        // no per-entity heap allocation.
-        struct EntityKey {
-            std::array<Index, 4> vertices {};
-            std::uint8_t count = 0;
+        using Loop = detail::EntitySignature<Index>;
 
-            std::span<const Index> view() const
-            {
-                return {vertices.data(), count};
-            }
-            std::size_t size() const { return count; }
-            const Index* begin() const { return vertices.data(); }
-            const Index* end() const { return vertices.data() + count; }
-            Index operator[](std::size_t i) const { return vertices[i]; }
-            bool operator==(const EntityKey&) const = default;
-        };
-
-        struct Canonical {
-            EntityKey key;
-            Orientation orientation;
-        };
-
-        EntityKey make_key(std::span<const Index> vertices)
-        {
-            IDMESH_ASSERT(!vertices.empty() && vertices.size() <= 4);
-            EntityKey result;
-            result.count = static_cast<std::uint8_t>(vertices.size());
-            std::copy(vertices.begin(), vertices.end(), result.vertices.begin());
-            return result;
-        }
-
-        Canonical canonicalize(std::span<const Index> local)
-        {
-            IDMESH_ASSERT(!local.empty() && local.size() <= 4);
-            Canonical result;
-            result.key.count = static_cast<std::uint8_t>(local.size());
-            if (local.size() == 2) {
-                result.key.vertices[0] = std::min(local[0], local[1]);
-                result.key.vertices[1] = std::max(local[0], local[1]);
-                const bool reversed = local[0] > local[1];
-                result.orientation = {static_cast<std::uint16_t>(reversed ? 1 : 0), reversed};
-                return result;
-            }
-            // Entity vertices are unique. The smallest vertex fixes the cyclic
-            // starting point; only the two traversal directions need comparison.
-            const auto first = static_cast<std::size_t>(
-                std::min_element(local.begin(), local.end()) - local.begin());
-            bool reversed = false;
-            for (std::size_t i = 1; i < local.size(); ++i) {
-                const Index forward = local[(first + i) % local.size()];
-                const Index backward = local[(first + local.size() - i) % local.size()];
-                if (forward != backward) {
-                    reversed = backward < forward;
-                    break;
-                }
-            }
-            for (std::size_t i = 0; i < local.size(); ++i) {
-                const auto position = reversed
-                    ? (first + local.size() - i) % local.size()
-                    : (first + i) % local.size();
-                result.key.vertices[i] = local[position];
-            }
-            result.orientation = {static_cast<std::uint16_t>(first), reversed};
-            return result;
-        }
-
-        using Loop = EntityKey;
-
-        // Keys are compared in full: hash collisions never merge distinct entities.
-        // Entity IDs remain assigned in the order of first appearance.
         struct LoopHash {
             std::size_t operator()(const Loop& key) const noexcept
             {
-                std::size_t hash = sizeof(std::size_t) == 8
-                    ? std::size_t {14695981039346656037ULL}
-                    : std::size_t {2166136261U};
-                for (Index vertex : key) {
-                    hash ^= vertex;
-                    hash *= sizeof(std::size_t) == 8
-                        ? std::size_t {1099511628211ULL}
-                        : std::size_t {16777619U};
-                }
-                hash ^= key.count;
-                return hash;
+                return detail::hash_entity_signature(key);
             }
         };
 
-        EntityKey boundary_loop(CellType type, Index facet, std::span<const Index> vertices)
+        Loop boundary_loop(
+            CellType type, Index facet, std::span<const Index> vertices)
         {
-            EntityKey result;
+            std::array<Index, 4> local {};
             const auto local_vertices = reference_facet_vertices(type, facet);
-            result.count = static_cast<std::uint8_t>(local_vertices.size());
+            IDMESH_ASSERT(local_vertices.size() <= local.size());
             for (std::size_t i = 0; i < local_vertices.size(); ++i)
-                result.vertices[i] = vertices[local_vertices[i]];
-            return result;
+                local[i] = vertices[local_vertices[i]];
+            return Loop(std::span<const Index>(
+                local.data(), local_vertices.size()));
         }
 
-        EntityKey polygon_edge(std::span<const Index> vertices, std::size_t edge)
+        Loop polygon_edge(
+            std::span<const Index> vertices, std::size_t edge)
         {
             const std::array<Index, 2> endpoints {
                 vertices[edge], vertices[(edge + 1) % vertices.size()]};
-            return make_key(endpoints);
+            return Loop(endpoints);
         }
 
         struct RelationData {
@@ -575,16 +500,15 @@ namespace idmesh {
         detail::require_argument(dimension < data_->dimension_, "use add_cell_label for top-dimensional labels");
         const bool arity = dimension == 0 ? vertices.size() == 1
             : dimension == 1              ? vertices.size() == 2
-                                          : vertices.size() == 3 || vertices.size() == 4;
+                                          : vertices.size() >= 3;
         detail::require_argument(arity, "invalid labeled entity arity");
-        std::array<Index, 4> sorted {};
-        for (std::size_t i = 0; i < vertices.size(); ++i) {
-            detail::require_argument(vertices[i] < data_->coordinates_.size(), "invalid labeled entity vertex");
-            sorted[i] = vertices[i];
-        }
-        std::sort(sorted.begin(), sorted.begin() + vertices.size());
-        detail::require_argument(std::adjacent_find(sorted.begin(), sorted.begin() + vertices.size())
-                == sorted.begin() + vertices.size(),
+        std::vector<Index> sorted(vertices.begin(), vertices.end());
+        for (Index vertex : sorted)
+            detail::require_argument(vertex < data_->coordinates_.size(),
+                "invalid labeled entity vertex");
+        std::sort(sorted.begin(), sorted.end());
+        detail::require_argument(
+            std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(),
             "duplicate labeled entity vertex");
         detail::require_length(data_->label_assignment_vertices_.size() < std::size_t(invalid_index) - vertices.size(),
             "label connectivity overflow");
@@ -692,12 +616,12 @@ namespace idmesh {
             if (source.dimension_ > 1 && want(source.dimension_ - 1))
                 lookup[source.dimension_ - 1].reserve(data.types.size() * 2);
             auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
-                auto canon = canonicalize(local);
+                auto canon = detail::canonicalize_entity<Index>(local);
                 detail::require_length(entities[dim].size() < invalid_index, "too many topology entities");
-                auto [it, inserted] = lookup[dim].try_emplace(canon.key,
+                auto [it, inserted] = lookup[dim].try_emplace(canon.signature,
                     static_cast<Index>(entities[dim].size()));
                 if (inserted)
-                    entities[dim].push_back(canon.key);
+                    entities[dim].push_back(canon.signature);
                 return {it->second, static_cast<std::int8_t>(canon.orientation.sign()), canon.orientation};
             };
             auto attach = [&](Index from, Index to, Index id, Incidence entry) {
@@ -754,7 +678,7 @@ namespace idmesh {
             struct PendingLabel {
                 Index dimension = 0;
                 Index entity = invalid_index;
-                EntityKey unbound_vertices;
+                Loop unbound_vertices;
                 int value = 0;
             };
             std::vector<PendingLabel> labels;
@@ -767,19 +691,19 @@ namespace idmesh {
                 const std::span<const Index> assigned {
                     source.label_assignment_vertices_.data() + assignment.begin,
                     assignment.end - assignment.begin};
-                const auto key = canonicalize(assigned);
+                const auto key = detail::canonicalize_entity<Index>(assigned);
                 Index entity = invalid_index;
                 if (dim == 0) {
                     entity = assigned.front();
                 }
                 else if (want(dim)) {
-                    const auto found = lookup[dim].find(key.key);
+                    const auto found = lookup[dim].find(key.signature);
                     if (found != lookup[dim].end())
                         entity = found->second;
                 }
                 PendingLabel label {dim, entity, {}, assignment.value};
                 if (entity == invalid_index)
-                    label.unbound_vertices = key.key;
+                    label.unbound_vertices = key.signature;
                 labels.push_back(label);
             }
             std::vector<Index>().swap(source.label_assignment_vertices_);

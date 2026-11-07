@@ -10,6 +10,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <span>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -116,20 +117,24 @@ namespace {
         const auto& plan = partition.exchange_plan(dimension);
         require(plan.local_entity_count() == count,
             "exchange plan local entity count mismatch");
-        std::vector<double> values(std::size_t(count) * 2, -1);
+        struct Record {
+            std::uint64_t first = ~std::uint64_t {0};
+            std::uint64_t second = ~std::uint64_t {0};
+        };
+        std::vector<Record> values(count);
         for (Index entity : owned) {
             const auto global = partition.global_ids(dimension)[entity];
-            values[2 * entity] = double(global * 3 + dimension + 11);
-            values[2 * entity + 1] = double(global * 5 + dimension + 17);
+            values[entity].first = global * 3 + dimension + 11;
+            values[entity].second = global * 5 + dimension + 17;
         }
-        auto request = plan.make_request(2);
-        request.start(values);
+        auto request = plan.make_request(sizeof(Record));
+        request.start(std::as_writable_bytes(std::span(values)));
         request.wait();
         for (Index entity = 0; entity < count; ++entity) {
             const auto global = partition.global_ids(dimension)[entity];
-            require(values[2 * entity] == double(global * 3 + dimension + 11)
-                    && values[2 * entity + 1]
-                        == double(global * 5 + dimension + 17),
+            require(values[entity].first == global * 3 + dimension + 11
+                    && values[entity].second
+                        == global * 5 + dimension + 17,
                 "entity halo exchange mismatch");
         }
     }

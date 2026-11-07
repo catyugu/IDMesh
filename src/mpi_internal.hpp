@@ -2,6 +2,7 @@
 #include "idmesh/mpi.hpp"
 #include <mpi.h>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
@@ -35,13 +36,13 @@ namespace idmesh::mpi {
         MPI_Comm comm = MPI_COMM_NULL;
         std::shared_ptr<void> context_owner;
 
-        void scaled_layout(Index components,
+        void scaled_layout(std::size_t bytes_per_entity,
             std::vector<int>& send_counts, std::vector<int>& recv_counts,
             std::vector<int>& send_offsets, std::vector<int>& recv_offsets) const
         {
-            if (components == 0)
-                throw std::invalid_argument("halo component count must be positive");
-            const auto width = static_cast<std::uint64_t>(components);
+            if (bytes_per_entity == 0)
+                throw std::invalid_argument("halo record size must be positive");
+            const auto width = static_cast<std::uint64_t>(bytes_per_entity);
             const int peers = static_cast<int>(send.size());
             send_counts.resize(peers);
             recv_counts.resize(peers);
@@ -90,14 +91,14 @@ namespace idmesh::mpi {
 
     struct ExchangeRequest::Data {
         ExchangePlan plan;
-        std::span<double> values;
-        Index components = 1;
+        std::span<std::byte> records;
+        std::size_t bytes_per_entity = 0;
         std::vector<int> send_counts;
         std::vector<int> recv_counts;
         std::vector<int> send_offsets;
         std::vector<int> recv_offsets;
-        std::vector<double> send_buffer;
-        std::vector<double> recv_buffer;
+        std::vector<std::byte> send_buffer;
+        std::vector<std::byte> recv_buffer;
         MPI_Request request = MPI_REQUEST_NULL;
         bool active = false;
 
