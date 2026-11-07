@@ -110,6 +110,27 @@ namespace idmesh::detail::vtk {
             return result;
         }
 
+        template <class T>
+        T scalar_at(const data::Array& array,
+            std::size_t tuple, std::size_t component)
+        {
+            const auto width = data::scalar_size(array.type);
+            ::idmesh::detail::require_runtime(
+                tuple < array.tuples && component < array.components
+                    && width == sizeof(T)
+                    && array.tuples <= std::numeric_limits<std::size_t>::max()
+                        / array.components,
+                "VTK scalar index or type mismatch");
+            const auto scalar = tuple * array.components + component;
+            ::idmesh::detail::require_runtime(
+                scalar < array.values.size() / width,
+                "truncated VTK scalar array");
+            const auto offset = scalar * width;
+            T result {};
+            std::memcpy(&result, array.values.data() + offset, width);
+            return result;
+        }
+
     } // namespace
 
     std::string_view legacy_scalar_name(data::ScalarType type)
@@ -212,6 +233,88 @@ namespace idmesh::detail::vtk {
             return data::ScalarType::float64;
         throw std::runtime_error(
             "unsupported VTU scalar type");
+    }
+
+    std::int64_t signed_integer(
+        const data::Array& array, std::size_t tuple,
+        std::size_t component)
+    {
+        switch (array.type) {
+        case data::ScalarType::int8:
+            return scalar_at<std::int8_t>(array, tuple, component);
+        case data::ScalarType::uint8:
+            return scalar_at<std::uint8_t>(array, tuple, component);
+        case data::ScalarType::int16:
+            return scalar_at<std::int16_t>(array, tuple, component);
+        case data::ScalarType::uint16:
+            return scalar_at<std::uint16_t>(array, tuple, component);
+        case data::ScalarType::int32:
+            return scalar_at<std::int32_t>(array, tuple, component);
+        case data::ScalarType::uint32:
+            return scalar_at<std::uint32_t>(array, tuple, component);
+        case data::ScalarType::int64:
+            return scalar_at<std::int64_t>(array, tuple, component);
+        case data::ScalarType::uint64: {
+            const auto value = scalar_at<std::uint64_t>(
+                array, tuple, component);
+            ::idmesh::detail::require_runtime(
+                value <= static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max()),
+                "VTK integer exceeds int64 range");
+            return static_cast<std::int64_t>(value);
+        }
+        case data::ScalarType::float32:
+        case data::ScalarType::float64:
+            throw std::runtime_error("VTK integer field has floating type");
+        }
+        throw std::runtime_error("invalid VTK integer scalar type");
+    }
+
+    std::uint64_t nonnegative_integer(
+        const data::Array& array, std::size_t tuple,
+        std::size_t component)
+    {
+        if (array.type == data::ScalarType::uint64)
+            return scalar_at<std::uint64_t>(array, tuple, component);
+        const auto value = signed_integer(array, tuple, component);
+        ::idmesh::detail::require_runtime(
+            value >= 0, "negative VTK integer");
+        return static_cast<std::uint64_t>(value);
+    }
+
+    double floating_value(
+        const data::Array& array, std::size_t tuple,
+        std::size_t component)
+    {
+        if (array.type == data::ScalarType::float32)
+            return scalar_at<float>(array, tuple, component);
+        if (array.type == data::ScalarType::float64)
+            return scalar_at<double>(array, tuple, component);
+        throw std::runtime_error("VTK coordinate/time must be floating point");
+    }
+
+    bool read_state_metadata(
+        data::State& state, std::string_view name,
+        const data::Array& values)
+    {
+        if (name != "__idmesh_time" && name != "__idmesh_cycle")
+            return false;
+        ::idmesh::detail::require_runtime(
+            values.tuples == 1 && values.components == 1,
+            "invalid VTK state metadata shape");
+        if (name == "__idmesh_time") {
+            ::idmesh::detail::require_runtime(
+                !state.time.has_value(), "duplicate VTK time metadata");
+            state.time = floating_value(values, 0);
+            ::idmesh::detail::require_runtime(
+                std::isfinite(*state.time), "nonfinite VTK time metadata");
+        }
+        else {
+            ::idmesh::detail::require_runtime(
+                !state.cycle.has_value(), "duplicate VTK cycle metadata");
+            state.cycle = signed_integer(values, 0);
+        }
+        return true;
     }
 
     std::vector<std::byte> interleave(
