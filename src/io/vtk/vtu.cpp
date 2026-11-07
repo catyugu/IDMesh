@@ -255,129 +255,6 @@ namespace idmesh::vtk {
                 std::move(raw), endian);
         }
 
-        template <class T>
-        T scalar_at(
-            const data::Array& array, std::size_t tuple,
-            std::size_t component = 0)
-        {
-            ::idmesh::detail::require_runtime(
-                tuple < array.tuples
-                    && component < array.components,
-                "VTU scalar index out of range");
-            T value {};
-            const auto width = data::scalar_size(array.type);
-            ::idmesh::detail::require_runtime(
-                width == sizeof(T),
-                "VTU scalar type mismatch");
-            const auto offset
-                = (tuple * array.components + component) * width;
-            std::memcpy(
-                &value, array.values.data() + offset, width);
-            return value;
-        }
-
-        std::uint64_t nonnegative_integer(
-            const data::Array& array, std::size_t tuple,
-            std::size_t component = 0)
-        {
-            switch (array.type) {
-            case data::ScalarType::int8: {
-                const auto value = scalar_at<std::int8_t>(
-                    array, tuple, component);
-                ::idmesh::detail::require_runtime(
-                    value >= 0, "negative VTU integer");
-                return value;
-            }
-            case data::ScalarType::uint8:
-                return scalar_at<std::uint8_t>(
-                    array, tuple, component);
-            case data::ScalarType::int16: {
-                const auto value = scalar_at<std::int16_t>(
-                    array, tuple, component);
-                ::idmesh::detail::require_runtime(
-                    value >= 0, "negative VTU integer");
-                return value;
-            }
-            case data::ScalarType::uint16:
-                return scalar_at<std::uint16_t>(
-                    array, tuple, component);
-            case data::ScalarType::int32: {
-                const auto value = scalar_at<std::int32_t>(
-                    array, tuple, component);
-                ::idmesh::detail::require_runtime(
-                    value >= 0, "negative VTU integer");
-                return static_cast<std::uint64_t>(value);
-            }
-            case data::ScalarType::uint32:
-                return scalar_at<std::uint32_t>(
-                    array, tuple, component);
-            case data::ScalarType::int64: {
-                const auto value = scalar_at<std::int64_t>(
-                    array, tuple, component);
-                ::idmesh::detail::require_runtime(
-                    value >= 0, "negative VTU integer");
-                return static_cast<std::uint64_t>(value);
-            }
-            case data::ScalarType::uint64:
-                return scalar_at<std::uint64_t>(
-                    array, tuple, component);
-            case data::ScalarType::float32:
-            case data::ScalarType::float64:
-                throw std::runtime_error(
-                    "VTU connectivity uses floating type");
-            }
-            throw std::runtime_error("invalid VTU scalar type");
-        }
-
-        std::int64_t signed_integer(
-            const data::Array& array, std::size_t tuple)
-        {
-            switch (array.type) {
-            case data::ScalarType::int8:
-                return scalar_at<std::int8_t>(array, tuple);
-            case data::ScalarType::uint8:
-                return scalar_at<std::uint8_t>(array, tuple);
-            case data::ScalarType::int16:
-                return scalar_at<std::int16_t>(array, tuple);
-            case data::ScalarType::uint16:
-                return scalar_at<std::uint16_t>(array, tuple);
-            case data::ScalarType::int32:
-                return scalar_at<std::int32_t>(array, tuple);
-            case data::ScalarType::uint32:
-                return scalar_at<std::uint32_t>(array, tuple);
-            case data::ScalarType::int64:
-                return scalar_at<std::int64_t>(array, tuple);
-            case data::ScalarType::uint64: {
-                const auto value
-                    = scalar_at<std::uint64_t>(array, tuple);
-                ::idmesh::detail::require_runtime(
-                    value <= static_cast<std::uint64_t>(
-                        std::numeric_limits<std::int64_t>::max()),
-                    "VTU integer out of int64 range");
-                return static_cast<std::int64_t>(value);
-            }
-            case data::ScalarType::float32:
-            case data::ScalarType::float64:
-                throw std::runtime_error(
-                    "VTU integer metadata has floating type");
-            }
-            throw std::runtime_error("invalid VTU scalar type");
-        }
-
-        double floating_value(
-            const data::Array& array, std::size_t tuple,
-            std::size_t component = 0)
-        {
-            if (array.type == data::ScalarType::float32)
-                return scalar_at<float>(
-                    array, tuple, component);
-            if (array.type == data::ScalarType::float64)
-                return scalar_at<double>(
-                    array, tuple, component);
-            throw std::runtime_error(
-                "VTU coordinate/time data must be floating point");
-        }
-
         void validate_vtu_name(std::string_view name)
         {
             ::idmesh::detail::require_argument(
@@ -634,7 +511,7 @@ namespace idmesh::vtk {
              point < point_count; ++point) {
             for (std::size_t component = 0;
                  component < 3; ++component) {
-                points[point][component] = floating_value(
+                points[point][component] = detail::vtk::floating_value(
                     coordinates, point, component);
                 ::idmesh::detail::require_runtime(
                     std::isfinite(points[point][component]),
@@ -664,7 +541,7 @@ namespace idmesh::vtk {
         for (std::size_t cell = 0;
              cell < cell_count; ++cell) {
             const auto end_u64
-                = nonnegative_integer(offsets, cell);
+                = detail::vtk::nonnegative_integer(offsets, cell);
             ::idmesh::detail::require_runtime(
                 end_u64 >= previous
                     && end_u64 <= connectivity.tuples,
@@ -672,7 +549,7 @@ namespace idmesh::vtk {
             const auto end
                 = static_cast<std::size_t>(end_u64);
             const auto code_u64
-                = nonnegative_integer(types, cell);
+                = detail::vtk::nonnegative_integer(types, cell);
             ::idmesh::detail::require_runtime(
                 code_u64
                     <= static_cast<std::uint64_t>(
@@ -688,7 +565,7 @@ namespace idmesh::vtk {
             cells[cell].points.resize(end - previous);
             for (std::size_t i = previous; i < end; ++i) {
                 const auto point
-                    = nonnegative_integer(connectivity, i);
+                    = detail::vtk::nonnegative_integer(connectivity, i);
                 ::idmesh::detail::require_runtime(
                     point < point_count,
                     "VTU connectivity point out of range");
@@ -757,7 +634,7 @@ namespace idmesh::vtk {
             for (std::size_t cell = 0;
                  cell < cells.size(); ++cell) {
                 const auto value
-                    = signed_integer(*physical_tags, cell);
+                    = detail::vtk::signed_integer(*physical_tags, cell);
                 ::idmesh::detail::require_runtime(
                     value >= std::numeric_limits<int>::min()
                         && value <= std::numeric_limits<int>::max(),
@@ -806,27 +683,8 @@ namespace idmesh::vtk {
         }
 
         for (auto& [name, values] : mesh_fields) {
-            if (name == time_name) {
-                ::idmesh::detail::require_runtime(
-                    !state.time.has_value()
-                        && values.tuples == 1
-                        && values.components == 1,
-                    "invalid VTU time metadata");
-                state.time = floating_value(values, 0);
-                ::idmesh::detail::require_runtime(
-                    std::isfinite(*state.time),
-                    "nonfinite VTU time metadata");
+            if (detail::vtk::read_state_metadata(state, name, values))
                 continue;
-            }
-            if (name == cycle_name) {
-                ::idmesh::detail::require_runtime(
-                    !state.cycle.has_value()
-                        && values.tuples == 1
-                        && values.components == 1,
-                    "invalid VTU cycle metadata");
-                state.cycle = signed_integer(values, 0);
-                continue;
-            }
             ::idmesh::detail::require_runtime(
                 name != physical_tag_name
                     && seen.emplace(2, name).second,

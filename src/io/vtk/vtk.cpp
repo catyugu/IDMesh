@@ -148,81 +148,6 @@ namespace idmesh {
             return result;
         }
 
-        template <class T>
-        T array_scalar(
-            const data::Array& array, std::size_t tuple,
-            std::size_t component = 0)
-        {
-            detail::require_runtime(
-                tuple < array.tuples
-                    && component < array.components,
-                "VTK scalar index out of range");
-            T value {};
-            const auto width = data::scalar_size(array.type);
-            const auto offset
-                = (tuple * array.components + component)
-                * width;
-            detail::require_runtime(
-                sizeof(T) == width
-                    && offset + width <= array.values.size(),
-                "VTK scalar type mismatch");
-            std::memcpy(
-                &value, array.values.data() + offset, width);
-            return value;
-        }
-
-        std::int64_t integer_scalar(
-            const data::Array& array, std::size_t tuple)
-        {
-            detail::require_runtime(
-                array.components == 1,
-                "integer metadata must be scalar");
-            switch (array.type) {
-            case data::ScalarType::int8:
-                return array_scalar<std::int8_t>(array, tuple);
-            case data::ScalarType::uint8:
-                return array_scalar<std::uint8_t>(array, tuple);
-            case data::ScalarType::int16:
-                return array_scalar<std::int16_t>(array, tuple);
-            case data::ScalarType::uint16:
-                return array_scalar<std::uint16_t>(array, tuple);
-            case data::ScalarType::int32:
-                return array_scalar<std::int32_t>(array, tuple);
-            case data::ScalarType::uint32:
-                return array_scalar<std::uint32_t>(array, tuple);
-            case data::ScalarType::int64:
-                return array_scalar<std::int64_t>(array, tuple);
-            case data::ScalarType::uint64: {
-                const auto value
-                    = array_scalar<std::uint64_t>(array, tuple);
-                detail::require_runtime(
-                    value <= static_cast<std::uint64_t>(
-                        std::numeric_limits<std::int64_t>::max()),
-                    "VTK integer metadata out of range");
-                return static_cast<std::int64_t>(value);
-            }
-            case data::ScalarType::float32:
-            case data::ScalarType::float64:
-                throw std::runtime_error(
-                    "VTK integer metadata has floating type");
-            }
-            throw std::runtime_error("invalid VTK scalar type");
-        }
-
-        double floating_scalar(
-            const data::Array& array, std::size_t tuple)
-        {
-            detail::require_runtime(
-                array.components == 1,
-                "floating metadata must be scalar");
-            if (array.type == data::ScalarType::float32)
-                return array_scalar<float>(array, tuple);
-            if (array.type == data::ScalarType::float64)
-                return array_scalar<double>(array, tuple);
-            throw std::runtime_error(
-                "VTK time metadata must be floating point");
-        }
-
         void write_binary_array(
             std::ostream& out,
             const data::ArrayView& array)
@@ -349,7 +274,7 @@ namespace idmesh {
             for (std::size_t i = 0;
                  i < cells.size(); ++i) {
                 const auto value
-                    = integer_scalar(tags, i);
+                    = detail::vtk::signed_integer(tags, i);
                 detail::require_runtime(
                     value >= std::numeric_limits<int>::min()
                         && value
@@ -431,14 +356,8 @@ namespace idmesh {
             for (std::size_t i = 0;
                  i < point_count; ++i) {
                 for (std::size_t c = 0; c < 3; ++c) {
-                    points[i][c]
-                        = coordinate_type
-                            == data::ScalarType::float32
-                        ? static_cast<double>(
-                              array_scalar<float>(
-                                  coordinate_values, i, c))
-                        : array_scalar<double>(
-                              coordinate_values, i, c);
+                    points[i][c] = detail::vtk::floating_value(
+                        coordinate_values, i, c);
                     detail::require_runtime(
                         std::isfinite(points[i][c]),
                         "nonfinite VTK point");
@@ -686,30 +605,9 @@ namespace idmesh {
                     "duplicate VTK field name in one association");
 
                 if (raw.domain == LegacyDomain::mesh
-                    && raw.name == time_name) {
-                    detail::require_runtime(
-                        !state.time.has_value()
-                            && raw.values.tuples == 1
-                            && raw.values.components == 1,
-                        "invalid VTK time metadata");
-                    state.time = floating_scalar(
-                        raw.values, 0);
-                    detail::require_runtime(
-                        std::isfinite(*state.time),
-                        "nonfinite VTK time metadata");
+                    && detail::vtk::read_state_metadata(
+                        state, raw.name, raw.values))
                     continue;
-                }
-                if (raw.domain == LegacyDomain::mesh
-                    && raw.name == cycle_name) {
-                    detail::require_runtime(
-                        !state.cycle.has_value()
-                            && raw.values.tuples == 1
-                            && raw.values.components == 1,
-                        "invalid VTK cycle metadata");
-                    state.cycle = integer_scalar(
-                        raw.values, 0);
-                    continue;
-                }
                 detail::require_runtime(
                     raw.name != physical_tag_name
                         && raw.name != time_name

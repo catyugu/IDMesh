@@ -19,6 +19,20 @@ namespace idmesh::detail::vtk {
     std::string_view xml_scalar_name(data::ScalarType type);
     data::ScalarType xml_scalar_type(std::string_view name);
 
+    // Numeric conversion shared by legacy VTK and VTU readers.
+    std::int64_t signed_integer(
+        const data::Array& array, std::size_t tuple,
+        std::size_t component = 0);
+    std::uint64_t nonnegative_integer(
+        const data::Array& array, std::size_t tuple,
+        std::size_t component = 0);
+    double floating_value(
+        const data::Array& array, std::size_t tuple,
+        std::size_t component = 0);
+    bool read_state_metadata(
+        data::State& state, std::string_view name,
+        const data::Array& values);
+
     std::vector<std::byte> interleave(
         const data::ArrayView& array);
 
