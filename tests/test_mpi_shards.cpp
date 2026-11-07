@@ -152,15 +152,6 @@ namespace {
         return cuts;
     }
 
-    struct Identity {
-        std::uint64_t vertex[4] {};
-        std::uint64_t ordered_vertex[4] {};
-        std::uint64_t global = 0;
-        Index dimension = 0;
-        Index arity = 0;
-        int owner = -1;
-    };
-
     struct Incidence {
         std::uint64_t upper = 0;
         std::uint64_t lower = 0;
@@ -195,28 +186,22 @@ namespace {
         const idmesh::mpi::PartitionedMesh& partition, int size)
     {
         const Index dim = partition.mesh().dimension();
-        std::vector<Identity> here;
+        std::vector<std::uint64_t> here;
         for (Index k = 0; k < dim; ++k) {
             if (!partition.mesh().has_entities(k))
                 continue;
             for (Index entity = 0;
                  entity < partition.mesh().entity_count(k); ++entity) {
-                Identity record {};
-                record.dimension = k;
-                record.global = partition.global_ids(k)[entity];
-                record.owner = partition.owner_ranks(k)[entity];
                 const auto vertices
                     = partition.mesh().entity_vertices(k, entity);
-                record.arity = static_cast<Index>(vertices.size());
-                for (std::size_t j = 0; j < vertices.size(); ++j) {
-                    const auto global
-                        = partition.global_ids(0)[vertices[j]];
-                    record.vertex[j] = global;
-                    record.ordered_vertex[j] = global;
-                }
-                std::sort(
-                    record.vertex, record.vertex + record.arity);
-                here.push_back(record);
+                here.push_back(k);
+                here.push_back(vertices.size());
+                here.push_back(partition.global_ids(k)[entity]);
+                here.push_back(static_cast<std::uint64_t>(
+                    partition.owner_ranks(k)[entity]));
+                for (Index vertex : vertices)
+                    here.push_back(
+                        partition.global_ids(0)[vertex]);
             }
         }
 
@@ -227,28 +212,38 @@ namespace {
         std::map<std::pair<Index, std::uint64_t>,
             std::vector<std::uint64_t>> ordered;
         std::size_t shared = 0;
-        for (const auto& record : all) {
-            Key key {record.dimension,
-                std::vector<std::uint64_t>(
-                    record.vertex, record.vertex + record.arity)};
+        for (std::size_t position = 0; position < all.size();) {
+            require(all.size() - position >= 4,
+                "truncated gathered entity identity");
+            const auto dimension = static_cast<Index>(all[position++]);
+            const auto arity = static_cast<std::size_t>(all[position++]);
+            const auto global = all[position++];
+            const auto owner = static_cast<int>(all[position++]);
+            require(arity > 0 && arity <= all.size() - position,
+                "invalid gathered entity arity");
+
+            std::vector<std::uint64_t> canonical(
+                all.begin() + static_cast<std::ptrdiff_t>(position),
+                all.begin() + static_cast<std::ptrdiff_t>(position + arity));
+            position += arity;
+            auto sorted = canonical;
+            std::sort(sorted.begin(), sorted.end());
+
+            Key key {dimension, std::move(sorted)};
             auto [existing, inserted] = identities.try_emplace(
-                key, record.global, record.owner);
+                key, global, owner);
             require(inserted
                     || existing->second
-                        == std::pair {record.global, record.owner},
+                        == std::pair {global, owner},
                 "shared entity identity/owner mismatch across ranks");
             if (!inserted)
                 ++shared;
 
-            const auto name
-                = std::pair {record.dimension, record.global};
+            const auto name = std::pair {dimension, global};
             auto [back, unique] = reverse.try_emplace(name, key);
             require(unique || back->second == key,
                 "global entity-ID collision");
 
-            std::vector<std::uint64_t> canonical(
-                record.ordered_vertex,
-                record.ordered_vertex + record.arity);
             auto [order, first]
                 = ordered.try_emplace(name, canonical);
             require(first || order->second == canonical,

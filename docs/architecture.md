@@ -234,8 +234,9 @@ connectivity and supplied Ghost layers; the reader does not infer
 missing off-rank neighbors from geometry. All distributed operations use
 the communicator owned by the caller-supplied `mpi::Context`; metadata
 operations are still blocking and local shard files must be consistent.
-Extremely large individual messages remain subject to MPI_Alltoallv's
-integer-count limits.
+Registry setup still uses bounded communicator-wide `MPI_Alltoallv`; repeated
+halo traffic uses sparse neighborhood collectives. Extremely large individual
+messages remain subject to MPI integer-count limits.
 
 ## GPU fields and direct MPI transport
 
@@ -247,7 +248,8 @@ supports `automatic`, `host_staging`, and `require_gpu_aware` transports.
 When using Open MPI, capability is queried via
 `MPIX_Query_cuda_support` / `MPIX_Query_rocm_support`, when present.
 `DeviceHaloPlan::start(device_data, byte_size)` packs caller-owned records, fences the pack dependency,
-performs D2H staging when required, and launches `MPI_Ineighbor_alltoallv`.
+performs D2H staging when required, and launches `MPI_Ineighbor_alltoallv` on
+the plan's distributed-graph communicator.
 Applications may launch work that does not depend on Ghost values before
 calling `wait`; MPI progress during that interval depends on the MPI runtime.
 `wait` completes MPI, performs H2D staging when required, unpacks Ghost

@@ -559,14 +559,10 @@ namespace idmesh {
             const Index stride = connectivity.rows == 0
                 ? 0
                 : offsets[1] - offsets[0];
-            const bool fixed = connectivity.rows == 0
-                || std::all_of(offsets.begin() + 1, offsets.end(),
-                    [&, row = Index {0}](Index) mutable {
-                        const auto current
-                            = offsets[row + 1] - offsets[row];
-                        ++row;
-                        return current == stride;
-                    });
+            bool fixed = true;
+            for (Index row = 0; row < connectivity.rows; ++row)
+                fixed = fixed
+                    && offsets[row + 1] - offsets[row] == stride;
             if (fixed)
                 connectivity.stride = stride;
             else
@@ -778,12 +774,18 @@ namespace idmesh {
                     const bool oriented = from == to + 1;
                     auto relation = compress(entries, data.counts[from], oriented);
                     PendingRelation().swap(entries);
-                    if (options.relations == RelationDirection::bidirectional && from == to + 1) {
+                    if (options.relations == RelationDirection::bidirectional
+                        && from == to + 1) {
                         data.relations[to][from] = transpose(
                             relation, data.counts[to]);
                     }
                     data.relations[from][to] = std::move(relation);
                 }
+            }
+            if (source.dimension_ == 1
+                && options.relations == RelationDirection::bidirectional) {
+                data.relations[0][1] = transpose(
+                    data.relations[1][0], data.counts[0]);
             }
             for (Index dim = 1; dim < source.dimension_; ++dim)
                 std::vector<Loop>().swap(entities[dim]);
