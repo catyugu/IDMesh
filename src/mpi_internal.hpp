@@ -83,7 +83,7 @@ namespace idmesh::mpi {
         std::vector<double> send_buffer;
         std::vector<double> recv_buffer;
         MPI_Request request = MPI_REQUEST_NULL;
-        bool unpacked = false;
+        bool active = false;
 
         ~Data();
         void unpack();

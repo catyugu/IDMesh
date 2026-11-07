@@ -29,7 +29,12 @@ namespace idmesh::mpi {
         ExchangeRequest(const ExchangeRequest&) = delete;
         ExchangeRequest& operator=(const ExchangeRequest&) = delete;
 
+        // Rebinds the preallocated request to a field and starts MPI_Ialltoallv.
+        // The field span must remain alive until wait() completes.
+        void start(std::span<double> values);
         void wait();
+        bool active() const noexcept;
+        Index component_count() const noexcept;
 
     private:
         struct Data;
@@ -68,6 +73,9 @@ namespace idmesh::mpi {
         // unpacks ghost values in wait(). The span must remain alive until then.
         ExchangeRequest begin_exchange(
             std::span<double> values, Index components = 1) const;
+        // Precomputes counts/displacements and allocates communication buffers
+        // once. Reuse with start()/wait() in steady exchange loops.
+        ExchangeRequest make_request(Index components = 1) const;
         bool empty() const noexcept;
         int rank_count() const noexcept;
         Index local_cell_count() const noexcept;

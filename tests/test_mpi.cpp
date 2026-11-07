@@ -62,11 +62,29 @@ namespace {
         std::vector<double> scalar(n, -1);
         for (Index i = 0; i < part.owned_cell_count(); ++i)
             scalar[i] = part.global_ids(d)[i] + 10;
-        auto pending = part.exchange_plan().begin_exchange(scalar);
-        pending.wait();
+        auto pending = part.exchange_plan().make_request();
+        require(pending.component_count() == 1 && !pending.active(),
+            "reusable exchange request initial state");
+        for (int round = 0; round < 2; ++round) {
+            std::fill(scalar.begin(), scalar.end(), -1);
+            for (Index i = 0; i < part.owned_cell_count(); ++i)
+                scalar[i] = part.global_ids(d)[i] + 10 + round;
+            pending.start(scalar);
+            require(pending.active(), "reusable exchange request did not start");
+            pending.wait();
+            require(!pending.active(), "reusable exchange request did not finish");
+            for (Index i = 0; i < n; ++i)
+                require(scalar[i] == part.global_ids(d)[i] + 10 + round,
+                    "reusable nonblocking exchange failed");
+        }
+        std::fill(scalar.begin(), scalar.end(), -1);
+        for (Index i = 0; i < part.owned_cell_count(); ++i)
+            scalar[i] = part.global_ids(d)[i] + 20;
+        auto one_shot = part.exchange_plan().begin_exchange(scalar);
+        one_shot.wait();
         for (Index i = 0; i < n; ++i)
-            require(scalar[i] == part.global_ids(d)[i] + 10,
-                "nonblocking exchange plan invocation failed");
+            require(scalar[i] == part.global_ids(d)[i] + 20,
+                "one-shot nonblocking exchange failed");
 
         for (Index k = 0; k < d; ++k) {
             require(part.global_ids(k).size() == part.mesh().entity_count(k),

@@ -123,7 +123,7 @@ namespace idmesh::mpi {
 
     void ExchangeRequest::Data::unpack()
     {
-        if (unpacked)
+        if (!active)
             return;
         for (int peer = 0; peer < plan.rank_count(); ++peer) {
             std::size_t input = recv_offsets[peer];
@@ -132,29 +132,76 @@ namespace idmesh::mpi {
                     values[static_cast<std::size_t>(cell) * components + component]
                         = recv_buffer[input++];
         }
-        unpacked = true;
+        values = {};
+        active = false;
     }
 
     ExchangeRequest::Data::~Data()
     {
-        if (request == MPI_REQUEST_NULL)
+        if (!active)
             return;
         int finalized = 0;
         if (MPI_Finalized(&finalized) != MPI_SUCCESS || finalized)
             return;
-        if (MPI_Wait(&request, MPI_STATUS_IGNORE) == MPI_SUCCESS)
+        if (request == MPI_REQUEST_NULL
+            || MPI_Wait(&request, MPI_STATUS_IGNORE) == MPI_SUCCESS)
             unpack();
+    }
+
+    void ExchangeRequest::start(std::span<double> values)
+    {
+        ensure_initialized();
+        ::idmesh::detail::require_state(data_ != nullptr, "empty exchange request");
+        ::idmesh::detail::require_state(!data_->active,
+            "exchange request is already active");
+        ::idmesh::detail::require_argument(
+            values.size()
+                == std::size_t(data_->plan.local_cell_count()) * data_->components,
+            "exchange field must have one fixed-width record per local cell");
+
+        data_->values = values;
+        for (int peer = 0; peer < data_->plan.rank_count(); ++peer) {
+            std::size_t output = data_->send_offsets[peer];
+            for (Index cell : data_->plan.send_indices(peer))
+                for (Index component = 0; component < data_->components; ++component)
+                    data_->send_buffer[output++]
+                        = values[static_cast<std::size_t>(cell) * data_->components
+                            + component];
+        }
+
+        MPI_Request request = MPI_REQUEST_NULL;
+        ::idmesh::mpi::detail::check_mpi(
+            MPI_Ialltoallv(data_->send_buffer.data(), data_->send_counts.data(),
+                data_->send_offsets.data(), MPI_DOUBLE,
+                data_->recv_buffer.data(), data_->recv_counts.data(),
+                data_->recv_offsets.data(), MPI_DOUBLE, data_->plan.data_->comm,
+                &request),
+            "MPI_Ialltoallv");
+        data_->request = request;
+        data_->active = true;
     }
 
     void ExchangeRequest::wait()
     {
         ensure_initialized();
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange request");
+        if (!data_->active)
+            return;
         if (data_->request != MPI_REQUEST_NULL) {
             ::idmesh::mpi::detail::check_mpi(
                 MPI_Wait(&data_->request, MPI_STATUS_IGNORE), "MPI_Wait");
         }
         data_->unpack();
+    }
+
+    bool ExchangeRequest::active() const noexcept
+    {
+        return data_ != nullptr && data_->active;
+    }
+
+    Index ExchangeRequest::component_count() const noexcept
+    {
+        return data_ ? data_->components : 0;
     }
 
     ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
@@ -261,19 +308,15 @@ namespace idmesh::mpi {
         }
     }
 
-    ExchangeRequest ExchangePlan::begin_exchange(
-        std::span<double> values, Index components) const
+    ExchangeRequest ExchangePlan::make_request(Index components) const
     {
         ensure_initialized();
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange plan");
-        ::idmesh::detail::require_argument(
-            components > 0
-                && values.size() == std::size_t(data_->local_cells) * components,
-            "exchange field must have one fixed-width record per local cell");
+        ::idmesh::detail::require_argument(components > 0,
+            "exchange component count must be positive");
 
         auto request = std::make_shared<ExchangeRequest::Data>();
         request->plan = *this;
-        request->values = values;
         request->components = components;
         scaled_layout(*data_, components,
             request->send_counts, request->recv_counts,
@@ -287,23 +330,15 @@ namespace idmesh::mpi {
             : request->recv_offsets.back() + request->recv_counts.back();
         request->send_buffer.resize(send_total);
         request->recv_buffer.resize(recv_total);
-
-        for (int peer = 0; peer < rank_count(); ++peer) {
-            std::size_t output = request->send_offsets[peer];
-            for (Index cell : data_->send[peer])
-                for (Index component = 0; component < components; ++component)
-                    request->send_buffer[output++]
-                        = values[static_cast<std::size_t>(cell) * components + component];
-        }
-
-        ::idmesh::mpi::detail::check_mpi(
-            MPI_Ialltoallv(request->send_buffer.data(), request->send_counts.data(),
-                request->send_offsets.data(), MPI_DOUBLE,
-                request->recv_buffer.data(), request->recv_counts.data(),
-                request->recv_offsets.data(), MPI_DOUBLE, data_->comm,
-                &request->request),
-            "MPI_Ialltoallv");
         return ExchangeRequest(std::move(request));
+    }
+
+    ExchangeRequest ExchangePlan::begin_exchange(
+        std::span<double> values, Index components) const
+    {
+        auto request = make_request(components);
+        request.start(values);
+        return request;
     }
 
     PartitionedMesh::PartitionedMesh(std::shared_ptr<Data> data)
