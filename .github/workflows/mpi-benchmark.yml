@@ -55,7 +55,7 @@ jobs:
             local iterations="$6"
             for repeat in 1 2 3; do
               echo "CASE revision=${revision} side=${side} components=${components} ghosts=${ghosts} repeat=${repeat}" | tee -a benchmark.log
-              mpirun -n 2 --bind-to core "$exe"                 --side "$side" --components "$components"                 --ghost-layers "$ghosts" --iterations "$iterations" | tee -a benchmark.log
+              mpirun -n 2 --bind-to none "$exe"                 --side "$side" --components "$components"                 --ghost-layers "$ghosts" --iterations "$iterations" | tee -a benchmark.log
             done
           }
 
