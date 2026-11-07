@@ -16,7 +16,7 @@
 - [x] Rank-local shard input with a distributed shared-entity registry.
 - [x] Geometry/field mirrors and device-aware communication with host-staging fallback.
 - [x] Communicator-scoped MPI contexts without exposing `mpi.h` in the SDK.
-- [x] Nonblocking host halo exchange.
+- [x] Reusable nonblocking host halo exchange with persistent request buffers.
 - [ ] Multi-node weak scaling and external partitioner integration.
 
 ## Milestone 3: advanced mesh coupling

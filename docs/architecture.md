@@ -125,10 +125,13 @@ then ghost-cell local meshes, carrying stable dimension-local global entity IDs,
 deterministic shared orientation and owner ranks. Facet adjacency defines the
 ghost expansion; the source mesh must materialize Cell/Facet and Facet/Cell
 relations. `ExchangePlan::exchange` exchanges one or more interleaved
-Host double components for cell-based fields. `begin_exchange` packs the owned
-records immediately, starts `MPI_Ialltoallv`, and returns a move-only request;
-`wait()` completes the collective and unpacks Ghost records, allowing interior
-work to overlap the communication interval.
+Host double components for cell-based fields. `begin_exchange` remains the
+one-shot convenience path. For steady time-stepping loops,
+`make_request(components)` allocates counts, displacements, and packed
+send/receive buffers once; repeated `start(field)` / `wait()` cycles perform
+no IDMesh-side host allocation. `start` packs owned records and launches
+`MPI_Ialltoallv`; `wait()` completes the collective and unpacks Ghost
+records, allowing interior work to overlap the communication interval.
 
 The replicated-input partition path remains available as a correctness baseline,
 but production-style rank-local loading is provided by the shard reader described

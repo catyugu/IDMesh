@@ -132,13 +132,16 @@ int main(int argc, char** argv)
                             = field[static_cast<std::size_t>(cell) * args.components + c];
         };
 
+        auto reusable = plan.make_request(args.components);
         plan.exchange(field, args.components);
         pack();
         plan.exchange_packed(packed_send.data(), packed_receive.data(),
             args.components, idmesh::mpi::DeviceMemoryKind::host);
+        reusable.start(field);
+        reusable.wait();
         MPI_Barrier(MPI_COMM_WORLD);
 
-        Timing exchange, packed;
+        Timing exchange, packed, one_shot, reused;
         for (unsigned iteration = 0; iteration < args.iterations; ++iteration) {
             fill_field(field, context.rank(), args.components);
             MPI_Barrier(MPI_COMM_WORLD);
@@ -154,13 +157,34 @@ int main(int argc, char** argv)
                 args.components, idmesh::mpi::DeviceMemoryKind::host);
             end = Clock::now();
             packed.samples.push_back(milliseconds(begin, end));
+
+            fill_field(field, context.rank(), args.components);
+            MPI_Barrier(MPI_COMM_WORLD);
+            begin = Clock::now();
+            auto temporary = plan.begin_exchange(field, args.components);
+            temporary.wait();
+            end = Clock::now();
+            one_shot.samples.push_back(milliseconds(begin, end));
+
+            fill_field(field, context.rank(), args.components);
+            MPI_Barrier(MPI_COMM_WORLD);
+            begin = Clock::now();
+            reusable.start(field);
+            reusable.wait();
+            end = Clock::now();
+            reused.samples.push_back(milliseconds(begin, end));
         }
 
         double exchange_local = exchange.median();
         double packed_local = packed.median();
+        double one_shot_local = one_shot.median();
+        double reused_local = reused.median();
         double exchange_max = 0.0, packed_max = 0.0;
+        double one_shot_max = 0.0, reused_max = 0.0;
         MPI_Reduce(&exchange_local, &exchange_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         MPI_Reduce(&packed_local, &packed_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&one_shot_local, &one_shot_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&reused_local, &reused_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
         std::uint64_t sent_local = send_records * args.components * sizeof(double);
         std::uint64_t recv_local = receive_records * args.components * sizeof(double);
@@ -172,11 +196,13 @@ int main(int argc, char** argv)
             std::cout << std::fixed << std::setprecision(6)
                       << "ranks,side,cells,components,ghost_layers,iterations,"
                          "exchange_ms_p50_max,packed_mpi_ms_p50_max,"
+                         "oneshot_nonblocking_ms_p50_max,reused_nonblocking_ms_p50_max,"
                          "send_bytes_per_exchange,receive_bytes_per_exchange\n"
                       << context.size() << ',' << args.side << ','
                       << source.entity_count(source.dimension()) << ','
                       << args.components << ',' << args.ghost_layers << ','
                       << args.iterations << ',' << exchange_max << ',' << packed_max << ','
+                      << one_shot_max << ',' << reused_max << ','
                       << sent_total << ',' << recv_total << '\n';
         }
         status = 0;

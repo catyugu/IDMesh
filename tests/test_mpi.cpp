@@ -1,6 +1,7 @@
 #include <idmesh/mpi.hpp>
 #include <mpi.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>

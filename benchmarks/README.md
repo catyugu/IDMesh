@@ -142,9 +142,11 @@ isolates a deliberately label-heavy finalization workload.
 ## MPI halo measurements
 
 When MPI is enabled, `idmesh_mpi_benchmark` compares the complete host
-`ExchangePlan::exchange` path with the already-packed
-`ExchangePlan::exchange_packed` transport path. The reported median is reduced
-with `MPI_MAX`, so the printed value represents the slowest rank.
+`ExchangePlan::exchange` path, the already-packed
+`ExchangePlan::exchange_packed` transport path, one-shot
+`begin_exchange`, and a reusable request created by `make_request`.
+The reported median is reduced with `MPI_MAX`, so the printed value represents
+the slowest rank.
 
 ```sh
 cmake -S . -B build-mpi-bench -DCMAKE_BUILD_TYPE=Release \
@@ -158,6 +160,7 @@ mpiexec -n 4 ./build-mpi-bench/benchmarks/idmesh_mpi_benchmark \
 ```
 
 Run the benchmark on controlled hosts only. It is intentionally excluded from
-CTest and GitHub Actions. The difference between `exchange_ms_p50_max` and
-`packed_mpi_ms_p50_max` approximates host packing/unpacking plus hot-path
-allocation overhead; the packed measurement excludes application-side packing.
+CTest and GitHub Actions. The difference between
+`oneshot_nonblocking_ms_p50_max` and `reused_nonblocking_ms_p50_max`
+captures the request-layout and buffer-allocation cost removed from steady-state
+nonblocking exchange. The packed measurement excludes application-side packing.
