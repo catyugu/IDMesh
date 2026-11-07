@@ -337,6 +337,7 @@ namespace idmesh::mpi {
         const Context& context, const std::string& path,
         BuildOptions options)
     {
+        ::idmesh::mpi::detail::require_active();
         const int rank = context.rank(), size = context.size();
         const MPI_Comm comm = context.data_->comm;
         auto* profile = active_profile;

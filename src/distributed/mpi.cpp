@@ -12,14 +12,6 @@
 #include <utility>
 
 namespace idmesh::mpi {
-    namespace {
-        void ensure_initialized()
-        {
-            int initialized = 0;
-            ::idmesh::mpi::detail::check_mpi(MPI_Initialized(&initialized), "MPI_Initialized");
-            ::idmesh::detail::require_state(initialized != 0, "MPI must be initialized by the application");
-        }
-    } // namespace
 
     Context::Context(std::shared_ptr<Data> data)
         : data_(std::move(data))
@@ -28,7 +20,7 @@ namespace idmesh::mpi {
 
     Context Context::world()
     {
-        ensure_initialized();
+        ::idmesh::mpi::detail::require_active();
         auto data = std::make_shared<Data>();
         ::idmesh::mpi::detail::check_mpi(MPI_Comm_dup(MPI_COMM_WORLD, &data->comm), "MPI_Comm_dup");
         ::idmesh::mpi::detail::check_mpi(
@@ -40,7 +32,7 @@ namespace idmesh::mpi {
 
     Context Context::from_fortran_handle(std::int64_t handle)
     {
-        ensure_initialized();
+        ::idmesh::mpi::detail::require_active();
         if (handle < std::numeric_limits<MPI_Fint>::min()
             || handle > std::numeric_limits<MPI_Fint>::max())
             throw std::out_of_range("MPI Fortran communicator handle");
@@ -89,14 +81,15 @@ namespace idmesh::mpi {
         int finalized = 0;
         if (MPI_Finalized(&finalized) != MPI_SUCCESS || finalized)
             return;
-        if (request == MPI_REQUEST_NULL
-            || MPI_Wait(&request, MPI_STATUS_IGNORE) == MPI_SUCCESS)
-            unpack();
+        // Complete transport without touching caller-owned records.
+        // Only an explicit wait() makes received ghosts visible.
+        if (request != MPI_REQUEST_NULL)
+            (void)MPI_Wait(&request, MPI_STATUS_IGNORE);
     }
 
     void ExchangeRequest::start(std::span<std::byte> records)
     {
-        ensure_initialized();
+        ::idmesh::mpi::detail::require_active();
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange request");
         ::idmesh::detail::require_state(!data_->active,
             "exchange request is already active");
@@ -135,7 +128,7 @@ namespace idmesh::mpi {
 
     void ExchangeRequest::wait()
     {
-        ensure_initialized();
+        ::idmesh::mpi::detail::require_active();
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange request");
         if (!data_->active)
             return;
@@ -188,7 +181,7 @@ namespace idmesh::mpi {
     ExchangeRequest ExchangePlan::make_request(
         std::size_t bytes_per_entity) const
     {
-        ensure_initialized();
+        ::idmesh::mpi::detail::require_active();
         ::idmesh::detail::require_state(data_ != nullptr, "empty exchange plan");
         ::idmesh::detail::require_argument(bytes_per_entity > 0,
             "exchange record size must be positive");

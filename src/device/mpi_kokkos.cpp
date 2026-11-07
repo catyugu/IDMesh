@@ -24,6 +24,13 @@ namespace idmesh::mpi::kokkos {
         using DeviceBuffer = Kokkos::View<Byte*, Memory>;
         using HostBuffer = typename DeviceBuffer::HostMirror;
 
+        void check_runtime()
+        {
+            ::idmesh::detail::require_state(Kokkos::is_initialized(),
+                "Kokkos must be initialized before device halo operations");
+            ::idmesh::mpi::detail::require_active();
+        }
+
         enum class DeviceBackend : std::uint8_t {
             host,
             cuda,
@@ -91,6 +98,7 @@ namespace idmesh::mpi::kokkos {
 
         ~Data()
         {
+            // An abandoned exchange completes MPI but never writes caller data.
             if (!active || request == MPI_REQUEST_NULL)
                 return;
             int initialized = 0;
@@ -107,8 +115,7 @@ namespace idmesh::mpi::kokkos {
         const ExchangePlan& plan, std::size_t bytes_per_entity)
         : data_(std::make_unique<Data>())
     {
-        ::idmesh::detail::require_state(Kokkos::is_initialized(),
-            "initialize Kokkos before creating DeviceHaloPlan");
+        check_runtime();
         ::idmesh::detail::require_argument(
             bytes_per_entity != 0 && plan.rank_count() > 0,
             "invalid device halo record size or plan");
@@ -154,6 +161,8 @@ namespace idmesh::mpi::kokkos {
 
     bool DeviceHaloPlan::direct_device_transport_available() const
     {
+        ::idmesh::detail::require_state(data_ != nullptr, "empty device halo plan");
+        check_runtime();
         const auto backend = current_device_backend();
         return backend != DeviceBackend::host
             && gpu_aware_mpi_available(backend);
@@ -163,6 +172,7 @@ namespace idmesh::mpi::kokkos {
         void* device_data, std::size_t byte_size, DeviceTransport mode)
     {
         ::idmesh::detail::require_state(data_ != nullptr, "empty device halo plan");
+        check_runtime();
         ::idmesh::detail::require_state(!data_->active,
             "device halo exchange is already active");
         ::idmesh::detail::require_argument(
@@ -227,6 +237,7 @@ namespace idmesh::mpi::kokkos {
     void DeviceHaloPlan::wait()
     {
         ::idmesh::detail::require_state(data_ != nullptr, "empty device halo plan");
+        check_runtime();
         if (!data_->active)
             return;
 

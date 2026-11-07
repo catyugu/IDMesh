@@ -12,6 +12,8 @@
 
 namespace idmesh::mpi {
 
+    // The application owns MPI initialization and finalization. Destroy all
+    // MPI-backed objects before MPI_Finalize().
     class PartitionedMesh;
     class ExchangePlan;
     namespace kokkos {
@@ -26,8 +28,9 @@ namespace idmesh::mpi {
         ExchangeRequest(const ExchangeRequest&) = delete;
         ExchangeRequest& operator=(const ExchangeRequest&) = delete;
 
-        // Rebinds the preallocated request to packed fixed-width entity records.
-        // The byte span must remain alive until wait() completes.
+        // The caller owns records and keeps them alive until wait() returns
+        // or the request is destroyed. Only wait() updates received ghosts.
+        // Destruction of an active request waits for MPI and discards the result.
         void start(std::span<std::byte> records);
         void wait();
 
