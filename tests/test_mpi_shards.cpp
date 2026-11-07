@@ -1,4 +1,5 @@
 #include <idmesh/mpi.hpp>
+#include <idmesh/partition.hpp>
 #include <mpi.h>
 
 #include <algorithm>
@@ -97,7 +98,7 @@ namespace {
         std::vector<int> assignments;
         if (rank == 0) {
             root.emplace(source());
-            assignments = idmesh::mpi::partition_graph(*root, size);
+            assignments = idmesh::partition_graph(*root, size);
             std::vector<int> counts(size);
             for (int owner : assignments) {
                 require(owner >= 0 && owner < size, "invalid graph partition assignment");
@@ -112,7 +113,7 @@ namespace {
                     std::uint64_t(i) * size / assignments.size());
             require(edge_cut(*root, assignments) < edge_cut(*root, blocks),
                 "graph partition did not reduce the checkerboard edge cut");
-            idmesh::mpi::write_partition_shards(
+            idmesh::write_partition_shards(
                 *root, assignments, ghost_depth, prefix);
             // Destroy the global source before any Rank reads its shard.
             root.reset();

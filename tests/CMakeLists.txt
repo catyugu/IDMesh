@@ -10,6 +10,7 @@ idmesh_add_core_test(idmesh_contracts_test test_contracts.cpp idmesh.contracts)
 idmesh_add_core_test(idmesh_formats_test test_formats.cpp idmesh.formats)
 idmesh_add_core_test(idmesh_geometry_test test_geometry.cpp idmesh.geometry)
 idmesh_add_core_test(idmesh_quadratic_io_test test_quadratic_io.cpp idmesh.quadratic_io)
+idmesh_add_core_test(idmesh_partition_test test_partition.cpp idmesh.partition)
 
 # Source LANGUAGE properties are directory-scoped: set them where the
 # CUDA/HIP test targets are declared, not only in the root CMakeLists.
