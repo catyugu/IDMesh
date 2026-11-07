@@ -237,17 +237,24 @@ namespace idmesh::mpi {
     }
 
     void ExchangePlan::exchange_packed(
-        const void* send, void* receive, Index components,
+        const void* send, void* receive,
+        std::span<const int> send_counts, std::span<const int> receive_counts,
+        std::span<const int> send_offsets, std::span<const int> receive_offsets,
         DeviceMemoryKind memory) const
     {
         ensure_initialized();
-        ::idmesh::detail::require_argument(data_ != nullptr && components > 0, "invalid packed halo exchange");
+        const auto peers = static_cast<std::size_t>(rank_count());
+        ::idmesh::detail::require_argument(
+            data_ != nullptr
+                && send_counts.size() == peers && receive_counts.size() == peers
+                && send_offsets.size() == peers && receive_offsets.size() == peers,
+            "invalid packed halo layout");
         if (!direct_memory_supported(memory))
             throw std::runtime_error("MPI is not GPU aware for the requested memory space");
-        std::vector<int> sc, rc, sd, rd;
-        scaled_layout(*data_, components, sc, rc, sd, rd);
-        ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(send, sc.data(), sd.data(), MPI_DOUBLE,
-                                             receive, rc.data(), rd.data(), MPI_DOUBLE, data_->comm),
+        ::idmesh::mpi::detail::check_mpi(
+            MPI_Alltoallv(send, send_counts.data(), send_offsets.data(), MPI_DOUBLE,
+                receive, receive_counts.data(), receive_offsets.data(), MPI_DOUBLE,
+                data_->comm),
             "MPI_Alltoallv");
     }
 

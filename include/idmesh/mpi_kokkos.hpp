@@ -21,6 +21,12 @@ namespace idmesh::mpi::kokkos {
     class IDMESH_MPI_KOKKOS_API DeviceHaloPlan {
     public:
         DeviceHaloPlan(const ExchangePlan& plan, Index components = 1);
+        ~DeviceHaloPlan();
+        DeviceHaloPlan(DeviceHaloPlan&&) noexcept;
+        DeviceHaloPlan& operator=(DeviceHaloPlan&&) noexcept;
+        DeviceHaloPlan(const DeviceHaloPlan&) = delete;
+        DeviceHaloPlan& operator=(const DeviceHaloPlan&) = delete;
+
         Index component_count() const noexcept;
         bool direct_device_transport_available() const;
         // Blocking collective. Device packing/unpacking use Kokkos kernels.
@@ -30,7 +36,7 @@ namespace idmesh::mpi::kokkos {
 
     private:
         struct Data;
-        std::shared_ptr<Data> data_;
+        std::unique_ptr<Data> data_;
     };
 
 } // namespace idmesh::mpi::kokkos

@@ -243,9 +243,10 @@ supports `automatic`, `host_staging`, and `require_gpu_aware` transports.
 When using Open MPI, capability is queried via
 `MPIX_Query_cuda_support` / `MPIX_Query_rocm_support`, when present.
 Direct transport fences the device pack kernel before entering MPI and
-the unpack kernel after MPI. host staging copies packed values through
-mirror Views, preserving operation ordering even when the MPI runtime
-does not support direct GPU pointers.
+the unpack kernel after MPI. Host staging owns persistent host mirrors and
+precomputed MPI counts/displacements in `DeviceHaloPlan`; steady-state
+exchange performs pack, deep copies, MPI transport and unpack without
+IDMesh-side allocation.
 
 The default CMake backend is `SERIAL`. The optional CUDA/HIP modes
 compile the Kokkos adapter sources in the CUDA/HIP CMake language and

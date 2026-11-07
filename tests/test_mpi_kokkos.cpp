@@ -39,6 +39,7 @@ namespace {
         field.upload(initial);
         idmesh::mpi::kokkos::DeviceHaloPlan plan(partition.exchange_plan(), 2);
         plan.exchange(field, mode);
+        plan.exchange(field, mode);
         const auto values = field.download();
         for (idmesh::Index i = 0; i < count; ++i) {
             const auto id = partition.global_ids(partition.mesh().dimension())[i];

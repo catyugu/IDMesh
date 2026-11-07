@@ -20,6 +20,9 @@ namespace idmesh::mpi {
 
     class PartitionedMesh;
     class ExchangePlan;
+    namespace kokkos {
+        class DeviceHaloPlan;
+    }
 
     class IDMESH_MPI_API ExchangeRequest {
     public:
@@ -76,18 +79,17 @@ namespace idmesh::mpi {
         std::span<const Index> receive_indices(int peer) const;
         bool direct_memory_supported(DeviceMemoryKind memory) const;
 
-        // Buffers are packed peer-by-peer in exactly send_indices()/
-        // receive_indices() order. Non-host pointers require explicit support
-        // from the MPI implementation.
-        void exchange_packed(const void* send, void* receive, Index components,
-            DeviceMemoryKind memory) const;
-
     private:
         struct Data;
         std::shared_ptr<Data> data_;
         explicit ExchangePlan(std::shared_ptr<Data> data);
+        void exchange_packed(const void* send, void* receive,
+            std::span<const int> send_counts, std::span<const int> receive_counts,
+            std::span<const int> send_offsets, std::span<const int> receive_offsets,
+            DeviceMemoryKind memory) const;
         friend class PartitionedMesh;
         friend class ExchangeRequest;
+        friend class kokkos::DeviceHaloPlan;
         friend PartitionedMesh partition_replicated(
             const Context&, const Mesh&, Index);
         friend PartitionedMesh read_partition_shard(

@@ -149,11 +149,10 @@ publication-quality measurements still belong on a controlled host.
 
 
 When MPI is enabled, `idmesh_mpi_benchmark` measures the reusable host
-request path created by `make_request` and the already-packed
-`ExchangePlan::exchange_packed` transport baseline. It reports `start`
-(pack + nonblocking launch), `wait` (completion + unpack), and their combined
-latency. Each median is reduced with `MPI_MAX`, so the printed value represents
-the slowest rank.
+request path created by `make_request`. It reports `start` (pack +
+nonblocking launch), `wait` (completion + unpack), and their combined latency.
+Each median is reduced with `MPI_MAX`, so the printed value represents the
+slowest rank.
 
 ```sh
 cmake -S . -B build-mpi-bench -DCMAKE_BUILD_TYPE=Release \
@@ -167,5 +166,9 @@ mpiexec -n 4 ./build-mpi-bench/benchmarks/idmesh_mpi_benchmark \
 ```
 
 Run the benchmark on controlled hosts for publication-quality comparisons.
-The packed measurement excludes application-side packing and therefore serves
-as a transport baseline for the reusable request's end-to-end host cost.
+
+When both MPI and Kokkos are enabled, `idmesh_mpi_kokkos_benchmark` forces
+`DeviceTransport::host_staging` and measures the steady-state device halo path.
+The `DeviceHaloPlan` itself is constructed before timing, so the reported
+latency excludes one-time rank-index mirrors, MPI layout construction, and
+persistent host/device buffer allocation.
