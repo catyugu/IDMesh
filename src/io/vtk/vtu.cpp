@@ -616,19 +616,7 @@ namespace idmesh::vtk {
             "CellData", cell_count,
             cell_fields, true);
 
-        const auto field_body
-            = detail::vtk::xml_element_body(piece, "FieldData", false);
-        if (!field_body.empty()) {
-            for (const auto& array : data_arrays(field_body)) {
-                const auto field_name = std::string(
-                    detail::vtk::xml_required_attribute(array.attributes, "Name"));
-                auto values = decode_array(
-                    array, std::size_t {1}, appended,
-                    endian, header_width);
-                mesh_fields.emplace_back(
-                    field_name, std::move(values));
-            }
-        }
+        read_field_section("FieldData", 1, mesh_fields, false);
 
         if (physical_tags) {
             for (std::size_t cell = 0;
@@ -648,52 +636,34 @@ namespace idmesh::vtk {
 
         data::State state;
         std::set<std::pair<int, std::string>> seen;
-        for (auto& [name, values] : point_fields) {
-            ::idmesh::detail::require_runtime(
-                name != physical_tag_name
-                    && name != time_name
-                    && name != cycle_name
-                    && seen.emplace(0, name).second,
-                "reserved or duplicate VTU PointData name");
-            auto field = make_field(
-                std::move(name), data::geometry_nodes(),
-                detail::vtk::reorder_point_array(
-                    std::move(values),
-                    built.point_to_geometry));
-            data::validate(built.mesh, field.view());
-            state.fields.push_back(std::move(field));
-        }
-
-        for (auto& [name, values] : cell_fields) {
-            ::idmesh::detail::require_runtime(
-                !built.has_lower_cells,
-                "VTU CellData cannot be mapped exactly when lower-dimensional cells are present");
-            ::idmesh::detail::require_runtime(
-                name != physical_tag_name
-                    && name != time_name
-                    && name != cycle_name
-                    && seen.emplace(1, name).second,
-                "reserved or duplicate VTU CellData name");
-            auto field = make_field(
-                std::move(name),
-                data::entities(built.mesh.dimension()),
-                std::move(values));
-            data::validate(built.mesh, field.view());
-            state.fields.push_back(std::move(field));
-        }
-
-        for (auto& [name, values] : mesh_fields) {
-            if (detail::vtk::read_state_metadata(state, name, values))
-                continue;
-            ::idmesh::detail::require_runtime(
-                name != physical_tag_name
-                    && seen.emplace(2, name).second,
-                "reserved or duplicate VTU FieldData name");
-            auto field = make_field(
-                std::move(name), data::whole_mesh(),
-                std::move(values));
-            data::validate(built.mesh, field.view());
-            state.fields.push_back(std::move(field));
+        for (int domain = 0; domain < 3; ++domain) {
+            auto& fields = domain == 0 ? point_fields
+                : domain == 1 ? cell_fields : mesh_fields;
+            for (auto& [name, values] : fields) {
+                if (domain == 2
+                    && detail::vtk::read_state_metadata(state, name, values))
+                    continue;
+                if (domain == 1)
+                    ::idmesh::detail::require_runtime(
+                        !built.has_lower_cells,
+                        "VTU CellData cannot be mapped exactly when lower-dimensional cells are present");
+                ::idmesh::detail::require_runtime(
+                    name != physical_tag_name
+                        && (domain == 2
+                            || (name != time_name && name != cycle_name))
+                        && seen.emplace(domain, name).second,
+                    "reserved or duplicate VTU field name");
+                const auto location = domain == 0 ? data::geometry_nodes()
+                    : domain == 1 ? data::entities(built.mesh.dimension())
+                                  : data::whole_mesh();
+                if (domain == 0)
+                    values = detail::vtk::reorder_point_array(
+                        std::move(values), built.point_to_geometry);
+                auto field = make_field(
+                    std::move(name), location, std::move(values));
+                data::validate(built.mesh, field.view());
+                state.fields.push_back(std::move(field));
+            }
         }
 
         return {
