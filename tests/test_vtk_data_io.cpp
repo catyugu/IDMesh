@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <iostream>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -225,6 +226,7 @@ namespace {
                           ? "BINARY"
                           : "ASCII"),
             "legacy encoding header");
+        in.close();
         std::filesystem::remove(path);
     }
 
@@ -255,6 +257,7 @@ namespace {
             check(contents.find("<AppendedData encoding=\"raw\">_")
                     != std::string::npos,
                 "VTU appended encoding");
+        in.close();
         std::filesystem::remove(path);
     }
 
@@ -347,22 +350,36 @@ namespace {
 
 int main()
 {
-    legacy_round_trip(
-        vtk::LegacyEncoding::ascii,
-        "idmesh-data-ascii.vtk");
-    legacy_round_trip(
-        vtk::LegacyEncoding::binary,
-        "idmesh-data-binary.vtk");
-    vtu_round_trip(
-        vtk::VtuEncoding::ascii,
-        "idmesh-data-ascii.vtu");
-    vtu_round_trip(
-        vtk::VtuEncoding::inline_binary,
-        "idmesh-data-inline.vtu");
-    vtu_round_trip(
-        vtk::VtuEncoding::appended_raw,
-        "idmesh-data-appended.vtu");
-    vtu_uint64();
-    strict_rejections();
-    return 0;
+    try {
+        std::cout << "legacy-ascii" << std::endl;
+        legacy_round_trip(
+            vtk::LegacyEncoding::ascii,
+            "idmesh-data-ascii.vtk");
+        std::cout << "legacy-binary" << std::endl;
+        legacy_round_trip(
+            vtk::LegacyEncoding::binary,
+            "idmesh-data-binary.vtk");
+        std::cout << "vtu-ascii" << std::endl;
+        vtu_round_trip(
+            vtk::VtuEncoding::ascii,
+            "idmesh-data-ascii.vtu");
+        std::cout << "vtu-inline" << std::endl;
+        vtu_round_trip(
+            vtk::VtuEncoding::inline_binary,
+            "idmesh-data-inline.vtu");
+        std::cout << "vtu-appended" << std::endl;
+        vtu_round_trip(
+            vtk::VtuEncoding::appended_raw,
+            "idmesh-data-appended.vtu");
+        std::cout << "vtu-u64" << std::endl;
+        vtu_uint64();
+        std::cout << "strict-rejections" << std::endl;
+        strict_rejections();
+        return 0;
+    }
+    catch (const std::exception& error) {
+        std::cerr << "VTK data IO test failure: "
+                  << error.what() << std::endl;
+        return 1;
+    }
 }
