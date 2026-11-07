@@ -4,9 +4,11 @@
 #include "mpi_internal.hpp"
 
 #include <Kokkos_Core.hpp>
-#include <climits>
 #include <cstdint>
 #include <mpi.h>
+#if defined(OPEN_MPI) && __has_include(<mpi-ext.h>)
+#include <mpi-ext.h>
+#endif
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -19,15 +21,34 @@ namespace idmesh::mpi::kokkos {
         using DeviceBuffer = Kokkos::View<double*, Memory>;
         using HostBuffer = typename DeviceBuffer::HostMirror;
 
-        DeviceMemoryKind current_memory_kind()
+        enum class DeviceBackend : std::uint8_t {
+            host,
+            cuda,
+            hip
+        };
+
+        DeviceBackend current_device_backend()
         {
 #if defined(KOKKOS_ENABLE_CUDA)
-            return DeviceMemoryKind::cuda;
+            return DeviceBackend::cuda;
 #elif defined(KOKKOS_ENABLE_HIP)
-            return DeviceMemoryKind::hip;
+            return DeviceBackend::hip;
 #else
-            return DeviceMemoryKind::host;
+            return DeviceBackend::host;
 #endif
+        }
+
+        bool gpu_aware_mpi_available(DeviceBackend backend)
+        {
+#if defined(OMPI_HAVE_MPI_EXT_CUDA) && OMPI_HAVE_MPI_EXT_CUDA
+            if (backend == DeviceBackend::cuda)
+                return MPIX_Query_cuda_support() == 1;
+#endif
+#if defined(OMPI_HAVE_MPI_EXT_ROCM) && OMPI_HAVE_MPI_EXT_ROCM
+            if (backend == DeviceBackend::hip)
+                return MPIX_Query_rocm_support() == 1;
+#endif
+            return false;
         }
 
         template <class T>
@@ -42,39 +63,6 @@ namespace idmesh::mpi::kokkos {
             return device;
         }
 
-        void make_layout(const ExchangePlan& plan, Index components,
-            std::vector<int>& send_counts, std::vector<int>& receive_counts,
-            std::vector<int>& send_offsets, std::vector<int>& receive_offsets)
-        {
-            const int peers = plan.rank_count();
-            send_counts.resize(peers);
-            receive_counts.resize(peers);
-            send_offsets.resize(peers);
-            receive_offsets.resize(peers);
-
-            int send_offset = 0;
-            int receive_offset = 0;
-            for (int peer = 0; peer < peers; ++peer) {
-                const auto sending = plan.send_indices(peer).size();
-                const auto receiving = plan.receive_indices(peer).size();
-                ::idmesh::detail::require_argument(
-                    sending <= static_cast<std::size_t>(INT_MAX) / components
-                        && receiving <= static_cast<std::size_t>(INT_MAX) / components,
-                    "device halo peer record count exceeds MPI int range");
-                const int send_count = static_cast<int>(sending * components);
-                const int receive_count = static_cast<int>(receiving * components);
-                ::idmesh::detail::require_argument(
-                    send_offset <= INT_MAX - send_count
-                        && receive_offset <= INT_MAX - receive_count,
-                    "device halo displacement overflow");
-                send_counts[peer] = send_count;
-                receive_counts[peer] = receive_count;
-                send_offsets[peer] = send_offset;
-                receive_offsets[peer] = receive_offset;
-                send_offset += send_count;
-                receive_offset += receive_count;
-            }
-        }
     } // namespace
 
     struct DeviceHaloPlan::Data {
@@ -136,7 +124,7 @@ namespace idmesh::mpi::kokkos {
 
         data_->sending = static_cast<Index>(send.size());
         data_->receiving = static_cast<Index>(receive.size());
-        make_layout(plan, components,
+        plan.data_->scaled_layout(components,
             data_->send_counts, data_->receive_counts,
             data_->send_offsets, data_->receive_offsets);
 
@@ -164,9 +152,9 @@ namespace idmesh::mpi::kokkos {
 
     bool DeviceHaloPlan::direct_device_transport_available() const
     {
-        const auto memory = current_memory_kind();
-        return memory != DeviceMemoryKind::host
-            && data_->plan.direct_memory_supported(memory);
+        const auto backend = current_device_backend();
+        return backend != DeviceBackend::host
+            && gpu_aware_mpi_available(backend);
     }
 
     void DeviceHaloPlan::start(idmesh::kokkos::DeviceField& field,
@@ -180,11 +168,11 @@ namespace idmesh::mpi::kokkos {
                 && field.component_count() == data_->components,
             "halo field shape does not match plan");
 
-        const auto memory = current_memory_kind();
-        const bool direct = memory == DeviceMemoryKind::host
-            || data_->plan.direct_memory_supported(memory);
+        const auto backend = current_device_backend();
+        const bool host_memory = backend == DeviceBackend::host;
+        const bool direct = host_memory || gpu_aware_mpi_available(backend);
         if (mode == DeviceTransport::require_gpu_aware
-            && (memory == DeviceMemoryKind::host || !direct))
+            && (host_memory || !direct))
             throw std::runtime_error("no GPU-aware MPI available for device halo");
         const bool use_direct = mode != DeviceTransport::host_staging && direct;
 

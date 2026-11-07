@@ -36,47 +36,6 @@ namespace idmesh::mpi {
         }
     } // namespace
 
-    namespace {
-        void scaled_layout(const auto& data, Index components,
-            std::vector<int>& send_counts, std::vector<int>& recv_counts,
-            std::vector<int>& send_offsets, std::vector<int>& recv_offsets)
-        {
-            const int peers = static_cast<int>(data.send.size());
-            send_counts.resize(peers);
-            recv_counts.resize(peers);
-            send_offsets.resize(peers);
-            recv_offsets.resize(peers);
-            for (int peer = 0; peer < peers; ++peer) {
-                ::idmesh::detail::require_argument(
-                    data.send_records[peer] <= INT_MAX / components
-                        && data.recv_records[peer] <= INT_MAX / components
-                        && data.send_record_offsets[peer] <= INT_MAX / components
-                        && data.recv_record_offsets[peer] <= INT_MAX / components,
-                    "halo exchange exceeds MPI count/displacement limits");
-                send_counts[peer] = data.send_records[peer] * static_cast<int>(components);
-                recv_counts[peer] = data.recv_records[peer] * static_cast<int>(components);
-                send_offsets[peer] = data.send_record_offsets[peer] * static_cast<int>(components);
-                recv_offsets[peer] = data.recv_record_offsets[peer] * static_cast<int>(components);
-            }
-        }
-
-        bool query_direct_device_memory(DeviceMemoryKind memory)
-        {
-            if (memory == DeviceMemoryKind::host)
-                return true;
-#if defined(OMPI_HAVE_MPI_EXT_CUDA) && OMPI_HAVE_MPI_EXT_CUDA
-            if (memory == DeviceMemoryKind::cuda)
-                return MPIX_Query_cuda_support() == 1;
-#endif
-#if defined(OMPI_HAVE_MPI_EXT_ROCM) && OMPI_HAVE_MPI_EXT_ROCM
-            if (memory == DeviceMemoryKind::hip)
-                return MPIX_Query_rocm_support() == 1;
-#endif
-            return false;
-        }
-
-    } // namespace
-
     Context::Context(std::shared_ptr<Data> data)
         : data_(std::move(data))
     {
@@ -231,11 +190,6 @@ namespace idmesh::mpi {
         return data_->recv[peer];
     }
 
-    bool ExchangePlan::direct_memory_supported(DeviceMemoryKind memory) const
-    {
-        return data_ != nullptr && query_direct_device_memory(memory);
-    }
-
     ExchangeRequest ExchangePlan::make_request(Index components) const
     {
         ensure_initialized();
@@ -246,7 +200,7 @@ namespace idmesh::mpi {
         auto request = std::make_unique<ExchangeRequest::Data>();
         request->plan = *this;
         request->components = components;
-        scaled_layout(*data_, components,
+        data_->scaled_layout(components,
             request->send_counts, request->recv_counts,
             request->send_offsets, request->recv_offsets);
 

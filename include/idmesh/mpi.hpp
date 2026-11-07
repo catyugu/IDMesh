@@ -12,12 +12,6 @@
 
 namespace idmesh::mpi {
 
-    enum class DeviceMemoryKind : std::uint8_t {
-        host,
-        cuda,
-        hip
-    };
-
     class PartitionedMesh;
     class ExchangePlan;
     namespace kokkos {
@@ -77,7 +71,6 @@ namespace idmesh::mpi {
         Index local_cell_count() const noexcept;
         std::span<const Index> send_indices(int peer) const;
         std::span<const Index> receive_indices(int peer) const;
-        bool direct_memory_supported(DeviceMemoryKind memory) const;
 
     private:
         struct Data;

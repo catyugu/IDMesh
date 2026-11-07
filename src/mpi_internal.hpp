@@ -2,6 +2,7 @@
 #include "idmesh/mpi.hpp"
 #include <mpi.h>
 #include <climits>
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -33,6 +34,33 @@ namespace idmesh::mpi {
         Index local_cells = 0;
         MPI_Comm comm = MPI_COMM_NULL;
         std::shared_ptr<void> context_owner;
+
+        void scaled_layout(Index components,
+            std::vector<int>& send_counts, std::vector<int>& recv_counts,
+            std::vector<int>& send_offsets, std::vector<int>& recv_offsets) const
+        {
+            if (components == 0)
+                throw std::invalid_argument("halo component count must be positive");
+            const auto width = static_cast<std::uint64_t>(components);
+            const int peers = static_cast<int>(send.size());
+            send_counts.resize(peers);
+            recv_counts.resize(peers);
+            send_offsets.resize(peers);
+            recv_offsets.resize(peers);
+            for (int peer = 0; peer < peers; ++peer) {
+                const auto send_count = static_cast<std::uint64_t>(send_records[peer]) * width;
+                const auto recv_count = static_cast<std::uint64_t>(recv_records[peer]) * width;
+                const auto send_offset = static_cast<std::uint64_t>(send_record_offsets[peer]) * width;
+                const auto recv_offset = static_cast<std::uint64_t>(recv_record_offsets[peer]) * width;
+                if (send_count > INT_MAX || recv_count > INT_MAX
+                    || send_offset > INT_MAX || recv_offset > INT_MAX)
+                    throw std::length_error("halo exchange exceeds MPI count/displacement limits");
+                send_counts[peer] = static_cast<int>(send_count);
+                recv_counts[peer] = static_cast<int>(recv_count);
+                send_offsets[peer] = static_cast<int>(send_offset);
+                recv_offsets[peer] = static_cast<int>(recv_offset);
+            }
+        }
 
         void finalize_layout()
         {
