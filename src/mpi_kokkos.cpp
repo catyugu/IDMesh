@@ -126,8 +126,10 @@ namespace idmesh::mpi::kokkos {
         const auto receive_values = receive.size() * components;
         data_->send_buffer = DeviceBuffer("idmesh_device_halo_send", send_values);
         data_->receive_buffer = DeviceBuffer("idmesh_device_halo_receive", receive_values);
-        data_->host_send_buffer = HostBuffer("idmesh_host_halo_send", send_values);
-        data_->host_receive_buffer = HostBuffer("idmesh_host_halo_receive", receive_values);
+        // create_mirror_view aliases host-accessible device storage and allocates
+        // staging storage only when the execution memory is not host accessible.
+        data_->host_send_buffer = Kokkos::create_mirror_view(data_->send_buffer);
+        data_->host_receive_buffer = Kokkos::create_mirror_view(data_->receive_buffer);
         Execution().fence();
     }
 

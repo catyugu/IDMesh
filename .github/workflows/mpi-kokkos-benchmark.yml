@@ -1,5 +1,7 @@
 name: MPI Kokkos benchmark
 
+# Same-runner baseline for persistent mirror/layout changes.
+
 on:
   push:
     branches: [main]
