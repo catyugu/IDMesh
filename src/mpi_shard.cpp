@@ -7,22 +7,17 @@
 
 #include <algorithm>
 #include <array>
-#include <climits>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <fstream>
 #include <iomanip>
-#include <limits>
 #include <map>
 #include <mpi.h>
-#include <numeric>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -35,7 +30,8 @@ namespace idmesh::mpi {
 
         double milliseconds(Clock::time_point begin, Clock::time_point end)
         {
-            return std::chrono::duration<double, std::milli>(end - begin).count();
+            return std::chrono::duration<double, std::milli>(
+                end - begin).count();
         }
 
         struct ProfileBinding {
@@ -50,73 +46,25 @@ namespace idmesh::mpi {
             detail::ShardReadProfile* previous = nullptr;
         };
 
-        template <class T>
-        struct Received {
-            std::vector<T> values;
-            std::vector<int> counts;
-            std::vector<int> offsets;
-        };
-
-        template <class T>
-        Received<T> exchange_records(MPI_Comm comm,
-            const std::vector<std::vector<T>>& sends,
-            std::uint64_t* sent_bytes = nullptr,
-            std::uint64_t* received_bytes = nullptr)
-        {
-            static_assert(std::is_trivially_copyable_v<T>);
-            int size = 0;
-            ::idmesh::mpi::detail::check_mpi(MPI_Comm_size(comm, &size), "MPI_Comm_size");
-            ::idmesh::detail::require_argument(sends.size() == static_cast<std::size_t>(size),
-                "MPI record destination count mismatch");
-            std::vector<int> sc(size), rc(size), sd(size), rd(size);
-            for (int peer = 0; peer < size; ++peer) {
-                ::idmesh::detail::require_argument(sends[peer].size() <= static_cast<std::size_t>(INT_MAX) / sizeof(T),
-                    "MPI record message exceeds int count");
-                sc[peer] = static_cast<int>(sends[peer].size() * sizeof(T));
-            }
-            ::idmesh::mpi::detail::check_mpi(MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT,
-                                                 comm),
-                "MPI_Alltoall");
-            std::size_t ns = 0, nr = 0;
-            for (int peer = 0; peer < size; ++peer) {
-                ::idmesh::detail::require_argument(rc[peer] >= 0 && rc[peer] % sizeof(T) == 0,
-                    "invalid MPI record message byte count");
-                ::idmesh::detail::require_argument(ns <= static_cast<std::size_t>(INT_MAX) - sc[peer] && nr <= static_cast<std::size_t>(INT_MAX) - rc[peer],
-                    "MPI_Alltoallv displacement exceeds int range");
-                sd[peer] = static_cast<int>(ns);
-                rd[peer] = static_cast<int>(nr);
-                ns += sc[peer];
-                nr += rc[peer];
-            }
-            if (sent_bytes)
-                *sent_bytes += static_cast<std::uint64_t>(ns);
-            if (received_bytes)
-                *received_bytes += static_cast<std::uint64_t>(nr);
-            std::vector<T> send_data(ns / sizeof(T)), recv_data(nr / sizeof(T));
-            std::size_t write = 0;
-            for (const auto& bucket : sends) {
-                std::copy(bucket.begin(), bucket.end(), send_data.begin() + write);
-                write += bucket.size();
-            }
-            ::idmesh::mpi::detail::check_mpi(MPI_Alltoallv(send_data.data(), sc.data(), sd.data(), MPI_BYTE,
-                                                 recv_data.data(), rc.data(), rd.data(), MPI_BYTE, comm),
-                "MPI_Alltoallv");
-            Received<T> result;
-            result.values = std::move(recv_data);
-            result.counts.resize(size);
-            result.offsets.resize(size);
-            for (int peer = 0; peer < size; ++peer) {
-                result.counts[peer] = rc[peer] / static_cast<int>(sizeof(T));
-                result.offsets[peer] = rd[peer] / static_cast<int>(sizeof(T));
-            }
-            return result;
-        }
-
         struct Cell {
             std::uint64_t id = 0;
             int owner = -1;
             CellType type = CellType::segment;
             std::vector<std::uint64_t> geometry;
+        };
+
+        struct EntityIdentity {
+            Index dimension = 0;
+            std::uint64_t id = 0;
+            int owner = -1;
+            std::vector<std::uint64_t> vertices;
+        };
+
+        struct HaloRecord {
+            Index dimension = 0;
+            int peer = -1;
+            std::vector<std::uint64_t> send;
+            std::vector<std::uint64_t> receive;
         };
 
         struct Label {
@@ -129,8 +77,11 @@ namespace idmesh::mpi {
             Index dimension = 0;
             Index geometric_dimension = 0;
             std::map<std::uint64_t, std::array<double, 3>> vertices;
+            std::map<std::uint64_t, int> vertex_owners;
             std::map<std::uint64_t, std::array<double, 3>> geometry_nodes;
             std::vector<Cell> cells;
+            std::vector<EntityIdentity> entities;
+            std::vector<HaloRecord> halos;
             std::vector<Label> labels;
             std::map<std::pair<Index, int>, std::string> label_names;
         };
@@ -138,206 +89,258 @@ namespace idmesh::mpi {
         Shard parse_shard(const std::string& path, int rank, int size)
         {
             std::ifstream file(path);
-            ::idmesh::detail::require_runtime(static_cast<bool>(file), "cannot open local IDMesh partition shard");
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file),
+                "cannot open local IDMesh partition shard");
+
             Shard shard;
             std::string word;
             int version = 0;
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> version) && word == "IDMESH_SHARD" && version == 2, "invalid IDMesh shard version");
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> shard.dimension >> shard.geometric_dimension) && word == "DIM" && shard.dimension >= 1 && shard.dimension <= 3 && shard.geometric_dimension >= shard.dimension && shard.geometric_dimension <= 3, "invalid shard dimensions");
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> version)
+                    && word == "IDMESH_SHARD" && version == 3,
+                "invalid IDMesh shard version");
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> shard.dimension
+                    >> shard.geometric_dimension)
+                    && word == "DIM"
+                    && shard.dimension >= 1 && shard.dimension <= 3
+                    && shard.geometric_dimension >= shard.dimension
+                    && shard.geometric_dimension <= 3,
+                "invalid shard dimensions");
+
             std::size_t count = 0;
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "VERTICES" && count < invalid_index, "invalid shard VERTICES section");
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> count)
+                    && word == "VERTICES" && count < invalid_index,
+                "invalid shard VERTICES section");
             for (std::size_t i = 0; i < count; ++i) {
                 std::uint64_t id = 0;
+                int owner = -1;
                 std::array<double, 3> p {};
-                ::idmesh::detail::require_runtime(static_cast<bool>(file >> id >> p[0] >> p[1] >> p[2]),
-                    "truncated shard vertex");
-                ::idmesh::detail::require_argument(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]),
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> id >> owner
+                        >> p[0] >> p[1] >> p[2])
+                        && owner >= 0 && owner < size,
+                    "truncated or invalid shard vertex");
+                ::idmesh::detail::require_argument(
+                    std::isfinite(p[0]) && std::isfinite(p[1])
+                        && std::isfinite(p[2]),
                     "nonfinite shard vertex");
-                ::idmesh::detail::require_runtime(shard.vertices.emplace(id, p).second, "duplicate shard vertex");
+                ::idmesh::detail::require_runtime(
+                    shard.vertices.emplace(id, p).second
+                        && shard.vertex_owners.emplace(id, owner).second,
+                    "duplicate shard vertex");
             }
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "GEOMETRY_NODES" && count < invalid_index, "invalid GEOMETRY_NODES section");
+
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> count)
+                    && word == "GEOMETRY_NODES"
+                    && count < invalid_index,
+                "invalid GEOMETRY_NODES section");
             for (std::size_t i = 0; i < count; ++i) {
                 std::uint64_t id = 0;
                 std::array<double, 3> p {};
-                ::idmesh::detail::require_runtime(static_cast<bool>(file >> id >> p[0] >> p[1] >> p[2]),
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> id
+                        >> p[0] >> p[1] >> p[2]),
                     "truncated shard high-order node");
-                ::idmesh::detail::require_argument(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]),
+                ::idmesh::detail::require_argument(
+                    std::isfinite(p[0]) && std::isfinite(p[1])
+                        && std::isfinite(p[2]),
                     "nonfinite high-order node");
-                ::idmesh::detail::require_runtime(shard.geometry_nodes.emplace(id, p).second,
+                ::idmesh::detail::require_runtime(
+                    shard.geometry_nodes.emplace(id, p).second,
                     "duplicate shard high-order node");
             }
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "CELLS" && count < invalid_index, "invalid shard CELLS section");
-            std::set<std::uint64_t> seen;
+
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> count)
+                    && word == "CELLS" && count < invalid_index,
+                "invalid shard CELLS section");
+            std::set<std::uint64_t> seen_cells;
             for (std::size_t i = 0; i < count; ++i) {
                 Cell cell;
                 unsigned type = 0;
                 std::size_t nodes = 0;
-                ::idmesh::detail::require_runtime(static_cast<bool>(file >> cell.id >> cell.owner >> type >> nodes), "invalid shard cell header");
-                ::idmesh::detail::require_runtime(cell.owner >= 0 && cell.owner < size && type >= static_cast<unsigned>(CellType::segment) && type <= static_cast<unsigned>(CellType::pyramid),
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> cell.id >> cell.owner
+                        >> type >> nodes),
+                    "invalid shard cell header");
+                ::idmesh::detail::require_runtime(
+                    cell.owner >= 0 && cell.owner < size
+                        && type
+                            >= static_cast<unsigned>(CellType::segment)
+                        && type
+                            <= static_cast<unsigned>(CellType::pyramid),
                     "invalid shard cell owner or type");
                 cell.type = static_cast<CellType>(type);
-                ::idmesh::detail::require_argument(cell_dimension(cell.type) == shard.dimension && nodes >= cell_vertex_count(cell.type) && nodes <= 27,
+                ::idmesh::detail::require_argument(
+                    cell_dimension(cell.type) == shard.dimension
+                        && nodes >= cell_vertex_count(cell.type)
+                        && nodes <= 27,
                     "invalid cell dimension or geometry arity");
                 cell.geometry.resize(nodes);
                 for (auto& id : cell.geometry)
-                    ::idmesh::detail::require_runtime(static_cast<bool>(file >> id), "truncated shard cell geometry");
-                for (Index j = 0; j < cell_vertex_count(cell.type); ++j)
-                    ::idmesh::detail::require_argument(shard.vertices.contains(cell.geometry[j]),
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(file >> id),
+                        "truncated shard cell geometry");
+                for (Index j = 0;
+                     j < cell_vertex_count(cell.type); ++j)
+                    ::idmesh::detail::require_argument(
+                        shard.vertices.contains(cell.geometry[j]),
                         "cell references missing global corner vertex");
-                for (std::size_t j = cell_vertex_count(cell.type); j < nodes; ++j)
-                    ::idmesh::detail::require_argument(shard.geometry_nodes.contains(cell.geometry[j]),
+                for (std::size_t j = cell_vertex_count(cell.type);
+                     j < nodes; ++j)
+                    ::idmesh::detail::require_argument(
+                        shard.geometry_nodes.contains(cell.geometry[j]),
                         "cell references missing high-order geometry node");
-                ::idmesh::detail::require_runtime(seen.insert(cell.id).second, "duplicate shard global cell ID");
+                ::idmesh::detail::require_runtime(
+                    seen_cells.insert(cell.id).second,
+                    "duplicate shard global cell ID");
                 shard.cells.push_back(std::move(cell));
             }
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "LABELS",
+
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> count)
+                    && word == "ENTITIES" && count < invalid_index,
+                "invalid shard ENTITIES section");
+            std::set<std::pair<Index, std::uint64_t>> seen_entities;
+            for (std::size_t i = 0; i < count; ++i) {
+                EntityIdentity entity;
+                std::size_t arity = 0;
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> entity.dimension
+                        >> entity.id >> entity.owner >> arity)
+                        && entity.dimension > 0
+                        && entity.dimension < shard.dimension
+                        && entity.owner >= 0 && entity.owner < size
+                        && arity >= 2 && arity < invalid_index,
+                    "invalid shard entity identity header");
+                entity.vertices.resize(arity);
+                for (auto& vertex : entity.vertices) {
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(file >> vertex),
+                        "truncated shard entity identity");
+                    ::idmesh::detail::require_runtime(
+                        shard.vertices.contains(vertex),
+                        "entity identity references missing vertex");
+                }
+                ::idmesh::detail::require_runtime(
+                    seen_entities.emplace(
+                        entity.dimension, entity.id).second,
+                    "duplicate shard entity global ID");
+                shard.entities.push_back(std::move(entity));
+            }
+
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> count)
+                    && word == "HALOS" && count < invalid_index,
+                "invalid shard HALOS section");
+            std::set<std::pair<Index, int>> seen_halos;
+            for (std::size_t i = 0; i < count; ++i) {
+                HaloRecord halo;
+                std::size_t send_count = 0, receive_count = 0;
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> halo.dimension >> halo.peer
+                        >> send_count >> receive_count)
+                        && halo.dimension <= shard.dimension
+                        && halo.peer >= 0 && halo.peer < size
+                        && halo.peer != rank
+                        && send_count < invalid_index
+                        && receive_count < invalid_index,
+                    "invalid shard halo header");
+                ::idmesh::detail::require_runtime(
+                    seen_halos.emplace(
+                        halo.dimension, halo.peer).second,
+                    "duplicate shard halo peer record");
+                halo.send.resize(send_count);
+                halo.receive.resize(receive_count);
+                for (auto& id : halo.send)
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(file >> id),
+                        "truncated shard halo send list");
+                for (auto& id : halo.receive)
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(file >> id),
+                        "truncated shard halo receive list");
+                shard.halos.push_back(std::move(halo));
+            }
+
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> count)
+                    && word == "LABELS",
                 "missing shard LABELS section");
             for (std::size_t i = 0; i < count; ++i) {
                 Label label;
                 std::size_t n = 0;
-                ::idmesh::detail::require_runtime(static_cast<bool>(file >> label.dimension >> label.value >> n) && label.dimension <= shard.dimension && n >= 1 && n <= 4,
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> label.dimension
+                        >> label.value >> n)
+                        && label.dimension <= shard.dimension
+                        && n >= 1 && n < invalid_index,
                     "invalid shard label header");
+                const bool valid_arity
+                    = label.dimension == shard.dimension
+                    || label.dimension == 0
+                    ? n == 1
+                    : label.dimension == 1 ? n == 2 : n >= 3;
+                ::idmesh::detail::require_runtime(
+                    valid_arity, "invalid shard label arity");
                 label.entities.resize(n);
                 for (auto& id : label.entities)
-                    ::idmesh::detail::require_runtime(static_cast<bool>(file >> id), "truncated shard label");
+                    ::idmesh::detail::require_runtime(
+                        static_cast<bool>(file >> id),
+                        "truncated shard label");
                 shard.labels.push_back(std::move(label));
             }
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word >> count) && word == "NAMES",
+
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word >> count)
+                    && word == "NAMES",
                 "missing shard NAMES section");
             for (std::size_t i = 0; i < count; ++i) {
                 Index dimension = 0;
                 int value = 0;
                 std::string name;
-                ::idmesh::detail::require_runtime(static_cast<bool>(file >> dimension >> value >> std::quoted(name))
+                ::idmesh::detail::require_runtime(
+                    static_cast<bool>(file >> dimension >> value
+                        >> std::quoted(name))
                         && dimension <= shard.dimension,
                     "invalid shard label name");
-                shard.label_names[{dimension, value}] = std::move(name);
+                shard.label_names[{dimension, value}]
+                    = std::move(name);
             }
-            ::idmesh::detail::require_runtime(static_cast<bool>(file >> word) && word == "END",
+
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(file >> word) && word == "END",
                 "missing shard END marker");
-            ::idmesh::detail::require_runtime(!(file >> word), "trailing garbage after shard END");
-            ::idmesh::detail::require_runtime(!shard.cells.empty(), "shard requires at least one local cell");
+            ::idmesh::detail::require_runtime(
+                !(file >> word),
+                "trailing garbage after shard END");
+            ::idmesh::detail::require_runtime(
+                !shard.cells.empty(),
+                "shard requires at least one local cell");
+
             std::stable_sort(shard.cells.begin(), shard.cells.end(),
                 [rank](const Cell& a, const Cell& b) {
-                    return std::tuple {a.owner != rank, a.id} < std::tuple {b.owner != rank, b.id};
+                    return std::tuple {a.owner != rank, a.id}
+                        < std::tuple {b.owner != rank, b.id};
                 });
             return shard;
         }
 
         struct Key {
-            Index dim = 0;
+            Index dimension = 0;
             ::idmesh::detail::EntitySignature<std::uint64_t> signature;
 
             bool operator<(const Key& other) const
             {
-                if (dim != other.dim)
-                    return dim < other.dim;
+                if (dimension != other.dimension)
+                    return dimension < other.dimension;
                 return signature < other.signature;
             }
         };
-
-        struct RegistryMessage {
-            Key key;
-            std::uint64_t global_id = 0;
-            Index local_entity = invalid_index;
-            int requester = -1;
-            int proposed_owner = -1;
-        };
-
-        std::uint64_t hash_key(const Key& key)
-        {
-            std::uint64_t hash = 14695981039346656037ULL;
-            const auto mix = [&](std::uint64_t value) {
-                for (unsigned i = 0; i < 8; ++i) {
-                    hash ^= (value >> (8 * i)) & 255ULL;
-                    hash *= 1099511628211ULL;
-                }
-            };
-            mix(key.dim);
-            mix(key.signature.size());
-            for (std::uint64_t id : key.signature)
-                mix(id);
-            return hash;
-        }
-
-        std::vector<RegistryMessage> exchange_registry_messages(
-            MPI_Comm comm,
-            const std::vector<std::vector<RegistryMessage>>& sends,
-            std::uint64_t* sent_bytes = nullptr,
-            std::uint64_t* received_bytes = nullptr)
-        {
-            std::vector<std::vector<std::uint64_t>> words(sends.size());
-            for (std::size_t peer = 0; peer < sends.size(); ++peer) {
-                auto& output = words[peer];
-                for (const auto& message : sends[peer]) {
-                    output.push_back(message.key.dim);
-                    output.push_back(message.key.signature.size());
-                    output.insert(output.end(),
-                        message.key.signature.begin(),
-                        message.key.signature.end());
-                    output.push_back(message.global_id);
-                    output.push_back(message.local_entity);
-                    output.push_back(
-                        static_cast<std::uint64_t>(message.requester));
-                    output.push_back(
-                        static_cast<std::uint64_t>(message.proposed_owner));
-                }
-            }
-
-            const auto received = exchange_records(
-                comm, words, sent_bytes, received_bytes);
-            std::vector<RegistryMessage> result;
-            for (std::size_t peer = 0; peer < received.counts.size(); ++peer) {
-                std::size_t position
-                    = static_cast<std::size_t>(received.offsets[peer]);
-                const std::size_t end = position
-                    + static_cast<std::size_t>(received.counts[peer]);
-                while (position < end) {
-                    ::idmesh::detail::require_runtime(
-                        end - position >= 6,
-                        "truncated distributed entity signature");
-                    const auto dim_value = received.values[position++];
-                    const auto arity_value = received.values[position++];
-                    ::idmesh::detail::require_runtime(
-                        dim_value <= 3 && arity_value > 0
-                            && arity_value < invalid_index
-                            && arity_value <= end - position - 4,
-                        "invalid distributed entity signature");
-                    const auto arity
-                        = static_cast<std::size_t>(arity_value);
-
-                    RegistryMessage message;
-                    message.key.dim = static_cast<Index>(dim_value);
-                    message.key.signature.assign(
-                        std::span<const std::uint64_t>(
-                            received.values.data() + position, arity));
-                    position += arity;
-                    message.global_id = received.values[position++];
-                    const auto local_entity = received.values[position++];
-                    const auto requester = received.values[position++];
-                    const auto proposed_owner = received.values[position++];
-                    ::idmesh::detail::require_runtime(
-                        local_entity < invalid_index
-                            && requester <= static_cast<std::uint64_t>(INT_MAX)
-                            && proposed_owner
-                                <= static_cast<std::uint64_t>(INT_MAX),
-                        "distributed entity registry value out of range");
-                    message.local_entity
-                        = static_cast<Index>(local_entity);
-                    message.requester = static_cast<int>(requester);
-                    message.proposed_owner
-                        = static_cast<int>(proposed_owner);
-                    result.push_back(std::move(message));
-                }
-            }
-            return result;
-        }
-
-        struct EntityRequest {
-            std::uint64_t global_id = 0;
-            Index local_entity = 0;
-        };
-        static_assert(std::is_trivially_copyable_v<EntityRequest>);
 
         struct LocalMeshData {
             Mesh mesh;
@@ -350,10 +353,12 @@ namespace idmesh::mpi {
             const Shard& input, BuildOptions options)
         {
             const Index dim = input.dimension;
-            MeshBuilder builder(input.dimension, input.geometric_dimension);
-            std::map<std::uint64_t, Index> vertices, high_order, cells;
+            MeshBuilder builder(
+                input.dimension, input.geometric_dimension);
+            std::map<std::uint64_t, Index>
+                vertices, high_order, cells;
 
-            // Ascending global corner IDs ensure identical reference orientation.
+            // Ascending global corner IDs preserve canonical orientation.
             for (const auto& [id, position] : input.vertices)
                 vertices[id] = builder.add_vertex(position);
 
@@ -361,10 +366,13 @@ namespace idmesh::mpi {
             std::vector<int> cell_owners;
             for (const Cell& cell : input.cells) {
                 std::vector<Index> corners, extras;
-                const Index corner_count = cell_vertex_count(cell.type);
+                const Index corner_count
+                    = cell_vertex_count(cell.type);
                 for (Index j = 0; j < corner_count; ++j)
-                    corners.push_back(vertices.at(cell.geometry[j]));
-                for (std::size_t j = corner_count; j < cell.geometry.size(); ++j) {
+                    corners.push_back(
+                        vertices.at(cell.geometry[j]));
+                for (std::size_t j = corner_count;
+                     j < cell.geometry.size(); ++j) {
                     const auto id = cell.geometry[j];
                     auto [it, inserted]
                         = high_order.try_emplace(id, invalid_index);
@@ -375,7 +383,8 @@ namespace idmesh::mpi {
                 }
                 const Index local = extras.empty()
                     ? builder.add_cell(cell.type, corners)
-                    : builder.add_quadratic_cell(cell.type, corners, extras);
+                    : builder.add_quadratic_cell(
+                          cell.type, corners, extras);
                 ::idmesh::detail::require_runtime(
                     local == cell_ids.size(),
                     "unexpected shard builder cell ordering");
@@ -395,6 +404,7 @@ namespace idmesh::mpi {
                 }
                 else {
                     std::vector<Index> corners;
+                    corners.reserve(label.entities.size());
                     for (auto id : label.entities) {
                         ::idmesh::detail::require_runtime(
                             vertices.contains(id),
@@ -406,7 +416,8 @@ namespace idmesh::mpi {
                 }
             }
             for (const auto& [key, name] : input.label_names)
-                builder.set_label_name(key.first, key.second, name);
+                builder.set_label_name(
+                    key.first, key.second, name);
 
             LocalMeshData result {
                 std::move(builder).finalize(options),
@@ -424,170 +435,100 @@ namespace idmesh::mpi {
             std::vector<std::vector<int>> owner_ranks;
         };
 
-        IdentityMetadata resolve_entity_identity(MPI_Comm comm,
-            int rank, int size, const Mesh& mesh,
-            const std::vector<std::uint64_t>& local_to_global_vertex,
-            std::vector<std::uint64_t> cell_ids,
-            std::vector<int> cell_owners,
+        IdentityMetadata load_identity_metadata(
+            const Shard& input, const LocalMeshData& local,
             detail::ShardReadProfile* profile)
         {
+            const auto begin
+                = profile ? Clock::now() : Clock::time_point {};
+            const Mesh& mesh = local.mesh;
             const Index dim = mesh.dimension();
+
             IdentityMetadata metadata;
             metadata.global_ids.resize(dim + 1);
             metadata.owner_ranks.resize(dim + 1);
-            metadata.global_ids[dim] = std::move(cell_ids);
-            metadata.owner_ranks[dim] = std::move(cell_owners);
+            metadata.global_ids[dim] = local.cell_ids;
+            metadata.owner_ranks[dim] = local.cell_owners;
 
-            const auto owner_begin
-                = profile ? Clock::now() : Clock::time_point {};
-            std::vector<std::vector<int>> candidate(dim + 1);
-            for (Index k = 0; k <= dim; ++k)
-                candidate[k].assign(mesh.entity_count(k), size);
-            candidate[dim] = metadata.owner_ranks[dim];
-            for (int from = static_cast<int>(dim); from > 0; --from) {
-                for (int to = from - 1; to >= 0; --to) {
-                    if (!mesh.has_relation(from, to))
-                        continue;
-                    const auto relation = mesh.relation(from, to);
-                    for (Index entity = 0;
-                         entity < mesh.entity_count(from); ++entity)
-                        for (Index lower : relation[entity].targets)
-                            candidate[to][lower] = std::min(
-                                candidate[to][lower],
-                                candidate[from][entity]);
-                }
-            }
-            if (profile)
-                profile->owner_candidates_ms
-                    = milliseconds(owner_begin, Clock::now());
-
-            const auto request_begin
-                = profile ? Clock::now() : Clock::time_point {};
-            std::vector<std::vector<RegistryMessage>> requests(size);
-            for (Index k = 0; k < dim; ++k) {
-                metadata.global_ids[k].resize(mesh.entity_count(k));
-                metadata.owner_ranks[k].resize(mesh.entity_count(k));
-                for (Index entity = 0;
-                     entity < mesh.entity_count(k); ++entity) {
-                    const auto local = mesh.entity_vertices(k, entity);
-                    std::vector<std::uint64_t> global_vertices;
-                    global_vertices.reserve(local.size());
-                    for (Index vertex : local)
-                        global_vertices.push_back(
-                            local_to_global_vertex[vertex]);
-                    auto canonical
-                        = ::idmesh::detail::canonicalize_entity<std::uint64_t>(
-                            global_vertices);
-                    Key key {k, std::move(canonical.signature)};
-                    const int service
-                        = static_cast<int>(hash_key(key) % size);
-                    requests[service].push_back(
-                        {key, 0, entity, rank, candidate[k][entity]});
-                }
+            metadata.global_ids[0] = local.local_to_global_vertex;
+            metadata.owner_ranks[0].resize(mesh.entity_count(0));
+            for (Index vertex = 0;
+                 vertex < mesh.entity_count(0); ++vertex) {
+                const auto global
+                    = local.local_to_global_vertex[vertex];
+                const auto owner
+                    = input.vertex_owners.find(global);
+                ::idmesh::detail::require_runtime(
+                    owner != input.vertex_owners.end(),
+                    "shard lacks vertex ownership");
+                metadata.owner_ranks[0][vertex] = owner->second;
             }
 
-            const auto received = exchange_registry_messages(
-                comm, requests,
-                profile ? &profile->registry_send_bytes : nullptr,
-                profile ? &profile->registry_receive_bytes : nullptr);
-            if (profile)
-                profile->registry_request_ms
-                    = milliseconds(request_begin, Clock::now());
-
-            const auto resolve_begin
-                = profile ? Clock::now() : Clock::time_point {};
-            std::map<Key, std::vector<RegistryMessage>> groups;
-            for (const auto& item : received)
-                groups[item.key].push_back(item);
-
-            std::vector<unsigned long long> local_unique(dim), prefix(dim);
-            for (const auto& [key, members] : groups) {
-                (void)members;
-                if (key.dim > 0)
-                    ++local_unique[key.dim];
+            std::map<Key, std::pair<std::uint64_t, int>> embedded;
+            for (const auto& entity : input.entities) {
+                const auto canonical
+                    = ::idmesh::detail::canonicalize_entity<
+                        std::uint64_t>(entity.vertices);
+                Key key {
+                    entity.dimension, canonical.signature};
+                ::idmesh::detail::require_runtime(
+                    embedded.emplace(
+                        std::move(key),
+                        std::pair {entity.id, entity.owner}).second,
+                    "duplicate shard entity identity key");
             }
+
             for (Index k = 1; k < dim; ++k) {
-                ::idmesh::mpi::detail::check_mpi(
-                    MPI_Exscan(&local_unique[k], &prefix[k], 1,
-                        MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm),
-                    "MPI_Exscan");
-                if (rank == 0)
-                    prefix[k] = 0;
-            }
-
-            std::vector<std::vector<RegistryMessage>> replies(size);
-            std::vector<std::uint64_t> next(dim);
-            for (const auto& [key, members] : groups) {
-                const std::uint64_t global = key.dim == 0
-                    ? key.signature[0]
-                    : static_cast<std::uint64_t>(prefix[key.dim])
-                        + next[key.dim]++;
-                int min_owner = size;
-                for (const auto& item : members)
-                    min_owner = std::min(min_owner,
-                        item.proposed_owner < size
-                            ? item.proposed_owner
-                            : item.requester);
-                ::idmesh::detail::require_runtime(
-                    min_owner >= 0 && min_owner < size,
-                    "invalid entity owner");
-                for (auto item : members) {
-                    item.global_id = global;
-                    item.proposed_owner = min_owner;
-                    replies[item.requester].push_back(item);
+                if (!mesh.has_entities(k))
+                    continue;
+                const Index count = mesh.entity_count(k);
+                metadata.global_ids[k].resize(count);
+                metadata.owner_ranks[k].resize(count);
+                for (Index entity = 0; entity < count; ++entity) {
+                    const auto local_vertices
+                        = mesh.entity_vertices(k, entity);
+                    std::vector<std::uint64_t> global_vertices;
+                    global_vertices.reserve(local_vertices.size());
+                    for (Index vertex : local_vertices)
+                        global_vertices.push_back(
+                            local.local_to_global_vertex[vertex]);
+                    const auto canonical
+                        = ::idmesh::detail::canonicalize_entity<
+                            std::uint64_t>(global_vertices);
+                    const Key key {
+                        k, canonical.signature};
+                    const auto found = embedded.find(key);
+                    ::idmesh::detail::require_runtime(
+                        found != embedded.end(),
+                        "shard lacks materialized entity identity");
+                    metadata.global_ids[k][entity]
+                        = found->second.first;
+                    metadata.owner_ranks[k][entity]
+                        = found->second.second;
                 }
             }
+
             if (profile)
-                profile->registry_resolve_ms
-                    = milliseconds(resolve_begin, Clock::now());
-
-            const auto reply_begin
-                = profile ? Clock::now() : Clock::time_point {};
-            const auto answers = exchange_registry_messages(
-                comm, replies,
-                profile ? &profile->registry_send_bytes : nullptr,
-                profile ? &profile->registry_receive_bytes : nullptr);
-
-            std::vector<std::vector<bool>> assigned(dim);
-            for (Index k = 0; k < dim; ++k)
-                assigned[k].resize(metadata.global_ids[k].size());
-            for (const auto& answer : answers) {
-                const auto k = answer.key.dim;
-                const auto entity = answer.local_entity;
-                ::idmesh::detail::require_runtime(
-                    k < dim
-                        && entity < metadata.global_ids[k].size()
-                        && !assigned[k][entity],
-                    "duplicate or invalid distributed entity response");
-                assigned[k][entity] = true;
-                metadata.global_ids[k][entity] = answer.global_id;
-                metadata.owner_ranks[k][entity] = answer.proposed_owner;
-            }
-            for (Index k = 0; k < dim; ++k)
-                ::idmesh::detail::require_runtime(
-                    std::all_of(assigned[k].begin(), assigned[k].end(),
-                        [](bool value) { return value; }),
-                    "missing distributed entity response");
-            if (profile)
-                profile->registry_reply_ms
-                    = milliseconds(reply_begin, Clock::now());
-
+                profile->metadata_ms
+                    = milliseconds(begin, Clock::now());
             return metadata;
         }
 
         struct ExchangeLayout {
             std::vector<Index> owned;
             std::vector<std::vector<Index>> send;
-            std::vector<std::vector<Index>> recv;
+            std::vector<std::vector<Index>> receive;
         };
 
-        std::vector<ExchangeLayout> build_exchange_layouts(
-            MPI_Comm comm, int rank, int size, const Mesh& mesh,
-            const IdentityMetadata& metadata,
-            detail::ShardReadProfile* profile)
+        std::vector<ExchangeLayout> load_exchange_layouts(
+            int rank, int size, const Shard& input,
+            const Mesh& mesh, const IdentityMetadata& metadata)
         {
             const Index dim = mesh.dimension();
             std::vector<ExchangeLayout> layouts(dim + 1);
+            std::vector<std::map<std::uint64_t, Index>>
+                local_by_global(dim + 1);
+
             for (Index k = 0; k <= dim; ++k) {
                 if (!mesh.has_entities(k))
                     continue;
@@ -596,55 +537,80 @@ namespace idmesh::mpi {
                     metadata.global_ids[k].size() == count
                         && metadata.owner_ranks[k].size() == count,
                     "distributed entity metadata size mismatch");
-
                 auto& layout = layouts[k];
                 layout.send.resize(size);
-                layout.recv.resize(size);
-                std::map<std::uint64_t, Index> owned_lookup;
-                std::vector<std::vector<EntityRequest>>
-                    ghost_requests(size);
+                layout.receive.resize(size);
                 for (Index entity = 0; entity < count; ++entity) {
-                    const int owner = metadata.owner_ranks[k][entity];
+                    const auto global = metadata.global_ids[k][entity];
+                    ::idmesh::detail::require_runtime(
+                        local_by_global[k]
+                            .emplace(global, entity).second,
+                        "duplicate local global entity ID");
+                    const int owner
+                        = metadata.owner_ranks[k][entity];
                     ::idmesh::detail::require_runtime(
                         owner >= 0 && owner < size,
                         "invalid distributed entity owner");
-                    const auto global = metadata.global_ids[k][entity];
-                    if (owner == rank) {
+                    if (owner == rank)
                         layout.owned.push_back(entity);
-                        ::idmesh::detail::require_runtime(
-                            owned_lookup.emplace(global, entity).second,
-                            "duplicate owned global entity ID");
-                    }
-                    else {
-                        ghost_requests[owner].push_back(
-                            {global, entity});
-                    }
                 }
+            }
 
-                const auto incoming = exchange_records(
-                    comm, ghost_requests,
-                    profile
-                        ? &profile->exchange_plan_send_bytes
-                        : nullptr,
-                    profile
-                        ? &profile->exchange_plan_receive_bytes
-                        : nullptr);
-                for (int peer = 0; peer < size; ++peer) {
-                    for (const auto& request : ghost_requests[peer])
-                        layout.recv[peer].push_back(
-                            request.local_entity);
-                    const int first = incoming.offsets[peer];
-                    const int received_count = incoming.counts[peer];
-                    for (int i = 0; i < received_count; ++i) {
-                        const auto& request
-                            = incoming.values[first + i];
-                        const auto found
-                            = owned_lookup.find(request.global_id);
-                        ::idmesh::detail::require_runtime(
-                            found != owned_lookup.end(),
-                            "requested ghost owner lacks its entity");
-                        layout.send[peer].push_back(found->second);
-                    }
+            std::vector<std::set<std::pair<int, Index>>>
+                seen_send(dim + 1), seen_receive(dim + 1);
+            for (const auto& halo : input.halos) {
+                if (!mesh.has_entities(halo.dimension))
+                    continue;
+                auto& layout = layouts[halo.dimension];
+                const auto& lookup
+                    = local_by_global[halo.dimension];
+
+                for (const auto global : halo.send) {
+                    const auto found = lookup.find(global);
+                    ::idmesh::detail::require_runtime(
+                        found != lookup.end()
+                            && metadata.owner_ranks[halo.dimension]
+                                   [found->second]
+                                == rank
+                            && seen_send[halo.dimension]
+                                   .emplace(halo.peer, found->second)
+                                   .second,
+                        "invalid shard halo send entity");
+                    layout.send[halo.peer].push_back(
+                        found->second);
+                }
+                for (const auto global : halo.receive) {
+                    const auto found = lookup.find(global);
+                    ::idmesh::detail::require_runtime(
+                        found != lookup.end()
+                            && metadata.owner_ranks[halo.dimension]
+                                   [found->second]
+                                == halo.peer
+                            && seen_receive[halo.dimension]
+                                   .emplace(halo.peer, found->second)
+                                   .second,
+                        "invalid shard halo receive entity");
+                    layout.receive[halo.peer].push_back(
+                        found->second);
+                }
+            }
+
+            for (Index k = 0; k <= dim; ++k) {
+                if (!mesh.has_entities(k))
+                    continue;
+                for (Index entity = 0;
+                     entity < mesh.entity_count(k); ++entity) {
+                    const int owner
+                        = metadata.owner_ranks[k][entity];
+                    const bool received = std::any_of(
+                        seen_receive[k].begin(),
+                        seen_receive[k].end(),
+                        [entity](const auto& item) {
+                            return item.second == entity;
+                        });
+                    ::idmesh::detail::require_runtime(
+                        received == (owner != rank),
+                        "shard halo receive coverage mismatch");
                 }
             }
             return layouts;
@@ -653,7 +619,8 @@ namespace idmesh::mpi {
     } // namespace
 
     PartitionedMesh read_partition_shard(
-        const Context& context, const std::string& path, BuildOptions options)
+        const Context& context, const std::string& path,
+        BuildOptions options)
     {
         const int rank = context.rank(), size = context.size();
         const MPI_Comm comm = context.data_->comm;
@@ -665,7 +632,8 @@ namespace idmesh::mpi {
             = profile ? Clock::now() : Clock::time_point {};
         const Shard input = parse_shard(path, rank, size);
         if (profile)
-            profile->parse_ms = milliseconds(parse_begin, Clock::now());
+            profile->parse_ms
+                = milliseconds(parse_begin, Clock::now());
 
         const Index dim = input.dimension;
         Index min_dim = 0, max_dim = 0;
@@ -688,16 +656,13 @@ namespace idmesh::mpi {
             profile->local_mesh_ms
                 = milliseconds(mesh_begin, Clock::now());
 
-        auto metadata = resolve_entity_identity(
-            comm, rank, size, local.mesh,
-            local.local_to_global_vertex,
-            std::move(local.cell_ids),
-            std::move(local.cell_owners), profile);
+        auto metadata
+            = load_identity_metadata(input, local, profile);
 
         const auto exchange_begin
             = profile ? Clock::now() : Clock::time_point {};
-        auto layouts = build_exchange_layouts(
-            comm, rank, size, local.mesh, metadata, profile);
+        auto layouts = load_exchange_layouts(
+            rank, size, input, local.mesh, metadata);
 
         auto partition = std::make_shared<PartitionedMesh::Data>(
             std::move(local.mesh));
@@ -711,13 +676,14 @@ namespace idmesh::mpi {
                 continue;
             partition->owned_entities[k]
                 = std::move(layouts[k].owned);
-            auto exchange = std::make_shared<ExchangePlan::Data>();
+            auto exchange
+                = std::make_shared<ExchangePlan::Data>();
             exchange->context_owner = context.data_;
             exchange->local_entities
                 = partition->mesh.entity_count(k);
             exchange->initialize_layout(comm,
                 std::move(layouts[k].send),
-                std::move(layouts[k].recv));
+                std::move(layouts[k].receive));
             partition->exchanges[k]
                 = ExchangePlan(std::move(exchange));
         }
@@ -741,7 +707,8 @@ namespace idmesh::mpi {
             BuildOptions options, ShardReadProfile& profile)
         {
             ProfileBinding binding(profile);
-            return read_partition_shard(context, path, options);
+            return read_partition_shard(
+                context, path, options);
         }
 
     } // namespace detail
