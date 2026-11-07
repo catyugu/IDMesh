@@ -191,6 +191,9 @@ shape families are rejected, pending a standard-preserving adapter.
 `-DIDMESH_ENABLE_MPI=ON` builds the `IDMesh::MPI` adapter without exposing
 `mpi.h` from public SDK headers. The application initializes/finalizes MPI.
 Production distributed meshes are loaded rank-locally from partition shards.
+The v3 shard format has one private schema declaration shared by the serial
+writer and MPI reader. MPI-independent parsing is separate from local Mesh
+reconstruction, global entity identity mapping, and halo-plan construction.
 Every materialized entity dimension carries stable global IDs, owner ranks,
 an explicit owned-entity index set, and a reusable halo `ExchangePlan`.
 Lower-dimensional entities retain canonical local numbering; ownership is

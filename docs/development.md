@@ -31,6 +31,9 @@ Implementation files are grouped under `src/core/`, `src/io/`,
 `src/distributed/` and `src/device/`. These are source-level boundaries:
 the existing four exported SDK targets and their link interfaces stay unchanged.
 Shared implementation-only contracts remain in `src/contracts.hpp`.
+The private `src/distributed/shard.hpp` holds the v3 shard schema;
+`shard.cpp` parses files without MPI; `mpi_shard.cpp` handles mesh
+reconstruction, global identity and communication-plan creation.
 
 Build options, public target aliases (`IDMesh::IDMesh`, `IDMesh::Kokkos`,
 `IDMesh::MPI`, `IDMesh::MPIKokkos`), installed package files, and CTest

@@ -55,7 +55,10 @@ if(IDMESH_ENABLE_KOKKOS)
 endif()
 
 if(IDMESH_ENABLE_MPI)
-    add_library(idmesh_mpi SHARED src/distributed/mpi.cpp src/distributed/mpi_shard.cpp)
+    add_library(idmesh_mpi SHARED
+        src/distributed/mpi.cpp
+        src/distributed/shard.cpp
+        src/distributed/mpi_shard.cpp)
     add_library(IDMesh::MPI ALIAS idmesh_mpi)
     idmesh_configure_target(idmesh_mpi MPI)
     target_compile_definitions(idmesh_mpi PRIVATE IDMESH_MPI_EXPORTS PUBLIC IDMESH_MPI_SHARED)
