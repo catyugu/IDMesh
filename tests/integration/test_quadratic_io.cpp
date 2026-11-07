@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -9,11 +11,6 @@
 
 namespace {
     using idmesh::Index;
-    void check(bool x, const char* msg)
-    {
-        if (!x)
-            throw std::runtime_error(msg);
-    }
     idmesh::Mesh mesh_for(idmesh::CellType type, Index count)
     {
         auto points = idmesh::reference_geometry_nodes(type, count);
@@ -104,13 +101,8 @@ namespace {
 }
 int main()
 {
-    try {
-        vtk_cases();
-        medit_cases();
-        std::cout << "IDMesh quadratic IO tests passed\n";
-    }
-    catch (const std::exception& error) {
-        std::cerr << "quadratic IO failure: " << error.what() << '\n';
-        return 1;
-    }
+    return idmesh::test::run({
+        {"VTK quadratic IO", vtk_cases},
+        {"Medit quadratic IO", medit_cases},
+    });
 }

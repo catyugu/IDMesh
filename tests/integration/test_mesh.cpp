@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include "idmesh/mesh.hpp"
 #include <algorithm>
 #include <array>
@@ -9,12 +11,6 @@
 #include <vector>
 
 namespace {
-    void check(bool condition, const char* message)
-    {
-        if (!condition)
-            throw std::runtime_error(message);
-    }
-
     bool has_label(const idmesh::Mesh& mesh, idmesh::Index dimension,
         idmesh::Index entity, int value)
     {
@@ -293,24 +289,18 @@ void test_gmsh_endpoint_v22()
 
 int main()
 {
-    try {
-        test_reference_cells();
-        test_shared_orientations();
-        test_compacted_incidence_order();
-        test_finite_volume();
-        test_gmsh();
-        test_gmsh_v41();
-        test_invalid();
-        test_labels();
-        test_variable_arity_label_signature();
-        test_gmsh_boundary_v22();
-        test_gmsh_boundary_v41();
-        test_gmsh_endpoint_v22();
-        std::cout << "IDMesh topology tests passed\n";
-        return 0;
-    }
-    catch (const std::exception& ex) {
-        std::cerr << "IDMesh test failure: " << ex.what() << '\n';
-        return 1;
-    }
+    return idmesh::test::run({
+        {"reference cells", test_reference_cells},
+        {"shared orientations", test_shared_orientations},
+        {"compacted incidence order", test_compacted_incidence_order},
+        {"finite-volume topology", test_finite_volume},
+        {"Gmsh 2.2", test_gmsh},
+        {"Gmsh 4.1", test_gmsh_v41},
+        {"invalid mesh input", test_invalid},
+        {"labels", test_labels},
+        {"variable-arity labels", test_variable_arity_label_signature},
+        {"Gmsh 2.2 boundaries", test_gmsh_boundary_v22},
+        {"Gmsh 4.1 boundaries", test_gmsh_boundary_v41},
+        {"Gmsh endpoints", test_gmsh_endpoint_v22},
+    });
 }

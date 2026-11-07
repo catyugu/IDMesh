@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -26,74 +25,6 @@ namespace idmesh::vtk {
 
         constexpr std::string_view physical_tag_name = "physical_tag";
 
-        std::map<std::string, std::string> attributes(
-            std::string_view tag)
-        {
-            std::map<std::string, std::string> result;
-            const auto space = tag.find_first_of(" \t\r\n");
-            if (space == std::string_view::npos)
-                return result;
-            std::size_t i = space;
-            while (i < tag.size()) {
-                while (i < tag.size()
-                    && std::isspace(
-                        static_cast<unsigned char>(tag[i])))
-                    ++i;
-                if (i >= tag.size()
-                    || tag[i] == '>' || tag[i] == '/')
-                    break;
-                const auto key_begin = i;
-                while (i < tag.size()
-                    && !std::isspace(
-                        static_cast<unsigned char>(tag[i]))
-                    && tag[i] != '=')
-                    ++i;
-                const std::string key(
-                    tag.substr(key_begin, i - key_begin));
-                while (i < tag.size()
-                    && std::isspace(
-                        static_cast<unsigned char>(tag[i])))
-                    ++i;
-                ::idmesh::detail::require_runtime(
-                    i < tag.size() && tag[i] == '=',
-                    "invalid VTK XML attribute");
-                ++i;
-                while (i < tag.size()
-                    && std::isspace(
-                        static_cast<unsigned char>(tag[i])))
-                    ++i;
-                ::idmesh::detail::require_runtime(
-                    i < tag.size()
-                        && (tag[i] == '"' || tag[i] == '\''),
-                    "invalid VTK XML attribute quoting");
-                const char quote = tag[i++];
-                const auto value_begin = i;
-                const auto value_end = tag.find(quote, i);
-                ::idmesh::detail::require_runtime(
-                    value_end != std::string_view::npos,
-                    "unterminated VTK XML attribute");
-                result.emplace(
-                    key,
-                    detail::vtk::xml_unescape(
-                        tag.substr(
-                            value_begin,
-                            value_end - value_begin)));
-                i = value_end + 1;
-            }
-            return result;
-        }
-
-        std::string_view required(
-            const std::map<std::string, std::string>& attrs,
-            std::string_view name)
-        {
-            const auto it = attrs.find(std::string(name));
-            ::idmesh::detail::require_runtime(
-                it != attrs.end(),
-                "missing required VTK XML attribute");
-            return it->second;
-        }
-
         std::string file_text(const std::string& filename)
         {
             std::ifstream in(filename, std::ios::binary);
@@ -102,71 +33,6 @@ namespace idmesh::vtk {
                 "cannot open VTK manifest");
             return {std::istreambuf_iterator<char>(in),
                 std::istreambuf_iterator<char>()};
-        }
-
-        std::string_view opening_tag(
-            std::string_view xml, std::string_view name)
-        {
-            const std::string prefix = "<" + std::string(name);
-            const auto begin = xml.find(prefix);
-            ::idmesh::detail::require_runtime(
-                begin != std::string_view::npos,
-                "missing VTK XML element");
-            const auto end = xml.find('>', begin);
-            ::idmesh::detail::require_runtime(
-                end != std::string_view::npos,
-                "unterminated VTK XML element");
-            return xml.substr(begin, end - begin + 1);
-        }
-
-        std::string_view element_body(
-            std::string_view xml, std::string_view name,
-            bool required_element = true)
-        {
-            const std::string open = "<" + std::string(name);
-            const std::string close
-                = "</" + std::string(name) + ">";
-            const auto begin = xml.find(open);
-            if (begin == std::string_view::npos) {
-                if (required_element)
-                    throw std::runtime_error(
-                        "missing VTK XML element");
-                return {};
-            }
-            const auto head_end = xml.find('>', begin);
-            const auto end = xml.find(close, head_end);
-            ::idmesh::detail::require_runtime(
-                head_end != std::string_view::npos
-                    && end != std::string_view::npos,
-                "unterminated VTK XML element");
-            return xml.substr(
-                head_end + 1, end - head_end - 1);
-        }
-
-        std::vector<std::map<std::string, std::string>>
-        self_closing_tags(
-            std::string_view body, std::string_view name)
-        {
-            std::vector<std::map<std::string, std::string>> result;
-            const std::string prefix = "<" + std::string(name);
-            std::size_t cursor = 0;
-            while (true) {
-                const auto begin = body.find(prefix, cursor);
-                if (begin == std::string_view::npos)
-                    break;
-                const auto end = body.find('>', begin);
-                ::idmesh::detail::require_runtime(
-                    end != std::string_view::npos,
-                    "unterminated VTK XML tag");
-                const auto tag = body.substr(
-                    begin, end - begin + 1);
-                ::idmesh::detail::require_runtime(
-                    end > begin && body[end - 1] == '/',
-                    "expected self-closing VTK XML tag");
-                result.push_back(attributes(tag));
-                cursor = end + 1;
-            }
-            return result;
         }
 
         double parse_double(std::string_view text)
@@ -284,19 +150,19 @@ namespace idmesh::vtk {
     PvdCollection read_pvd(const std::string& filename)
     {
         const auto xml = file_text(filename);
-        const auto root = attributes(
-            opening_tag(xml, "VTKFile"));
+        const auto root = detail::vtk::xml_attributes(
+            detail::vtk::xml_opening_tag(xml, "VTKFile"));
         ::idmesh::detail::require_runtime(
-            required(root, "type") == "Collection",
+            detail::vtk::xml_required_attribute(root, "type") == "Collection",
             "PVD VTKFile type must be Collection");
 
-        const auto body = element_body(xml, "Collection");
+        const auto body = detail::vtk::xml_element_body(xml, "Collection");
         PvdCollection result;
         for (const auto& attrs
-            : self_closing_tags(body, "DataSet")) {
+            : detail::vtk::xml_self_closing_tags(body, "DataSet")) {
             PvdEntry entry;
             entry.time = parse_double(
-                required(attrs, "timestep"));
+                detail::vtk::xml_required_attribute(attrs, "timestep"));
             if (const auto it = attrs.find("group");
                 it != attrs.end())
                 entry.group = it->second;
@@ -304,7 +170,7 @@ namespace idmesh::vtk {
                 it != attrs.end())
                 entry.part = parse_u32(it->second);
             entry.file = std::string(
-                required(attrs, "file"));
+                detail::vtk::xml_required_attribute(attrs, "file"));
             result.entries.push_back(std::move(entry));
         }
         validate_pvd(result);
@@ -566,36 +432,36 @@ namespace idmesh::vtk {
     PvtuManifest read_pvtu(const std::string& filename)
     {
         const auto xml = file_text(filename);
-        const auto root = attributes(
-            opening_tag(xml, "VTKFile"));
+        const auto root = detail::vtk::xml_attributes(
+            detail::vtk::xml_opening_tag(xml, "VTKFile"));
         ::idmesh::detail::require_runtime(
-            required(root, "type") == "PUnstructuredGrid",
+            detail::vtk::xml_required_attribute(root, "type") == "PUnstructuredGrid",
             "PVTU VTKFile type must be PUnstructuredGrid");
         ::idmesh::detail::require_runtime(
             root.find("compressor") == root.end(),
             "compressed PVTU manifests are not supported");
 
         const auto grid_tag
-            = opening_tag(xml, "PUnstructuredGrid");
-        const auto grid_attrs = attributes(grid_tag);
+            = detail::vtk::xml_opening_tag(xml, "PUnstructuredGrid");
+        const auto grid_attrs = detail::vtk::xml_attributes(grid_tag);
         PvtuManifest result;
         if (const auto it = grid_attrs.find("GhostLevel");
             it != grid_attrs.end())
             result.ghost_level = parse_u32(it->second);
 
-        const auto grid = element_body(
+        const auto grid = detail::vtk::xml_element_body(
             xml, "PUnstructuredGrid");
 
-        const auto point_body = element_body(
+        const auto point_body = detail::vtk::xml_element_body(
             grid, "PPointData", false);
         for (const auto& attrs
-            : self_closing_tags(
+            : detail::vtk::xml_self_closing_tags(
                 point_body, "PDataArray")) {
             ArraySchema field;
             field.name = std::string(
-                required(attrs, "Name"));
+                detail::vtk::xml_required_attribute(attrs, "Name"));
             field.type = detail::vtk::xml_scalar_type(
-                required(attrs, "type"));
+                detail::vtk::xml_required_attribute(attrs, "type"));
             if (const auto it
                 = attrs.find("NumberOfComponents");
                 it != attrs.end())
@@ -603,16 +469,16 @@ namespace idmesh::vtk {
             result.point_data.push_back(std::move(field));
         }
 
-        const auto cell_body = element_body(
+        const auto cell_body = detail::vtk::xml_element_body(
             grid, "PCellData", false);
         for (const auto& attrs
-            : self_closing_tags(
+            : detail::vtk::xml_self_closing_tags(
                 cell_body, "PDataArray")) {
             ArraySchema field;
             field.name = std::string(
-                required(attrs, "Name"));
+                detail::vtk::xml_required_attribute(attrs, "Name"));
             field.type = detail::vtk::xml_scalar_type(
-                required(attrs, "type"));
+                detail::vtk::xml_required_attribute(attrs, "type"));
             if (const auto it
                 = attrs.find("NumberOfComponents");
                 it != attrs.end())
@@ -620,14 +486,14 @@ namespace idmesh::vtk {
             result.cell_data.push_back(std::move(field));
         }
 
-        const auto points = self_closing_tags(
-            element_body(grid, "PPoints"),
+        const auto points = detail::vtk::xml_self_closing_tags(
+            detail::vtk::xml_element_body(grid, "PPoints"),
             "PDataArray");
         ::idmesh::detail::require_runtime(
             points.size() == 1,
             "PVTU PPoints must contain one PDataArray");
         result.points_type = detail::vtk::xml_scalar_type(
-            required(points.front(), "type"));
+            detail::vtk::xml_required_attribute(points.front(), "type"));
         const auto components = points.front().find(
             "NumberOfComponents");
         ::idmesh::detail::require_runtime(
@@ -636,9 +502,9 @@ namespace idmesh::vtk {
             "PVTU points require three components");
 
         for (const auto& attrs
-            : self_closing_tags(grid, "Piece"))
+            : detail::vtk::xml_self_closing_tags(grid, "Piece"))
             result.pieces.push_back(
-                std::string(required(attrs, "Source")));
+                std::string(detail::vtk::xml_required_attribute(attrs, "Source")));
 
         validate_pvtu(result);
         return result;

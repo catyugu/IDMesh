@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -17,11 +19,6 @@ static_assert(std::is_move_constructible_v<idmesh::MeshBuilder>);
 
 namespace {
     using idmesh::Index;
-    void check(bool condition, const char* what)
-    {
-        if (!condition)
-            throw std::runtime_error(what);
-    }
     void verify_orientation(std::span<const Index> local, std::span<const Index> canonical,
         idmesh::Orientation orientation)
     {
@@ -147,19 +144,6 @@ namespace {
         }
     }
 
-    template <class Error, class Operation>
-    void expect_error(Operation&& operation, const char* message)
-    {
-        bool caught = false;
-        try {
-            operation();
-        }
-        catch (const Error&) {
-            caught = true;
-        }
-        check(caught, message);
-    }
-
     void error_contracts()
     {
         expect_error<std::invalid_argument>(
@@ -230,16 +214,11 @@ namespace {
 }
 int main()
 {
-    try {
-        all_reference_cells();
-        mixed_hex_prism();
-        layer_masks();
-        permutation_invariants();
-        error_contracts();
-        std::cout << "IDMesh contract tests passed\n";
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Contract test failure: " << e.what() << '\n';
-        return 1;
-    }
+    return idmesh::test::run({
+        {"reference cells", all_reference_cells},
+        {"mixed hex/prism", mixed_hex_prism},
+        {"layer masks", layer_masks},
+        {"permutation invariants", permutation_invariants},
+        {"error contracts", error_contracts},
+    });
 }

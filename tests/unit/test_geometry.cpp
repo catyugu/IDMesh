@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include <array>
 #include <cmath>
 #include <idmesh/geometry.hpp>
@@ -9,11 +11,6 @@
 namespace {
     using idmesh::Index;
     using Vec = std::array<double, 3>;
-    void check(bool value, const char* message)
-    {
-        if (!value)
-            throw std::runtime_error(message);
-    }
     void close(double a, double b, double tol, const char* message)
     {
         if (std::abs(a - b) > tol)
@@ -169,14 +166,9 @@ namespace {
 }
 int main()
 {
-    try {
-        all_orders();
-        curvature();
-        invalid();
-        std::cout << "IDMesh analytic geometry tests passed\n";
-    }
-    catch (const std::exception& e) {
-        std::cerr << "geometry test failure: " << e.what() << '\n';
-        return 1;
-    }
+    return idmesh::test::run({
+        {"all reference cells", all_orders},
+        {"curved geometry", curvature},
+        {"invalid inputs", invalid},
+    });
 }

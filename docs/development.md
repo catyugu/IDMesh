@@ -7,9 +7,10 @@ From a fresh clone, use CMake 3.26+ and a C++20 compiler:
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON
 cmake --build build --config Release --parallel
-ctest --test-dir build -C Release --output-on-failure
+ctest --test-dir build -C Release --output-on-failure -L unit
+ctest --test-dir build -C Release --output-on-failure -L integration
 cmake --install build --config Release --prefix install
-cmake -S tests/consumer -B consumer-build -DCMAKE_PREFIX_PATH="$PWD/install"
+cmake -S tests/integration/consumer -B consumer-build -DCMAKE_PREFIX_PATH="$PWD/install"
 cmake --build consumer-build --config Release
 ```
 
@@ -21,8 +22,10 @@ The root `CMakeLists.txt` owns project options and the build entry points.
 `cmake/Dependencies.cmake` acquires optional MPI/Kokkos dependencies and
 configures CUDA/HIP when requested. `cmake/Targets.cmake` defines the core
 and optional adapter libraries; `cmake/Install.cmake` exports the installed
-SDK. The `tests/`, `examples/`, and `benchmarks/` directories each own
-their executable targets and test registration.
+SDK. `tests/unit/` contains fast in-memory contract tests, `tests/integration/`
+contains file/backend/end-to-end tests, and `tests/support/test.hpp` is the
+small dependency-free test runner shared by both layers. `examples/` and
+`benchmarks/` own their executable targets separately.
 
 Build options, public target aliases (`IDMesh::IDMesh`, `IDMesh::Kokkos`,
 `IDMesh::MPI`, `IDMesh::MPIKokkos`), installed package files, and CTest
@@ -93,10 +96,12 @@ counts and check representational limits before narrowing.
 
 ## Verification
 
-Retain core functional/contract tests, independent installed-package
-consumers, optional MPI/Kokkos paths and the existing hardware-validation
-policy. Examples and benchmark executables may print diagnostics. The
-benchmark remains a local-only tool rather than a CI gate.
+Keep local API/algorithm checks in the `unit` CTest label. Put file-format
+round-trips, installed-package consumers, fixed-fixture pipelines and actual
+MPI/Kokkos execution in the `integration` label. Do not add a third-party C++
+test framework; extend `tests/support/test.hpp` only when a genuinely shared
+primitive is needed. Examples and benchmark executables may print diagnostics.
+The benchmark remains a local-only tool rather than a CI gate.
 
 ## Technical scope
 

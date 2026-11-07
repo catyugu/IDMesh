@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include "idmesh/mesh.hpp"
 
 #include <algorithm>
@@ -12,12 +14,6 @@
 
 namespace {
     using idmesh::Index;
-
-    void check(bool condition, const char* reason)
-    {
-        if (!condition)
-            throw std::runtime_error(reason);
-    }
 
     void has_group(const idmesh::Mesh& mesh, Index dimension, int tag, bool bound)
     {
@@ -317,21 +313,15 @@ void many_labels()
 
 int main()
 {
-    try {
-        quadratic_variants();
-        quadratic_gmsh22_all_groups();
-        quadratic_gmsh41_multigroup();
-        legacy_vtk_round_trip();
-        medit_round_trip();
-        zero_label_io_rejected();
-        mixed_geometry_orders();
-        many_labels();
-        omitted_layer_labels();
-        std::cout << "IDMesh high-order/IO tests passed\n";
-        return 0;
-    }
-    catch (const std::exception& e) {
-        std::cerr << "IDMesh format test failure: " << e.what() << '\n';
-        return 1;
-    }
+    return idmesh::test::run({
+        {"quadratic variants", quadratic_variants},
+        {"Gmsh 2.2 groups", quadratic_gmsh22_all_groups},
+        {"Gmsh 4.1 groups", quadratic_gmsh41_multigroup},
+        {"legacy VTK round-trip", legacy_vtk_round_trip},
+        {"Medit round-trip", medit_round_trip},
+        {"zero labels rejected", zero_label_io_rejected},
+        {"mixed geometry orders", mixed_geometry_orders},
+        {"many labels", many_labels},
+        {"omitted-layer labels", omitted_layer_labels},
+    });
 }

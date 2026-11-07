@@ -47,12 +47,14 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_BUILD_BENCHMARKS=OFF -DBUILD_SHARED_LIBS=${{ matrix.shared }}
       - name: Build
         run: cmake --build build --config Release --parallel 2
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure -L unit
+      - name: Integration tests
+        run: ctest --test-dir build -C Release --output-on-failure -L integration
       - name: Install
         run: cmake --install build --config Release --prefix install
       - name: Configure installed-package consumer
-        run: cmake -S tests/consumer -B consumer-build -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install
+        run: cmake -S tests/integration/consumer -B consumer-build -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install
       - name: Build installed-package consumer
         run: cmake --build consumer-build --config Release
       - name: Upload installed SDK
@@ -74,12 +76,14 @@ jobs:
         run: cmake -S . -B build-kokkos -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_ENABLE_KOKKOS=ON
       - name: Build
         run: cmake --build build-kokkos --parallel 2
-      - name: Test
-        run: ctest --test-dir build-kokkos --output-on-failure
+      - name: Unit tests
+        run: ctest --test-dir build-kokkos --output-on-failure -L unit
+      - name: Kokkos integration tests
+        run: ctest --test-dir build-kokkos --output-on-failure -L integration
       - name: Install SDK
         run: cmake --install build-kokkos --prefix install-kokkos
       - name: Verify external consumer
-        run: cmake -S tests/consumer -B consumer-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-kokkos" && cmake --build consumer-kokkos --parallel 2
+        run: cmake -S tests/integration/consumer -B consumer-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-kokkos" && cmake --build consumer-kokkos --parallel 2
 
   mpi-backends:
     name: backend / MPI-only + MPI-Kokkos
@@ -108,24 +112,28 @@ jobs:
         run: cmake -S . -B build-mpi -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_ENABLE_MPI=ON
       - name: Build MPI-only
         run: cmake --build build-mpi --parallel 2
-      - name: Test MPI-only
-        run: ctest --test-dir build-mpi --output-on-failure
+      - name: Unit tests (MPI build)
+        run: ctest --test-dir build-mpi --output-on-failure -L unit
+      - name: MPI integration tests
+        run: ctest --test-dir build-mpi --output-on-failure -L integration
       - name: Install and verify MPI-only SDK
         run: |
           cmake --install build-mpi --prefix install-mpi
-          cmake -S tests/consumer -B consumer-mpi -DCMAKE_PREFIX_PATH="$PWD/install-mpi"
+          cmake -S tests/integration/consumer -B consumer-mpi -DCMAKE_PREFIX_PATH="$PWD/install-mpi"
           cmake --build consumer-mpi --parallel 2
 
       - name: Configure MPI + Kokkos (Serial)
         run: cmake -S . -B build-mpi-kokkos -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
       - name: Build MPI + Kokkos
         run: cmake --build build-mpi-kokkos --parallel 2
-      - name: Test MPI + Kokkos
-        run: ctest --test-dir build-mpi-kokkos --output-on-failure
+      - name: Unit tests (MPI + Kokkos build)
+        run: ctest --test-dir build-mpi-kokkos --output-on-failure -L unit
+      - name: MPI + Kokkos integration tests
+        run: ctest --test-dir build-mpi-kokkos --output-on-failure -L integration
       - name: Install and verify MPI + Kokkos SDK
         run: |
           cmake --install build-mpi-kokkos --prefix install-mpi-kokkos
-          cmake -S tests/consumer -B consumer-mpi-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-mpi-kokkos"
+          cmake -S tests/integration/consumer -B consumer-mpi-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-mpi-kokkos"
           cmake --build consumer-mpi-kokkos --parallel 2
 
   examples:

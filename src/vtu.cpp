@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -35,112 +34,6 @@ namespace idmesh::vtk {
             std::string_view content;
         };
 
-        std::map<std::string, std::string> parse_attributes(
-            std::string_view tag)
-        {
-            std::map<std::string, std::string> result;
-            const auto space = tag.find_first_of(" \t\r\n");
-            if (space == std::string_view::npos)
-                return result;
-            std::size_t i = space;
-            while (i < tag.size()) {
-                while (i < tag.size()
-                    && std::isspace(
-                        static_cast<unsigned char>(tag[i])))
-                    ++i;
-                if (i >= tag.size()
-                    || tag[i] == '>' || tag[i] == '/')
-                    break;
-                const auto begin = i;
-                while (i < tag.size()
-                    && !std::isspace(
-                        static_cast<unsigned char>(tag[i]))
-                    && tag[i] != '=')
-                    ++i;
-                const std::string key(tag.substr(begin, i - begin));
-                while (i < tag.size()
-                    && std::isspace(
-                        static_cast<unsigned char>(tag[i])))
-                    ++i;
-                ::idmesh::detail::require_runtime(
-                    i < tag.size() && tag[i] == '=',
-                    "invalid VTU XML attribute");
-                ++i;
-                while (i < tag.size()
-                    && std::isspace(
-                        static_cast<unsigned char>(tag[i])))
-                    ++i;
-                ::idmesh::detail::require_runtime(
-                    i < tag.size()
-                        && (tag[i] == '"' || tag[i] == '\''),
-                    "invalid VTU XML attribute quoting");
-                const char quote = tag[i++];
-                const auto value_begin = i;
-                const auto value_end = tag.find(quote, i);
-                ::idmesh::detail::require_runtime(
-                    value_end != std::string_view::npos,
-                    "unterminated VTU XML attribute");
-                result.emplace(
-                    key,
-                    detail::vtk::xml_unescape(
-                        tag.substr(
-                            value_begin,
-                            value_end - value_begin)));
-                i = value_end + 1;
-            }
-            return result;
-        }
-
-        std::string_view required_attribute(
-            const std::map<std::string, std::string>& attrs,
-            std::string_view name)
-        {
-            const auto it = attrs.find(std::string(name));
-            ::idmesh::detail::require_runtime(
-                it != attrs.end(),
-                "missing required VTU XML attribute");
-            return it->second;
-        }
-
-        std::string_view element_body(
-            std::string_view xml, std::string_view name,
-            bool required = true)
-        {
-            const std::string open = "<" + std::string(name);
-            const std::string close
-                = "</" + std::string(name) + ">";
-            const auto begin = xml.find(open);
-            if (begin == std::string_view::npos) {
-                if (required)
-                    throw std::runtime_error(
-                        "missing VTU XML element");
-                return {};
-            }
-            const auto head_end = xml.find('>', begin);
-            const auto end = xml.find(close, head_end);
-            ::idmesh::detail::require_runtime(
-                head_end != std::string_view::npos
-                    && end != std::string_view::npos,
-                "unterminated VTU XML element");
-            return xml.substr(
-                head_end + 1, end - head_end - 1);
-        }
-
-        std::string_view opening_tag(
-            std::string_view xml, std::string_view name)
-        {
-            const std::string open = "<" + std::string(name);
-            const auto begin = xml.find(open);
-            ::idmesh::detail::require_runtime(
-                begin != std::string_view::npos,
-                "missing VTU XML opening tag");
-            const auto end = xml.find('>', begin);
-            ::idmesh::detail::require_runtime(
-                end != std::string_view::npos,
-                "unterminated VTU XML opening tag");
-            return xml.substr(begin, end - begin + 1);
-        }
-
         std::vector<XmlArray> data_arrays(
             std::string_view body)
         {
@@ -161,7 +54,7 @@ namespace idmesh::vtk {
                     = head_end > begin
                     && body[head_end - 1] == '/';
                 XmlArray array;
-                array.attributes = parse_attributes(tag);
+                array.attributes = detail::vtk::xml_attributes(tag);
                 if (self_closing) {
                     array.content = {};
                     cursor = head_end + 1;
@@ -250,7 +143,7 @@ namespace idmesh::vtk {
             std::endian endian, std::size_t header_width)
         {
             const auto type = detail::vtk::xml_scalar_type(
-                required_attribute(source.attributes, "type"));
+                detail::vtk::xml_required_attribute(source.attributes, "type"));
             std::uint32_t components = 1;
             if (const auto it
                 = source.attributes.find("NumberOfComponents");
@@ -641,11 +534,11 @@ namespace idmesh::vtk {
             ::idmesh::detail::require_runtime(
                 head_end != std::string::npos,
                 "unterminated VTU AppendedData");
-            const auto attrs = parse_attributes(
+            const auto attrs = detail::vtk::xml_attributes(
                 std::string_view(file).substr(
                     appended_open, head_end - appended_open + 1));
             const auto encoding
-                = required_attribute(attrs, "encoding");
+                = detail::vtk::xml_required_attribute(attrs, "encoding");
             ::idmesh::detail::require_runtime(
                 encoding == "raw",
                 "only raw VTU AppendedData is supported");
@@ -667,10 +560,10 @@ namespace idmesh::vtk {
                 appended_storage.data(),
                 appended_storage.size());
 
-        const auto root_attrs = parse_attributes(
-            opening_tag(xml, "VTKFile"));
+        const auto root_attrs = detail::vtk::xml_attributes(
+            detail::vtk::xml_opening_tag(xml, "VTKFile"));
         ::idmesh::detail::require_runtime(
-            required_attribute(root_attrs, "type")
+            detail::vtk::xml_required_attribute(root_attrs, "type")
                 == "UnstructuredGrid",
             "VTU file is not an UnstructuredGrid");
         ::idmesh::detail::require_runtime(
@@ -701,17 +594,17 @@ namespace idmesh::vtk {
                     "unsupported VTU header_type");
         }
 
-        const auto piece_tag = opening_tag(xml, "Piece");
+        const auto piece_tag = detail::vtk::xml_opening_tag(xml, "Piece");
         const auto next_piece = xml.find(
             "<Piece", xml.find("<Piece") + 1);
         ::idmesh::detail::require_runtime(
             next_piece == std::string::npos,
             "multi-Piece VTU is not supported");
-        const auto piece_attrs = parse_attributes(piece_tag);
+        const auto piece_attrs = detail::vtk::xml_attributes(piece_tag);
         const auto point_count_u64 = parse_u64(
-            required_attribute(piece_attrs, "NumberOfPoints"));
+            detail::vtk::xml_required_attribute(piece_attrs, "NumberOfPoints"));
         const auto cell_count_u64 = parse_u64(
-            required_attribute(piece_attrs, "NumberOfCells"));
+            detail::vtk::xml_required_attribute(piece_attrs, "NumberOfCells"));
         ::idmesh::detail::require_runtime(
             point_count_u64 < invalid_index
                 && cell_count_u64 < invalid_index,
@@ -721,10 +614,10 @@ namespace idmesh::vtk {
         const auto cell_count
             = static_cast<std::size_t>(cell_count_u64);
 
-        const auto piece = element_body(xml, "Piece");
+        const auto piece = detail::vtk::xml_element_body(xml, "Piece");
 
         const auto point_arrays
-            = data_arrays(element_body(piece, "Points"));
+            = data_arrays(detail::vtk::xml_element_body(piece, "Points"));
         ::idmesh::detail::require_runtime(
             point_arrays.size() == 1,
             "VTU Points must contain exactly one DataArray");
@@ -750,7 +643,7 @@ namespace idmesh::vtk {
         }
 
         const auto cell_arrays
-            = data_arrays(element_body(piece, "Cells"));
+            = data_arrays(detail::vtk::xml_element_body(piece, "Cells"));
         const auto connectivity = find_named_array(
             cell_arrays, "connectivity", std::nullopt,
             appended, endian, header_width);
@@ -815,13 +708,13 @@ namespace idmesh::vtk {
         const auto read_field_section =
             [&](std::string_view name, std::size_t tuples,
                 auto& destination, bool cell_domain) {
-                const auto body = element_body(
+                const auto body = detail::vtk::xml_element_body(
                     piece, name, false);
                 if (body.empty())
                     return;
                 for (const auto& array : data_arrays(body)) {
                     const auto field_name = std::string(
-                        required_attribute(array.attributes, "Name"));
+                        detail::vtk::xml_required_attribute(array.attributes, "Name"));
                     auto values = decode_array(
                         array, tuples, appended,
                         endian, header_width);
@@ -847,11 +740,11 @@ namespace idmesh::vtk {
             cell_fields, true);
 
         const auto field_body
-            = element_body(piece, "FieldData", false);
+            = detail::vtk::xml_element_body(piece, "FieldData", false);
         if (!field_body.empty()) {
             for (const auto& array : data_arrays(field_body)) {
                 const auto field_name = std::string(
-                    required_attribute(array.attributes, "Name"));
+                    detail::vtk::xml_required_attribute(array.attributes, "Name"));
                 auto values = decode_array(
                     array, std::size_t {1}, appended,
                     endian, header_width);

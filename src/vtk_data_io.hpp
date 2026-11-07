@@ -5,6 +5,7 @@
 #include <bit>
 #include <cstddef>
 #include <iosfwd>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -47,5 +48,18 @@ namespace idmesh::detail::vtk {
 
     std::string xml_escape(std::string_view text);
     std::string xml_unescape(std::string_view text);
+
+    using XmlAttributes = std::map<std::string, std::string>;
+
+    XmlAttributes xml_attributes(std::string_view tag);
+    std::string_view xml_required_attribute(
+        const XmlAttributes& attributes, std::string_view name);
+    std::string_view xml_opening_tag(
+        std::string_view xml, std::string_view name);
+    std::string_view xml_element_body(
+        std::string_view xml, std::string_view name,
+        bool required = true);
+    std::vector<XmlAttributes> xml_self_closing_tags(
+        std::string_view body, std::string_view name);
 
 } // namespace idmesh::detail::vtk

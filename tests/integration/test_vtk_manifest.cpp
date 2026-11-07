@@ -1,3 +1,5 @@
+#include "test.hpp"
+
 #include <idmesh/data.hpp>
 #include <idmesh/mesh.hpp>
 #include <idmesh/vtk.hpp>
@@ -20,25 +22,6 @@ namespace {
     namespace data = idmesh::data;
     namespace vtk = idmesh::vtk;
     using idmesh::Index;
-
-    void check(bool condition, const char* message)
-    {
-        if (!condition)
-            throw std::runtime_error(message);
-    }
-
-    template <class Error, class Operation>
-    void expect_error(Operation&& operation, const char* message)
-    {
-        bool caught = false;
-        try {
-            operation();
-        }
-        catch (const Error&) {
-            caught = true;
-        }
-        check(caught, message);
-    }
 
     std::filesystem::path temp(const char* name)
     {
@@ -328,9 +311,10 @@ namespace {
 
 int main()
 {
-    pvd_round_trip();
-    series_round_trip();
-    pvtu_round_trip();
-    strict_rejections();
-    return 0;
+    return idmesh::test::run({
+        {"PVD round-trip", pvd_round_trip},
+        {"VTU series", series_round_trip},
+        {"PVTU round-trip", pvtu_round_trip},
+        {"strict rejections", strict_rejections},
+    });
 }
