@@ -29,11 +29,11 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 ## Extended IO and geometry (in progress)
 - [x] Retain physical group memberships and names from all Gmsh dimensions.
 - [x] Represent quadratic Gmsh geometry nodes separately from topological vertices.
-- [x] Add VTK legacy ASCII and Medit ASCII first-order readers and writers.
+- [x] Add VTK legacy ASCII/BINARY and VTU XML mesh/state readers and writers, plus Medit ASCII IO.
 - [x] Verify the supported high-order Gmsh imports and linear-format IO round-trips on all supported platforms.
 - [x] Implement analytic order-1/2 geometry interpolation and Jacobians for all standard cell families.
 - [x] Add supported native VTK quadratic types and Medit P2 (line/triangle/tetrahedron).
-- [ ] Add custom Medit Ordering descriptors and extended pyramid14 VTK Lagrange encoding.
+- [ ] Add custom Medit Ordering descriptors, extended pyramid14 VTK Lagrange encoding, and VTK time-series/PVTU manifests.
 
 ## Milestone 2 incremental implementation
 - [x] Rank-local MPI partition loading and deterministic global entity identity.

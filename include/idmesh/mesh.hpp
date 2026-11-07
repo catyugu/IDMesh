@@ -138,8 +138,9 @@ namespace idmesh {
     // Gmsh ASCII MSH 2.2 / 4.1: first- and second-order standard cells,
     // geometry-node connectivity, physical groups and names.
     IDMESH_API Mesh read_gmsh(const std::string& filename, BuildOptions options = {});
-    // ASCII legacy VTK UNSTRUCTURED_GRID with standard linear and supported
-    // quadratic cell types; at most one nonzero integer label is exported per cell.
+    // Mesh-only compatibility wrappers. The reader accepts ASCII/BINARY legacy
+    // UNSTRUCTURED_GRID; the writer emits ASCII. Field/state and VTU APIs live
+    // in idmesh/vtk.hpp.
     IDMESH_API Mesh read_vtk_legacy(const std::string& filename,
         BuildOptions options = {});
     IDMESH_API void write_vtk_legacy(const Mesh& mesh, const std::string& filename);
