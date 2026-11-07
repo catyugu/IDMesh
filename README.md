@@ -88,6 +88,19 @@ Gmsh import preserves supported labels and second-order geometry.
 Reference-to-physical geometry evaluation is available through
 `idmesh/geometry.hpp`.
 
+## Partition preprocessing
+
+Serial dual-graph partitioning and rank-local shard export are part of the core SDK and require no MPI dependency:
+
+```cpp
+#include <idmesh/partition.hpp>
+
+auto owners = idmesh::partition_graph(mesh, parts);
+idmesh::write_partition_shards(mesh, owners, ghost_layers, "mesh");
+```
+
+The optional MPI backend reads those shards at runtime.
+
 ## Optional backends
 
 Enable MPI:
