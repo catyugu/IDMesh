@@ -4,6 +4,7 @@
 #include <cmath>
 #include <filesystem>
 #include <idmesh/geometry.hpp>
+#include <idmesh/io.hpp>
 #include <iostream>
 #include <stdexcept>
 #include <utility>

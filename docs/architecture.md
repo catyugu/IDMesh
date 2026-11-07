@@ -129,6 +129,12 @@ PointData/CellData cannot preserve those associations exactly.
 
 ## IO capabilities and limitations
 
+The public `idmesh/io.hpp` owns mesh-only Gmsh, Medit and legacy VTK
+read/write declarations. The separate `idmesh/vtk.hpp` owns dataset and
+field/state-aware VTK/VTU/PVD/PVTU interfaces. Both are compiled into the
+existing `IDMesh::IDMesh` library; no new SDK target or data conversion
+layer is introduced. `idmesh/mesh.hpp` remains independent of file formats.
+
 - Gmsh MSH 2.2/4.1 ASCII: first- and second-order standard cells, physical
   memberships for dimensions 0 through d, physical names, and geometry nodes.
 - VTK legacy `UNSTRUCTURED_GRID`: ASCII and big-endian BINARY read/write,

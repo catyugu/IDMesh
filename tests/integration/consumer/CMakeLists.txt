@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.26)
 project(IDMeshConsumer LANGUAGES CXX)
 find_package(IDMesh CONFIG REQUIRED)
-add_executable(idmesh_consumer main.cpp)
+add_executable(idmesh_consumer main.cpp io.cpp)
 target_link_libraries(idmesh_consumer PRIVATE IDMesh::IDMesh)
 
 if(TARGET IDMesh::MPI)

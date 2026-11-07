@@ -1,4 +1,5 @@
 #include "contracts.hpp"
+#include "idmesh/io.hpp"
 #include "idmesh/vtk.hpp"
 #include "vtk_common.hpp"
 #include "vtk_data_io.hpp"
