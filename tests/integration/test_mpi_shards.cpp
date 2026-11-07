@@ -153,6 +153,17 @@ namespace {
             values[entity].first = global * 3 + dimension + 11;
             values[entity].second = global * 5 + dimension + 17;
         }
+        // Abandonment must finish transport without writing to borrowed records.
+        {
+            auto abandoned = plan.make_request(sizeof(Record));
+            abandoned.start(std::as_writable_bytes(std::span(values)));
+        }
+        for (Index entity = 0; entity < count; ++entity)
+            if (!is_owned[entity])
+                require(values[entity].first == ~std::uint64_t {0}
+                        && values[entity].second == ~std::uint64_t {0},
+                    "abandoned host halo updated ghost records");
+
         auto request = plan.make_request(sizeof(Record));
         request.start(std::as_writable_bytes(std::span(values)));
         request.wait();
@@ -490,40 +501,82 @@ namespace {
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    // MPI_Initialized must reject use both before initialization and after finalization.
+    bool rejected_before_init = false;
     try {
-        const auto context = idmesh::mpi::Context::world();
-        const auto from_handle = idmesh::mpi::Context::from_fortran_handle(
-            static_cast<std::int64_t>(MPI_Comm_c2f(MPI_COMM_WORLD)));
-        const int rank = context.rank(), size = context.size();
-        require(rank == from_handle.rank() && size == from_handle.size(),
-            "MPI communicator handle conversion changed context");
-        require(size >= 2 && size <= 3, "test requires two or three MPI ranks");
-        const auto base = (std::filesystem::temp_directory_path()
-            / ("idmesh-parallel-" + std::to_string(size)))
-                              .string();
-        const auto depth1
-            = test_shard(context, base + "-g1", rank, size, 1);
-        const auto depth2
-            = test_shard(context, base + "-g2", rank, size, 2);
-        require(std::includes(
-                    depth2.begin(), depth2.end(),
-                    depth1.begin(), depth1.end()),
-            "two-layer ghost cells are not a superset of one-layer ghosts");
-        int local_growth = depth2.size() > depth1.size() ? 1 : 0;
-        int any_growth = 0;
-        MPI_Allreduce(&local_growth, &any_growth, 1,
-            MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-        require(any_growth != 0,
-            "second ghost layer did not add any cell");
-        test_complete_3d(context, base + "-3d", rank, size);
-        if (rank == 0)
-            std::cout << "MPI shard: graph cuts, rank-local loading, all-dimension "
-                      << "identity/halo, orientation and quadratic geometry OK\n";
+        (void)idmesh::mpi::Context::world();
+    }
+    catch (const std::logic_error&) {
+        rejected_before_init = true;
+    }
+    if (!rejected_before_init) {
+        std::cerr << "MPI context constructed before MPI_Init\n";
+        return 1;
+    }
+
+    MPI_Init(&argc, &argv);
+    const auto handle = static_cast<std::int64_t>(MPI_Comm_c2f(MPI_COMM_WORLD));
+    try {
+        // All communicator owners must be destroyed before MPI_Finalize.
+        {
+            const auto context = idmesh::mpi::Context::world();
+            const auto from_handle
+                = idmesh::mpi::Context::from_fortran_handle(handle);
+            const int rank = context.rank(), size = context.size();
+            require(rank == from_handle.rank() && size == from_handle.size(),
+                "MPI communicator handle conversion changed context");
+            require(size >= 2 && size <= 3, "test requires two or three MPI ranks");
+            const auto base = (std::filesystem::temp_directory_path()
+                / ("idmesh-parallel-" + std::to_string(size)))
+                                  .string();
+            const auto depth1
+                = test_shard(context, base + "-g1", rank, size, 1);
+            const auto depth2
+                = test_shard(context, base + "-g2", rank, size, 2);
+            require(std::includes(
+                        depth2.begin(), depth2.end(),
+                        depth1.begin(), depth1.end()),
+                "two-layer ghost cells are not a superset of one-layer ghosts");
+            int local_growth = depth2.size() > depth1.size() ? 1 : 0;
+            int any_growth = 0;
+            MPI_Allreduce(&local_growth, &any_growth, 1,
+                MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+            require(any_growth != 0,
+                "second ghost layer did not add any cell");
+            test_complete_3d(context, base + "-3d", rank, size);
+            if (rank == 0)
+                std::cout << "MPI shard: graph cuts, rank-local loading, all-dimension "
+                          << "identity/halo, orientation and quadratic geometry OK\n";
+        }
+
         MPI_Finalize();
+        bool world_rejected = false, handle_rejected = false;
+        try {
+            (void)idmesh::mpi::Context::world();
+        }
+        catch (const std::logic_error&) {
+            world_rejected = true;
+        }
+        try {
+            (void)idmesh::mpi::Context::from_fortran_handle(handle);
+        }
+        catch (const std::logic_error&) {
+            handle_rejected = true;
+        }
+        if (!world_rejected || !handle_rejected) {
+            std::cerr << "MPI context accepted a finalized MPI runtime\n";
+            return 1;
+        }
         return 0;
     }
     catch (const std::exception& error) {
+        int finalized = 0;
+        MPI_Finalized(&finalized);
+        if (finalized) {
+            std::cerr << "MPI shard test after MPI_Finalize: "
+                      << error.what() << '\n';
+            return 1;
+        }
         int rank = 0;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         std::cerr << "MPI shard test rank " << rank << ": " << error.what() << '\n';

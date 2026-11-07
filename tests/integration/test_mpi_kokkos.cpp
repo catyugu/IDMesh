@@ -48,9 +48,22 @@ namespace {
         Kokkos::deep_copy(field, host);
 
         const auto bytes_per_entity = 2 * sizeof(Value);
+        const auto byte_size = field.extent(0) * sizeof(Value);
+        std::vector<Value> before(host.extent(0));
+        for (std::size_t i = 0; i < before.size(); ++i)
+            before[i] = host(i);
+        {
+            idmesh::mpi::kokkos::DeviceHaloPlan abandoned(
+                partition.exchange_plan(dimension), bytes_per_entity);
+            abandoned.start(field.data(), byte_size, mode);
+        }
+        Kokkos::deep_copy(host, field);
+        for (std::size_t i = 0; i < before.size(); ++i)
+            if (host(i) != before[i])
+                throw std::runtime_error("abandoned device halo updated ghost records");
+
         idmesh::mpi::kokkos::DeviceHaloPlan plan(
             partition.exchange_plan(dimension), bytes_per_entity);
-        const auto byte_size = field.extent(0) * sizeof(Value);
         plan.start(field.data(), byte_size, mode);
         plan.wait();
         plan.start(field.data(), byte_size, mode);
