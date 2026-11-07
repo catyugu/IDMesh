@@ -13,6 +13,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -70,30 +71,24 @@ namespace {
         return std::move(builder).finalize();
     }
 
-    idmesh::Mesh source_3d()
+    idmesh::Mesh source_3d_mixed()
     {
         idmesh::MeshBuilder builder(3, 3);
-        constexpr Index nx = 3, ny = 2;
-        for (Index z = 0; z <= 1; ++z)
-            for (Index y = 0; y <= ny; ++y)
-                for (Index x = 0; x <= nx; ++x)
-                    builder.add_vertex({double(x), double(y), double(z)});
+        for (const auto& p : std::array<std::array<double, 3>, 12> {{
+                 {{0, 0, 0}}, {{1, 0, 0}}, {{1, 1, 0}}, {{0, 1, 0}},
+                 {{0, 0, 1}}, {{1, 0, 1}}, {{1, 1, 1}}, {{0, 1, 1}},
+                 {{2, 0.5, 0}}, {{2, 0.5, 1}},
+                 {{2, 1.5, 0.5}}, {{3, 1.5, 0.5}}}})
+            builder.add_vertex(p);
 
-        const auto vertex = [](Index x, Index y, Index z) {
-            return z * (nx + 1) * (ny + 1) + y * (nx + 1) + x;
-        };
-        for (Index parity = 0; parity < 2; ++parity)
-            for (Index y = 0; y < ny; ++y)
-                for (Index x = 0; x < nx; ++x) {
-                    if ((x + y) % 2 != parity)
-                        continue;
-                    const std::array<Index, 8> corners {
-                        vertex(x, y, 0), vertex(x + 1, y, 0),
-                        vertex(x + 1, y + 1, 0), vertex(x, y + 1, 0),
-                        vertex(x, y, 1), vertex(x + 1, y, 1),
-                        vertex(x + 1, y + 1, 1), vertex(x, y + 1, 1)};
-                    builder.add_cell(idmesh::CellType::hexahedron, corners);
-                }
+        builder.add_cell(idmesh::CellType::hexahedron,
+            std::array<Index, 8> {0, 1, 2, 3, 4, 5, 6, 7});
+        builder.add_cell(idmesh::CellType::prism,
+            std::array<Index, 6> {1, 2, 8, 5, 6, 9});
+        builder.add_cell(idmesh::CellType::pyramid,
+            std::array<Index, 5> {2, 8, 9, 6, 10});
+        builder.add_cell(idmesh::CellType::tetrahedron,
+            std::array<Index, 4> {8, 9, 10, 11});
         return std::move(builder).finalize();
     }
 
