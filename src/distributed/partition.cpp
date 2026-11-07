@@ -1,5 +1,6 @@
 #include "contracts.hpp"
 #include "idmesh/partition.hpp"
+#include "shard.hpp"
 
 #include <algorithm>
 #include <array>
@@ -383,7 +384,8 @@ namespace idmesh {
                 static_cast<bool>(out),
                 "cannot create partition shard file");
 
-            out << "IDMESH_SHARD 3\nDIM " << d << ' '
+            out << detail::shard::magic << ' ' << detail::shard::version
+                << "\nDIM " << d << ' '
                 << source.geometric_dimension() << '\n';
             out << std::setprecision(17);
 
