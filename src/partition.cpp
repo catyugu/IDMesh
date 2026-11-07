@@ -67,6 +67,78 @@ namespace idmesh {
             return distance;
         }
 
+        Mesh complete_identity_topology(const Mesh& source)
+        {
+            const Index dim = source.dimension();
+            bool complete = true;
+            for (Index k = 0; k <= dim; ++k)
+                complete = complete && source.has_entities(k);
+            if (complete)
+                return source;
+
+            MeshBuilder builder(dim, source.geometric_dimension());
+            for (const auto& point : source.coordinates())
+                builder.add_vertex(point);
+            for (Index cell = 0; cell < source.entity_count(dim); ++cell)
+                builder.add_cell(source.cell_types()[cell],
+                    source.entity_vertices(dim, cell));
+            return std::move(builder).finalize(
+                {.topology = TopologyLayout::complete,
+                    .relations = RelationDirection::bidirectional});
+        }
+
+        std::vector<std::vector<int>> entity_owners(
+            const Mesh& topology, std::span<const int> cell_owners, int parts)
+        {
+            const Index dim = topology.dimension();
+            std::vector<std::vector<int>> result(dim + 1);
+            for (Index k = 0; k <= dim; ++k)
+                result[k].assign(topology.entity_count(k), parts);
+            result[dim].assign(cell_owners.begin(), cell_owners.end());
+
+            for (int from = static_cast<int>(dim); from > 0; --from) {
+                const auto boundary = topology.relation(
+                    static_cast<Index>(from), static_cast<Index>(from - 1));
+                for (Index entity = 0;
+                     entity < topology.entity_count(static_cast<Index>(from));
+                     ++entity) {
+                    for (Index lower : boundary[entity].targets)
+                        result[from - 1][lower] = std::min(
+                            result[from - 1][lower],
+                            result[from][entity]);
+                }
+            }
+            for (Index k = 0; k < dim; ++k)
+                ::idmesh::detail::require_runtime(
+                    std::all_of(result[k].begin(), result[k].end(),
+                        [parts](int owner) {
+                            return owner >= 0 && owner < parts;
+                        }),
+                    "could not determine subentity owner");
+            return result;
+        }
+
+        std::vector<std::set<Index>> entity_closure(
+            const Mesh& topology, std::span<const Index> cells)
+        {
+            const Index dim = topology.dimension();
+            std::vector<std::set<Index>> result(dim + 1);
+            result[dim].insert(cells.begin(), cells.end());
+            for (int from = static_cast<int>(dim); from > 0; --from) {
+                const auto boundary = topology.relation(
+                    static_cast<Index>(from), static_cast<Index>(from - 1));
+                for (Index entity : result[from])
+                    for (Index lower : boundary[entity].targets)
+                        result[from - 1].insert(lower);
+            }
+            return result;
+        }
+
+        struct HaloLayout {
+            std::map<int, std::vector<Index>> send;
+            std::map<int, std::vector<Index>> receive;
+        };
+
     } // namespace
 
     std::vector<int> partition_graph(const Mesh& source, int parts)
@@ -152,39 +224,50 @@ namespace idmesh {
         return owners;
     }
 
-    void write_partition_shards(const Mesh& source, std::span<const int> owners,
-        Index ghost_layers, const std::string& prefix)
+    void write_partition_shards(const Mesh& source,
+        std::span<const int> owners, Index ghost_layers,
+        const std::string& prefix)
     {
         const Index d = source.dimension();
         const Index n = source.entity_count(d);
-        ::idmesh::detail::require_argument(owners.size() == n && ghost_layers <= 8,
+        ::idmesh::detail::require_argument(
+            owners.size() == n && ghost_layers <= 8,
             "invalid shard owner count or ghost depth");
-        ::idmesh::detail::require_argument(n > 0, "cannot export empty source mesh");
+        ::idmesh::detail::require_argument(
+            n > 0, "cannot export empty source mesh");
+
         int parts = 0;
         for (int owner : owners) {
-            ::idmesh::detail::require_argument(owner >= 0 && owner < std::numeric_limits<int>::max() - 1,
+            ::idmesh::detail::require_argument(
+                owner >= 0
+                    && owner < std::numeric_limits<int>::max() - 1,
                 "invalid shard owner rank");
             parts = std::max(parts, owner + 1);
         }
-        ::idmesh::detail::require_argument(parts >= 1, "empty shard partition");
+        ::idmesh::detail::require_argument(
+            parts >= 1, "empty shard partition");
+
         const auto graph = dual_graph(source);
         std::vector<std::vector<Index>> owned(parts);
         for (Index cell = 0; cell < n; ++cell)
             owned[owners[cell]].push_back(cell);
 
+        std::vector<std::vector<Index>> local_cells(parts);
         for (int rank = 0; rank < parts; ++rank) {
-            ::idmesh::detail::require_argument(!owned[rank].empty(), "every exported shard must own cells");
+            ::idmesh::detail::require_argument(
+                !owned[rank].empty(),
+                "every exported shard must own cells");
             std::vector<bool> seen(n);
             std::vector<Index> frontier;
-            for (Index c : owned[rank]) {
-                seen[c] = true;
-                frontier.push_back(c);
+            for (Index cell : owned[rank]) {
+                seen[cell] = true;
+                frontier.push_back(cell);
             }
             std::set<Index> ghosts;
             for (Index depth = 0; depth < ghost_layers; ++depth) {
                 std::vector<Index> next;
                 for (Index cell : frontier) {
-                    for (auto neighbor : graph[cell]) {
+                    for (Index neighbor : graph[cell]) {
                         if (seen[neighbor])
                             continue;
                         seen[neighbor] = true;
@@ -195,80 +278,212 @@ namespace idmesh {
                 }
                 frontier = std::move(next);
             }
-            std::vector<Index> local = owned[rank];
-            local.insert(local.end(), ghosts.begin(), ghosts.end());
+            local_cells[rank] = owned[rank];
+            local_cells[rank].insert(local_cells[rank].end(),
+                ghosts.begin(), ghosts.end());
+        }
 
-            std::set<Index> corners;
-            std::set<Index> geometry;
-            for (Index c : local) {
-                for (Index v : source.entity_vertices(d, c))
-                    corners.insert(v);
-                const auto g = source.cell_geometry_nodes(c);
-                for (std::size_t j = cell_vertex_count(source.cell_types()[c]);
-                    j < g.size(); ++j)
-                    geometry.insert(g[j]);
+        const Mesh identity = complete_identity_topology(source);
+        const auto global_owners
+            = entity_owners(identity, owners, parts);
+
+        std::vector<std::vector<std::set<Index>>> local_entities(parts);
+        for (int rank = 0; rank < parts; ++rank)
+            local_entities[rank]
+                = entity_closure(identity, local_cells[rank]);
+
+        std::vector<std::vector<HaloLayout>> halos(
+            parts, std::vector<HaloLayout>(d + 1));
+        for (int rank = 0; rank < parts; ++rank) {
+            for (Index k = 0; k <= d; ++k) {
+                for (Index entity : local_entities[rank][k]) {
+                    const int owner = global_owners[k][entity];
+                    if (owner == rank)
+                        continue;
+                    halos[rank][k].receive[owner].push_back(entity);
+                    halos[owner][k].send[rank].push_back(entity);
+                }
             }
+        }
+        for (auto& rank_halos : halos) {
+            for (auto& layout : rank_halos) {
+                for (auto& [peer, ids] : layout.send) {
+                    (void)peer;
+                    std::sort(ids.begin(), ids.end());
+                }
+                for (auto& [peer, ids] : layout.receive) {
+                    (void)peer;
+                    std::sort(ids.begin(), ids.end());
+                }
+            }
+        }
+
+        for (int rank = 0; rank < parts; ++rank) {
+            const auto& local = local_cells[rank];
+            const auto& entities = local_entities[rank];
+            const auto& corners = entities[0];
+
+            std::set<Index> geometry;
+            for (Index cell : local) {
+                const auto nodes = source.cell_geometry_nodes(cell);
+                for (std::size_t j
+                         = cell_vertex_count(source.cell_types()[cell]);
+                     j < nodes.size(); ++j)
+                    geometry.insert(nodes[j]);
+            }
+
             std::vector<const Label*> labels;
             std::map<std::pair<Index, int>, std::string> names;
-            std::set<Index> local_cells(local.begin(), local.end());
+            const std::set<Index> local_cell_set(
+                local.begin(), local.end());
             for (const auto& label : source.labels()) {
                 if (label.dimension == d) {
-                    if (label.entity == invalid_index || !local_cells.contains(label.entity))
+                    if (label.entity == invalid_index
+                        || !local_cell_set.contains(label.entity))
                         continue;
                 }
                 else {
-                    const auto all_corners_present = std::all_of(
+                    const bool all_corners_present = std::all_of(
                         label.vertices.begin(), label.vertices.end(),
-                        [&](Index vertex) { return corners.contains(vertex); });
+                        [&](Index vertex) {
+                            return corners.contains(vertex);
+                        });
                     if (!all_corners_present)
                         continue;
                 }
                 labels.push_back(&label);
-                auto name = source.label_name(label.dimension, label.value);
+                const auto name
+                    = source.label_name(label.dimension, label.value);
                 if (!name.empty())
-                    names[{label.dimension, label.value}] = std::string(name);
+                    names[{label.dimension, label.value}]
+                        = std::string(name);
             }
 
-            std::ofstream out(prefix + "." + std::to_string(rank) + ".idm");
-            ::idmesh::detail::require_runtime(static_cast<bool>(out), "cannot create partition shard file");
-            out << "IDMESH_SHARD 2\nDIM " << d << ' ' << source.geometric_dimension() << '\n';
+            std::size_t identity_count = 0;
+            for (Index k = 1; k < d; ++k)
+                identity_count += entities[k].size();
+
+            std::size_t halo_count = 0;
+            for (Index k = 0; k <= d; ++k) {
+                std::set<int> peers;
+                for (const auto& [peer, ids] : halos[rank][k].send) {
+                    (void)ids;
+                    peers.insert(peer);
+                }
+                for (const auto& [peer, ids] : halos[rank][k].receive) {
+                    (void)ids;
+                    peers.insert(peer);
+                }
+                halo_count += peers.size();
+            }
+
+            std::ofstream out(
+                prefix + "." + std::to_string(rank) + ".idm");
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(out),
+                "cannot create partition shard file");
+
+            out << "IDMESH_SHARD 3\nDIM " << d << ' '
+                << source.geometric_dimension() << '\n';
             out << std::setprecision(17);
+
             out << "VERTICES " << corners.size() << '\n';
             for (Index id : corners) {
                 const auto p = source.coordinates()[id];
-                out << id << ' ' << p[0] << ' ' << p[1] << ' ' << p[2] << '\n';
+                out << id << ' ' << global_owners[0][id] << ' '
+                    << p[0] << ' ' << p[1] << ' ' << p[2] << '\n';
             }
+
             out << "GEOMETRY_NODES " << geometry.size() << '\n';
             for (Index id : geometry) {
                 const auto p = source.geometry_node_position(id);
-                out << id << ' ' << p[0] << ' ' << p[1] << ' ' << p[2] << '\n';
+                out << id << ' ' << p[0] << ' ' << p[1] << ' '
+                    << p[2] << '\n';
             }
+
             out << "CELLS " << local.size() << '\n';
             for (Index cell : local) {
-                const auto g = source.cell_geometry_nodes(cell);
+                const auto nodes = source.cell_geometry_nodes(cell);
                 out << cell << ' ' << owners[cell] << ' '
-                    << static_cast<int>(source.cell_types()[cell]) << ' ' << g.size();
-                for (Index id : g)
+                    << static_cast<int>(source.cell_types()[cell])
+                    << ' ' << nodes.size();
+                for (Index id : nodes)
                     out << ' ' << id;
                 out << '\n';
             }
+
+            out << "ENTITIES " << identity_count << '\n';
+            for (Index k = 1; k < d; ++k) {
+                for (Index entity : entities[k]) {
+                    const auto vertices
+                        = identity.entity_vertices(k, entity);
+                    out << k << ' ' << entity << ' '
+                        << global_owners[k][entity] << ' '
+                        << vertices.size();
+                    for (Index vertex : vertices)
+                        out << ' ' << vertex;
+                    out << '\n';
+                }
+            }
+
+            out << "HALOS " << halo_count << '\n';
+            for (Index k = 0; k <= d; ++k) {
+                std::set<int> peers;
+                for (const auto& [peer, ids] : halos[rank][k].send) {
+                    (void)ids;
+                    peers.insert(peer);
+                }
+                for (const auto& [peer, ids] : halos[rank][k].receive) {
+                    (void)ids;
+                    peers.insert(peer);
+                }
+                for (int peer : peers) {
+                    static const std::vector<Index> empty;
+                    const auto sent = halos[rank][k].send.find(peer);
+                    const auto received
+                        = halos[rank][k].receive.find(peer);
+                    const auto& send_ids = sent == halos[rank][k].send.end()
+                        ? empty
+                        : sent->second;
+                    const auto& receive_ids
+                        = received == halos[rank][k].receive.end()
+                        ? empty
+                        : received->second;
+
+                    out << k << ' ' << peer << ' '
+                        << send_ids.size() << ' '
+                        << receive_ids.size();
+                    for (Index id : send_ids)
+                        out << ' ' << id;
+                    for (Index id : receive_ids)
+                        out << ' ' << id;
+                    out << '\n';
+                }
+            }
+
             out << "LABELS " << labels.size() << '\n';
             for (const auto* label : labels) {
                 if (label->dimension == d) {
-                    out << d << ' ' << label->value << " 1 " << label->entity << '\n';
+                    out << d << ' ' << label->value
+                        << " 1 " << label->entity << '\n';
                 }
                 else {
-                    out << label->dimension << ' ' << label->value << ' ' << label->vertices.size();
+                    out << label->dimension << ' ' << label->value
+                        << ' ' << label->vertices.size();
                     for (Index vertex : label->vertices)
                         out << ' ' << vertex;
                     out << '\n';
                 }
             }
+
             out << "NAMES " << names.size() << '\n';
             for (const auto& [key, name] : names)
-                out << key.first << ' ' << key.second << ' ' << std::quoted(name) << '\n';
+                out << key.first << ' ' << key.second << ' '
+                    << std::quoted(name) << '\n';
             out << "END\n";
-            ::idmesh::detail::require_runtime(static_cast<bool>(out), "partition shard write failure");
+            ::idmesh::detail::require_runtime(
+                static_cast<bool>(out),
+                "partition shard write failure");
         }
     }
 

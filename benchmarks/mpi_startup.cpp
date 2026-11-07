@@ -170,14 +170,6 @@ namespace {
         return result;
     }
 
-    std::uint64_t reduce_sum(std::uint64_t value)
-    {
-        std::uint64_t result = 0;
-        MPI_Reduce(
-            &value, &result, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
-        return result;
-    }
-
 } // namespace
 
 int main(int argc, char** argv)
@@ -212,14 +204,8 @@ int main(int argc, char** argv)
                 = reduce_max(milliseconds(begin, end), MPI_DOUBLE);
             const auto parse_ms = reduce_max(profile.parse_ms, MPI_DOUBLE);
             const auto mesh_ms = reduce_max(profile.local_mesh_ms, MPI_DOUBLE);
-            const auto owner_ms
-                = reduce_max(profile.owner_candidates_ms, MPI_DOUBLE);
-            const auto request_ms
-                = reduce_max(profile.registry_request_ms, MPI_DOUBLE);
-            const auto resolve_ms
-                = reduce_max(profile.registry_resolve_ms, MPI_DOUBLE);
-            const auto reply_ms
-                = reduce_max(profile.registry_reply_ms, MPI_DOUBLE);
+            const auto metadata_ms
+                = reduce_max(profile.metadata_ms, MPI_DOUBLE);
             const auto plan_ms
                 = reduce_max(profile.exchange_plan_ms, MPI_DOUBLE);
             const auto validate_ms
@@ -228,15 +214,6 @@ int main(int argc, char** argv)
             std::uint64_t peak_delta
                 = peak_after > peak_before ? peak_after - peak_before : 0;
             peak_delta = reduce_max(peak_delta, MPI_UINT64_T);
-
-            const auto registry_send
-                = reduce_sum(profile.registry_send_bytes);
-            const auto registry_receive
-                = reduce_sum(profile.registry_receive_bytes);
-            const auto plan_send
-                = reduce_sum(profile.exchange_plan_send_bytes);
-            const auto plan_receive
-                = reduce_sum(profile.exchange_plan_receive_bytes);
 
             const Index dim = partition.mesh().dimension();
             const std::uint64_t cells
@@ -257,22 +234,15 @@ int main(int argc, char** argv)
                 std::cout << std::fixed << std::setprecision(3)
                           << "ranks,layout,local_cells_max,local_facets_max,"
                              "local_edges_max,total_ms_max,parse_ms_max,"
-                             "local_mesh_ms_max,owner_candidates_ms_max,"
-                             "registry_request_ms_max,registry_resolve_ms_max,"
-                             "registry_reply_ms_max,exchange_plan_ms_max,"
-                             "validate_ms_max,peak_rss_delta_bytes_max,"
-                             "registry_send_bytes,registry_receive_bytes,"
-                             "exchange_plan_send_bytes,"
-                             "exchange_plan_receive_bytes\n"
+                             "local_mesh_ms_max,metadata_ms_max,"
+                             "exchange_plan_ms_max,validate_ms_max,"
+                             "peak_rss_delta_bytes_max\n"
                           << context.size() << ',' << args.layout_name << ','
                           << max_cells << ',' << max_facets << ','
                           << max_edges << ',' << total_ms << ',' << parse_ms
-                          << ',' << mesh_ms << ',' << owner_ms << ','
-                          << request_ms << ',' << resolve_ms << ','
-                          << reply_ms << ',' << plan_ms << ','
-                          << validate_ms << ',' << peak_delta << ','
-                          << registry_send << ',' << registry_receive << ','
-                          << plan_send << ',' << plan_receive << '\n';
+                          << ',' << mesh_ms << ',' << metadata_ms << ','
+                          << plan_ms << ',' << validate_ms << ','
+                          << peak_delta << '\n';
             }
         }
         catch (const std::exception& error) {

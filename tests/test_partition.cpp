@@ -55,8 +55,16 @@ int main()
             std::string magic;
             int version = 0;
             require(static_cast<bool>(input >> magic >> version)
-                    && magic == "IDMESH_SHARD" && version == 2,
+                    && magic == "IDMESH_SHARD" && version == 3,
                 "invalid core shard output");
+            input.clear();
+            input.seekg(0);
+            const std::string contents {
+                std::istreambuf_iterator<char>(input),
+                std::istreambuf_iterator<char>()};
+            require(contents.find("\nENTITIES ") != std::string::npos
+                    && contents.find("\nHALOS ") != std::string::npos,
+                "execution-ready shard metadata is missing");
         }
         std::filesystem::remove(path);
     }

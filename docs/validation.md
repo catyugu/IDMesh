@@ -50,10 +50,12 @@ memory measurements and reproducible performance runs.
 `partition_graph` is a balanced deterministic region-growing heuristic
 on the Cell dual graph. It is useful as a dependency-free baseline.
 `write_partition_shards` is an offline serial exporter and needs the
-global source mesh once; **runtime** `read_partition_shard` only reads
-a Rank's local owned/ghost data, uses a distributed identity registry, and
-builds flat sparse-neighbor halo plans backed by MPI distributed-graph
-communicators.
+global source mesh once. It writes stable entity identity, ownership and Halo
+metadata into each execution-ready shard. **Runtime** `read_partition_shard`
+therefore reads only a Rank's local owned/Ghost data, maps embedded global IDs
+to local entities, and builds flat sparse-neighbor Halo plans backed by MPI
+distributed-graph communicators; it performs no distributed identity registry
+or Halo-discovery exchange.
 Large multi-node weak scaling, ParMETIS-class partition quality, generic
 distributed Gmsh ingestion, dynamic repartitioning and GPU-aware MPI
 throughput are future work.

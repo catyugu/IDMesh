@@ -93,6 +93,32 @@ namespace {
         return std::move(builder).finalize();
     }
 
+    using EntityKey
+        = std::pair<Index, std::vector<std::uint64_t>>;
+
+    std::map<EntityKey, std::uint64_t> source_entity_ids(
+        const idmesh::Mesh& mesh)
+    {
+        std::map<EntityKey, std::uint64_t> result;
+        for (Index k = 0; k < mesh.dimension(); ++k) {
+            if (!mesh.has_entities(k))
+                continue;
+            for (Index entity = 0;
+                 entity < mesh.entity_count(k); ++entity) {
+                const auto vertices
+                    = mesh.entity_vertices(k, entity);
+                std::vector<std::uint64_t> key(
+                    vertices.begin(), vertices.end());
+                std::sort(key.begin(), key.end());
+                require(result.emplace(
+                            EntityKey {k, std::move(key)}, entity)
+                            .second,
+                    "duplicate source entity signature");
+            }
+        }
+        return result;
+    }
+
     void check_entity_exchange(const idmesh::mpi::PartitionedMesh& partition,
         Index dimension, int rank)
     {
@@ -183,7 +209,8 @@ namespace {
     }
 
     void check_shared_identity(
-        const idmesh::mpi::PartitionedMesh& partition, int size)
+        const idmesh::mpi::PartitionedMesh& partition, int size,
+        const std::map<EntityKey, std::uint64_t>* expected = nullptr)
     {
         const Index dim = partition.mesh().dimension();
         std::vector<std::uint64_t> here;
@@ -230,6 +257,12 @@ namespace {
             std::sort(sorted.begin(), sorted.end());
 
             Key key {dimension, std::move(sorted)};
+            if (expected != nullptr) {
+                const auto source = expected->find(key);
+                require(source != expected->end()
+                        && source->second == global,
+                    "distributed global ID differs from source topology ID");
+            }
             auto [existing, inserted] = identities.try_emplace(
                 key, global, owner);
             require(inserted
@@ -308,8 +341,10 @@ namespace {
     {
         std::optional<idmesh::Mesh> root;
         std::vector<int> assignments;
+        std::map<EntityKey, std::uint64_t> expected_ids;
         if (rank == 0) {
             root.emplace(source());
+            expected_ids = source_entity_ids(*root);
             assignments = idmesh::partition_graph(*root, size);
             std::vector<int> counts(size);
             for (int owner : assignments) {
@@ -342,7 +377,8 @@ namespace {
             if (partition.mesh().has_entities(k))
                 check_entity_exchange(partition, k, rank);
 
-        check_shared_identity(partition, size);
+        check_shared_identity(
+            partition, size, rank == 0 ? &expected_ids : nullptr);
         check_shared_incidence(partition, size);
 
         const auto labels = partition.mesh().labels();
@@ -376,8 +412,10 @@ namespace {
     void test_complete_3d(const idmesh::mpi::Context& context,
         const std::string& prefix, int rank, int size)
     {
+        std::map<EntityKey, std::uint64_t> expected_ids;
         if (rank == 0) {
             const auto mesh = source_3d_mixed();
+            expected_ids = source_entity_ids(mesh);
             const auto assignments = idmesh::partition_graph(mesh, size);
             idmesh::write_partition_shards(mesh, assignments, 1, prefix);
         }
@@ -396,7 +434,8 @@ namespace {
             "complete 3D topology was not materialized");
         for (Index k = 0; k <= 3; ++k)
             check_entity_exchange(partition, k, rank);
-        check_shared_identity(partition, size);
+        check_shared_identity(
+            partition, size, rank == 0 ? &expected_ids : nullptr);
         check_shared_incidence(partition, size);
 
         unsigned local_types = 0;
@@ -414,6 +453,31 @@ namespace {
                         & (1u << static_cast<unsigned>(type)))
                     != 0,
                 "mixed 3D distributed fixture lost a cell family");
+
+        auto facets = idmesh::mpi::read_partition_shard(
+            context, local_path,
+            idmesh::BuildOptions {
+                .topology = idmesh::TopologyLayout::cell_facets,
+                .relations = idmesh::RelationDirection::bidirectional});
+        facets.mesh().validate();
+        require(facets.mesh().has_entities(2)
+                && !facets.mesh().has_entities(1),
+            "cell_facets layout materialized the wrong topology");
+        check_entity_exchange(facets, 0, rank);
+        check_entity_exchange(facets, 2, rank);
+        check_entity_exchange(facets, 3, rank);
+
+        auto minimal = idmesh::mpi::read_partition_shard(
+            context, local_path,
+            idmesh::BuildOptions {
+                .topology = idmesh::TopologyLayout::cell_vertices,
+                .relations = idmesh::RelationDirection::bidirectional});
+        minimal.mesh().validate();
+        require(!minimal.mesh().has_entities(1)
+                && !minimal.mesh().has_entities(2),
+            "cell_vertices layout materialized intermediate topology");
+        check_entity_exchange(minimal, 0, rank);
+        check_entity_exchange(minimal, 3, rank);
 
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
