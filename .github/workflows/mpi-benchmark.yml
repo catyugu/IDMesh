@@ -36,9 +36,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake -S baseline -B baseline/build -DCMAKE_BUILD_TYPE=Release             -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
+          cmake -S baseline -B baseline/build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
           cmake --build baseline/build --target idmesh_mpi_benchmark --parallel 2
-          cmake -S current -B current/build -DCMAKE_BUILD_TYPE=Release             -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
+          cmake -S current -B current/build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
           cmake --build current/build --target idmesh_mpi_benchmark --parallel 2
 
       - name: Run same-runner comparison
@@ -46,23 +46,34 @@ jobs:
         run: |
           set -euo pipefail
           : > benchmark.log
-          run_case() {
+
+          run_once() {
             local revision="$1"
             local exe="$2"
             local side="$3"
             local components="$4"
             local ghosts="$5"
             local iterations="$6"
-            for repeat in 1 2 3; do
-              echo "CASE revision=${revision} side=${side} components=${components} ghosts=${ghosts} repeat=${repeat}" | tee -a benchmark.log
-              mpirun -n 2 --bind-to none "$exe"                 --side "$side" --components "$components"                 --ghost-layers "$ghosts" --iterations "$iterations" | tee -a benchmark.log
-            done
+            local repeat="$7"
+            echo "CASE revision=${revision} side=${side} components=${components} ghosts=${ghosts} repeat=${repeat}" | tee -a benchmark.log
+            mpirun -n 2 --bind-to none "$exe" --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations "$iterations" | tee -a benchmark.log
           }
 
           for spec in "128 1 1 200" "256 8 1 200" "256 8 4 200"; do
             read -r side components ghosts iterations <<< "$spec"
-            run_case baseline baseline/build/benchmarks/idmesh_mpi_benchmark               "$side" "$components" "$ghosts" "$iterations"
-            run_case current current/build/benchmarks/idmesh_mpi_benchmark               "$side" "$components" "$ghosts" "$iterations"
+
+            mpirun -n 2 --bind-to none baseline/build/benchmarks/idmesh_mpi_benchmark --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations 50 >/dev/null
+            mpirun -n 2 --bind-to none current/build/benchmarks/idmesh_mpi_benchmark --side "$side" --components "$components" --ghost-layers "$ghosts" --iterations 50 >/dev/null
+
+            for repeat in 1 2 3 4 5; do
+              if (( repeat % 2 )); then
+                run_once baseline baseline/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
+                run_once current current/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
+              else
+                run_once current current/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
+                run_once baseline baseline/build/benchmarks/idmesh_mpi_benchmark "$side" "$components" "$ghosts" "$iterations" "$repeat"
+              fi
+            done
           done
 
       - uses: actions/upload-artifact@v4
