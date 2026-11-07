@@ -49,12 +49,14 @@ int main()
     idmesh::write_partition_shards(mesh, owners, 1, prefix);
     for (int rank = 0; rank < 2; ++rank) {
         const auto path = prefix + "." + std::to_string(rank) + ".idm";
-        std::ifstream input(path);
-        std::string magic;
-        int version = 0;
-        require(static_cast<bool>(input >> magic >> version)
-                && magic == "IDMESH_SHARD" && version == 2,
-            "invalid core shard output");
+        {
+            std::ifstream input(path);
+            std::string magic;
+            int version = 0;
+            require(static_cast<bool>(input >> magic >> version)
+                    && magic == "IDMESH_SHARD" && version == 2,
+                "invalid core shard output");
+        }
         std::filesystem::remove(path);
     }
     return 0;
