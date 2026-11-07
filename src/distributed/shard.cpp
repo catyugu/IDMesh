@@ -139,7 +139,8 @@ namespace idmesh::detail::shard {
                     && entity.dimension > 0
                     && entity.dimension < shard.dimension
                     && entity.owner >= 0 && entity.owner < size
-                    && arity >= 2 && arity < invalid_index,
+                    && (entity.dimension == 1 ? arity == 2
+                        : arity == 3 || arity == 4),
                 "invalid shard entity identity header");
             entity.vertices.resize(arity);
             for (auto& vertex : entity.vertices) {
@@ -208,7 +209,7 @@ namespace idmesh::detail::shard {
                 = label.dimension == shard.dimension
                 || label.dimension == 0
                 ? n == 1
-                : label.dimension == 1 ? n == 2 : n >= 3;
+                : label.dimension == 1 ? n == 2 : n == 3 || n == 4;
             ::idmesh::detail::require_runtime(
                 valid_arity, "invalid shard label arity");
             label.entities.resize(n);

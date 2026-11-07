@@ -303,19 +303,13 @@ namespace idmesh {
                         true});
             }
 
-            const auto numbering
-                = detail::vtk::point_numbering(mesh);
             for (const auto& label : mesh.labels()) {
                 if (label.dimension >= d)
                     continue;
                 const int code = detail::vtk::entity_code(
                     label.dimension,
                     static_cast<Index>(label.vertices.size()));
-                std::vector<Index> points;
-                points.reserve(label.vertices.size());
-                for (Index vertex : label.vertices)
-                    points.push_back(
-                        numbering.point_for_geometry(vertex));
+                std::vector<Index> points(label.vertices.begin(), label.vertices.end());
                 cells.push_back(
                     {code, std::move(points),
                         label.value, false});
@@ -837,19 +831,13 @@ namespace idmesh {
                 << (binary ? "BINARY\n" : "ASCII\n")
                 << "DATASET UNSTRUCTURED_GRID\n";
 
-            const auto numbering
-                = detail::vtk::point_numbering(mesh);
-            out << "POINTS " << numbering.count
+            out << "POINTS " << mesh.geometry_node_count()
                 << " double\n";
             std::vector<double> coordinates;
             coordinates.reserve(
-                static_cast<std::size_t>(
-                    numbering.count) * 3);
-            for (Index point = 0;
-                 point < numbering.count; ++point) {
-                const auto position
-                    = mesh.geometry_node_position(
-                        numbering.geometry_for_point(point));
+                static_cast<std::size_t>(mesh.geometry_node_count()) * 3);
+            for (Index point = 0; point < mesh.geometry_node_count(); ++point) {
+                const auto position = mesh.geometry_node_position(point);
                 coordinates.insert(
                     coordinates.end(),
                     position.begin(), position.end());
@@ -918,7 +906,7 @@ namespace idmesh {
 
             if (!point_fields.empty()) {
                 out << "POINT_DATA "
-                    << numbering.count << '\n';
+                    << mesh.geometry_node_count() << '\n';
                 write_field_block(
                     out, binary, point_fields);
             }

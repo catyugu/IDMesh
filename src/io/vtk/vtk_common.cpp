@@ -159,27 +159,6 @@ namespace idmesh::detail::vtk {
         return result;
     }
 
-    Index PointNumbering::point_for_geometry(
-        Index geometry_node) const
-    {
-        ::idmesh::detail::require_range(
-            geometry_node < count,
-            "VTK geometry node out of range");
-        return geometry_node;
-    }
-
-    Index PointNumbering::geometry_for_point(Index point) const
-    {
-        ::idmesh::detail::require_range(
-            point < count, "VTK point out of range");
-        return point;
-    }
-
-    PointNumbering point_numbering(const Mesh& mesh)
-    {
-        return {mesh.geometry_node_count()};
-    }
-
     EncodedCell encode_cell(const Mesh& mesh, Index cell)
     {
         ::idmesh::detail::require_range(
@@ -194,9 +173,10 @@ namespace idmesh::detail::vtk {
         result.points = to_vtk_order(
             mesh.cell_types()[cell], geometry);
 
-        const auto numbering = point_numbering(mesh);
-        for (auto& point : result.points)
-            point = numbering.point_for_geometry(point);
+        for (const Index point : result.points)
+            ::idmesh::detail::require_range(
+                point < mesh.geometry_node_count(),
+                "VTK geometry node out of range");
         return result;
     }
 

@@ -29,16 +29,7 @@ namespace idmesh::detail::vtk {
     std::vector<Index> to_gmsh_order(
         CellType type, std::span<const Index> vtk_nodes);
 
-    // VTK points are emitted in IDMesh global geometry-node order. Making this
-    // mapping explicit keeps PointData tuple order identical across VTK writers.
-    struct PointNumbering {
-        Index count = 0;
-
-        Index point_for_geometry(Index geometry_node) const;
-        Index geometry_for_point(Index point) const;
-    };
-
-    PointNumbering point_numbering(const Mesh& mesh);
+    // VTK point IDs directly equal IDMesh geometry-node IDs.
 
     struct EncodedCell {
         int code = 0;

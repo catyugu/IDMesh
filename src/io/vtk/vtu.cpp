@@ -879,16 +879,11 @@ namespace idmesh::vtk {
                 "duplicate VTU field name in one association");
         }
 
-        const auto numbering
-            = detail::vtk::point_numbering(mesh);
         std::vector<double> coordinates;
         coordinates.reserve(
-            static_cast<std::size_t>(
-                numbering.count) * 3);
-        for (Index point = 0;
-             point < numbering.count; ++point) {
-            const auto p = mesh.geometry_node_position(
-                numbering.geometry_for_point(point));
+            static_cast<std::size_t>(mesh.geometry_node_count()) * 3);
+        for (Index point = 0; point < mesh.geometry_node_count(); ++point) {
+            const auto p = mesh.geometry_node_position(point);
             coordinates.insert(
                 coordinates.end(), p.begin(), p.end());
         }
@@ -969,7 +964,7 @@ namespace idmesh::vtk {
                "byte_order=\"LittleEndian\" header_type=\"UInt64\">\n"
             << "  <UnstructuredGrid>\n"
             << "    <Piece NumberOfPoints=\""
-            << numbering.count
+            << mesh.geometry_node_count()
             << "\" NumberOfCells=\""
             << cell_count << "\">\n";
 

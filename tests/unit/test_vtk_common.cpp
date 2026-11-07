@@ -118,28 +118,6 @@ namespace {
             "unsupported polygon entity was mapped to VTK");
     }
 
-    void point_numbering()
-    {
-        const auto mesh = make_cell(
-            idmesh::CellType::triangle, 6);
-        const auto numbering = vtk::point_numbering(mesh);
-        check(numbering.count
-                == mesh.geometry_node_count(),
-            "VTK point count mismatch");
-        for (Index i = 0; i < numbering.count; ++i) {
-            check(numbering.point_for_geometry(i) == i,
-                "geometry-to-VTK numbering changed");
-            check(numbering.geometry_for_point(i) == i,
-                "VTK-to-geometry numbering changed");
-        }
-        expect_error<std::out_of_range>(
-            [&] {
-                (void)numbering.point_for_geometry(
-                    numbering.count);
-            },
-            "out-of-range geometry node accepted");
-    }
-
     void data_association()
     {
         const auto linear = make_cell(
@@ -253,7 +231,6 @@ int main()
 {
     return idmesh::test::run({
         {"cell mappings", cell_mappings},
-        {"point numbering", point_numbering},
         {"data association", data_association},
     });
 }

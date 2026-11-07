@@ -191,7 +191,7 @@ void test_labels()
     }
     check(found, "tagged boundary not found");
 }
-void test_variable_arity_label_signature()
+void test_standard_face_label_signature()
 {
     idmesh::MeshBuilder builder(3, 3);
     for (const auto& p : std::array<std::array<double, 3>, 8> {{
@@ -201,10 +201,14 @@ void test_variable_arity_label_signature()
     builder.add_cell(idmesh::CellType::hexahedron,
         std::array<idmesh::Index, 8> {0, 1, 2, 3, 4, 5, 6, 7});
 
-    const std::array<idmesh::Index, 5> forward {0, 1, 2, 6, 4};
-    const std::array<idmesh::Index, 5> reversed {0, 4, 6, 2, 1};
+    const std::array<idmesh::Index, 4> forward {0, 1, 2, 3};
+    const std::array<idmesh::Index, 4> reversed {0, 3, 2, 1};
     builder.add_label(2, forward, 77);
     builder.add_label(2, reversed, 77);
+    const std::array<idmesh::Index, 5> unsupported {0, 1, 2, 6, 4};
+    expect_error<std::invalid_argument>(
+        [&] { builder.add_label(2, unsupported, 77); },
+        "nonstandard five-vertex face label was accepted");
 
     const auto mesh = std::move(builder).finalize(
         idmesh::BuildOptions {
@@ -216,15 +220,15 @@ void test_variable_arity_label_signature()
             continue;
         ++matches;
         check(label.entity == idmesh::invalid_index,
-            "omitted variable-arity label unexpectedly bound");
-        check(label.vertices.size() == 5,
-            "variable-arity label signature was truncated");
+            "omitted standard face label unexpectedly bound");
+        check(label.vertices.size() == 4,
+            "standard face label signature was truncated");
         check(std::equal(label.vertices.begin(), label.vertices.end(),
                   forward.begin(), forward.end()),
-            "variable-arity label canonical order mismatch");
+            "standard face label canonical order mismatch");
     }
     check(matches == 1,
-        "reversed variable-arity label signature was not deduplicated");
+        "reversed face label signature was not deduplicated");
 }
 
 void test_gmsh_boundary_v22()
@@ -298,7 +302,7 @@ int main()
         {"Gmsh 4.1", test_gmsh_v41},
         {"invalid mesh input", test_invalid},
         {"labels", test_labels},
-        {"variable-arity labels", test_variable_arity_label_signature},
+        {"standard face labels", test_standard_face_label_signature},
         {"Gmsh 2.2 boundaries", test_gmsh_boundary_v22},
         {"Gmsh 4.1 boundaries", test_gmsh_boundary_v41},
         {"Gmsh endpoints", test_gmsh_endpoint_v22},
