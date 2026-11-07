@@ -185,17 +185,21 @@ that two Ghost layers contain the one-layer local Cell set.
 
 ## Rank-local distributed mesh reading and graph partitioning
 
-The `IDMESH_SHARD 2` ASCII schema is:
+The `IDMESH_SHARD 3` ASCII schema is execution-ready:
 
 ```text
-IDMESH_SHARD 2
+IDMESH_SHARD 3
 DIM <topology_dimension> <geometry_dimension>
 VERTICES <count>
-<global_vertex_id> <x> <y> <z>
+<global_vertex_id> <owner_rank> <x> <y> <z>
 GEOMETRY_NODES <count>
 <global_geometry_id> <x> <y> <z>
 CELLS <count>
 <global_cell_id> <owner_rank> <cell_type_enum> <num_geometry_nodes> <ids...>
+ENTITIES <count>
+<dimension> <global_entity_id> <owner_rank> <arity> <global_vertex_ids...>
+HALOS <count>
+<dimension> <peer_rank> <send_count> <receive_count> <send_global_ids...> <receive_global_ids...>
 LABELS <count>
 <dimension> <value> <count> <global_corner_ids... or single global_cell_id>
 NAMES <count>
@@ -203,40 +207,50 @@ NAMES <count>
 END
 ```
 
-Each Rank reads only its local shard. Top-dimensional cells are sorted
-into owned cells followed by Ghost cells. Corner vertices receive local
-IDs sorted by external global vertex identity, so their canonical edge
-and facet orientations agree across ranks. Every materialized subentity
-is registered by the same `(dimension, canonical cyclic corner signature)` used by the serial topology builder, through a distributed hash-sharded registry. The registry assigns unique
-dimension-local 64-bit global IDs and chooses the minimum owning Rank
-among incident cells. Requests and answers use bounded MPI_Alltoallv,
-with storage proportional to local entities plus the Rank's hash
-registry share, rather than the complete global mesh.
+Shard generation has access to the complete source mesh and the Cell-owner
+vector, so it resolves distributed identity once during preprocessing.
+Dimension-local source entity IDs become the stable distributed global IDs;
+subentity ownership is the minimum owner of incident Cells. If the source Mesh
+omits an intermediate topology layer, the exporter builds a temporary complete
+identity topology from the same Cell-to-Vertex connectivity. This does not
+change the source Mesh or its geometry.
 
-After global identity and ownership are established, each materialized
-dimension builds its halo plan from global-ID requests sent to entity owners.
-The resulting `ExchangePlan` is topology-dimension agnostic and operates
-without accessing the original mesh or the identity registry. Its peer index
-lists are stored as flat arrays with rank offsets. A distributed-graph
-communicator is created once from the nonempty send/receive peer sets, so
-repeated halo exchanges use sparse neighborhood collectives rather than
-communicator-wide collectives.
+For every Rank the exporter computes the closure of its owned plus requested
+Ghost Cells through all topology dimensions. The shard therefore contains the
+owner and global identity of every local entity plus the exact per-dimension
+Halo send/receive global-ID lists. These lists are independent of the runtime
+`TopologyLayout`; a reader simply ignores dimensions it does not materialize.
 
-`idmesh::partition_graph` performs balanced region growing on the
-Facet-adjacency cell dual graph, initializing well-separated seeds and
-using BFS frontiers. `idmesh::write_partition_shards` expands a configurable
-number of Ghost layers, then writes only required vertices and geometric
-nodes. This is a **serial preprocessing** route; partition quality and
-scalability are not claimed comparable to ParMETIS.
+At runtime each Rank reads only its local shard, rebuilds its immutable local
+Mesh, and maps embedded canonical global-vertex signatures to local entity IDs.
+No distributed entity registry, owner-candidate propagation, `MPI_Exscan`, or
+ghost-owner discovery exchange is performed. The precomputed Halo global IDs
+are mapped locally and used to construct the flat `ExchangePlan` arrays. MPI
+communication during this startup path is limited to consistency checks and
+the distributed-graph communicator construction required by the sparse
+neighborhood transport.
 
-Limitations: shards carry explicit first- or second-order Cell
-connectivity and supplied Ghost layers; the reader does not infer
-missing off-rank neighbors from geometry. All distributed operations use
-the communicator owned by the caller-supplied `mpi::Context`; metadata
-operations are still blocking and local shard files must be consistent.
-Registry setup still uses bounded communicator-wide `MPI_Alltoallv`; repeated
-halo traffic uses sparse neighborhood collectives. Extremely large individual
-messages remain subject to MPI integer-count limits.
+Corner vertices receive local IDs in ascending global-vertex order, independently
+of owned/Ghost Cell discovery order. This preserves the canonical edge direction
+and facet vertex cycle on every Rank. Embedded entity signatures are
+variable-arity and use the same cyclic canonicalization contract as the serial
+topology builder.
+
+`idmesh::partition_graph` remains a balanced deterministic region-growing
+baseline on the Facet-adjacency Cell dual graph. `write_partition_shards`
+expands a configurable number of Ghost layers and emits execution-ready shards.
+It is a serial preprocessing route; external partitioners integrate through the
+plain Cell-owner vector without entering the SDK ABI.
+
+Shard v2 is intentionally unsupported. Partition shards are generated
+artifacts rather than persistent user data; older shards must be regenerated
+with the current writer.
+
+Limitations: shards carry explicit first- or second-order Cell connectivity and
+supplied Ghost layers; the reader does not infer missing off-rank neighbors
+from geometry. Fully distributed shard generation from a parallel global mesh
+format, dynamic repartitioning, and large multi-node weak-scaling validation
+remain future work.
 
 ## GPU fields and direct MPI transport
 

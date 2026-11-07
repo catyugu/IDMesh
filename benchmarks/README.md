@@ -161,11 +161,12 @@ done
 ```
 
 The CSV decomposes rank-local startup into shard parsing, local immutable mesh
-construction, owner-candidate propagation, distributed identity request /
-resolution / reply, per-dimension `ExchangePlan` construction and final
-validation. Phase timings are reduced with `MPI_MAX`; registry and plan
-communication byte counts are summed across ranks. `peak_rss_delta_bytes_max`
-is the largest per-rank process peak increase during runtime loading.
+construction, local mapping of embedded identity metadata, per-dimension
+`ExchangePlan`/distributed-graph construction and final validation. There are
+no runtime registry or Halo-discovery byte counters because those exchanges are
+removed from the v3 reader. Phase timings are reduced with `MPI_MAX`;
+`peak_rss_delta_bytes_max` is the largest per-rank process peak increase during
+runtime loading.
 
 Run layouts in independent processes and repeat the complete command on a
 controlled host before making performance claims. Shared GitHub runners are

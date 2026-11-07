@@ -13,7 +13,7 @@
 ## Milestone 2: distributed execution
 - [x] Global entity identity and deterministic cross-rank orientation matching.
 - [x] Owned/ghost ranges, partitioning and halo exchange; MPI remains an optional backend.
-- [x] Rank-local shard input with a distributed shared-entity registry.
+- [x] Execution-ready rank-local shards with preprocessing-time entity identity and Halo metadata.
 - [x] Geometry mirrors and caller-owned device-aware communication with host-staging fallback.
 - [x] Communicator-scoped MPI contexts without exposing `mpi.h` in the SDK.
 - [x] Reusable sparse-neighbor host halo exchange with persistent request buffers.
@@ -50,8 +50,8 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Deterministic Cell dual-graph balanced region-growing partitioner.
 - [x] Serial graph partition to rank-local shard exporter (1/2 Ghost layers).
 - [x] Independently read owned/ghost Cell and quadratic geometry shards on each MPI Rank.
-- [x] Distributed registry for unique shared entity IDs and ownership.
-- [x] Build flat sparse-neighbor halo plans from explicit global-ID ghost requests without global mesh replication.
+- [x] Stable source-topology global entity IDs and preprocessing-time ownership.
+- [x] Embed per-dimension Halo send/receive global IDs in shards and build flat sparse-neighbor plans without runtime discovery.
 - [x] Keep external partitioners behind the plain Cell-owner-vector shard-writer boundary.
 - [ ] Add ParMETIS/PT-Scotch adapters/tooling and multi-node weak scaling when a concrete caller requires them.
 - [ ] Fully distributed parallel generation of shard files from a global parallel mesh format.
