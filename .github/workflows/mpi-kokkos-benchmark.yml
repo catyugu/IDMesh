@@ -3,10 +3,16 @@ name: MPI Kokkos benchmark
 # Same-runner baseline for persistent mirror/layout changes.
 
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/mpi-kokkos-benchmark.yml]
   workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Baseline commit, tag, or branch
+        required: true
+        default: 51fc5b7a0295f3573e73d778a6be1fb7879abce8
+      candidate_ref:
+        description: Candidate commit, tag, or branch
+        required: true
+        default: main
 
 permissions:
   contents: read
@@ -28,10 +34,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 51fc5b7a0295f3573e73d778a6be1fb7879abce8
+          ref: ${{ inputs.baseline_ref }}
           path: baseline
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.candidate_ref }}
           path: current
 
       - name: Configure and build both revisions
