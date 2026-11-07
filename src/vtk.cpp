@@ -33,13 +33,6 @@ namespace idmesh {
             cell
         };
 
-        struct CellRecord {
-            CellType type = CellType::segment;
-            Index dimension = 0;
-            std::vector<Index> nodes;
-            int tag = 0;
-        };
-
         struct RawField {
             LegacyDomain domain = LegacyDomain::mesh;
             std::string name;
@@ -350,162 +343,8 @@ namespace idmesh {
             }
         }
 
-        data::Array reorder_points(
-            data::Array input,
-            std::span<const Index> point_to_geometry)
-        {
-            detail::require_runtime(
-                input.tuples == point_to_geometry.size(),
-                "VTK PointData tuple count mismatch");
-            const auto width
-                = data::scalar_size(input.type);
-            const auto tuple_bytes
-                = static_cast<std::size_t>(
-                      input.components) * width;
-            data::Array output {
-                input.type, input.tuples,
-                input.components,
-                std::vector<std::byte>(
-                    input.values.size())};
-            std::vector<bool> seen(input.tuples);
-            for (Index point = 0;
-                 point < point_to_geometry.size(); ++point) {
-                const Index target
-                    = point_to_geometry[point];
-                detail::require_runtime(
-                    target < output.tuples
-                        && !seen[target],
-                    "VTK point-to-geometry mapping is not bijective");
-                seen[target] = true;
-                std::copy_n(
-                    input.values.data()
-                        + static_cast<std::size_t>(point)
-                            * tuple_bytes,
-                    tuple_bytes,
-                    output.values.data()
-                        + static_cast<std::size_t>(target)
-                            * tuple_bytes);
-            }
-            detail::require_runtime(
-                std::all_of(
-                    seen.begin(), seen.end(),
-                    [](bool value) { return value; }),
-                "VTK has points not represented by IDMesh geometry");
-            return output;
-        }
-
-        struct BuiltLegacyMesh {
-            Mesh mesh;
-            std::vector<Index> point_to_geometry;
-            bool has_lower_cells = false;
-        };
-
-        BuiltLegacyMesh build_legacy_mesh(
-            std::vector<std::array<double, 3>> points,
-            std::vector<CellRecord>& cells,
-            BuildOptions options)
-        {
-            Index dimension = 0;
-            for (const auto& cell : cells)
-                dimension = std::max(
-                    dimension, cell.dimension);
-            detail::require_runtime(
-                dimension >= 1,
-                "VTK has no mesh cells");
-
-            std::set<Index> corner_points;
-            for (const auto& cell : cells) {
-                const Index corners
-                    = cell.dimension == 0
-                    ? 1
-                    : cell_vertex_count(cell.type);
-                for (Index i = 0; i < corners; ++i)
-                    corner_points.insert(cell.nodes[i]);
-            }
-
-            MeshBuilder builder(dimension, 3);
-            std::map<Index, Index> corner_ids;
-            for (Index point : corner_points)
-                corner_ids[point]
-                    = builder.add_vertex(points[point]);
-
-            const Index corner_count
-                = static_cast<Index>(corner_ids.size());
-            std::map<Index, Index> extra_ids;
-            std::vector<Index> point_to_geometry(
-                points.size(), invalid_index);
-
-            for (const auto& [point, vertex] : corner_ids)
-                point_to_geometry[point] = vertex;
-
-            for (auto& cell : cells) {
-                if (cell.dimension != dimension)
-                    continue;
-                const auto gmsh
-                    = detail::vtk::to_gmsh_order(
-                        cell.type, cell.nodes);
-                std::vector<Index> vertices, extras;
-                for (Index i = 0;
-                     i < cell_vertex_count(cell.type); ++i)
-                    vertices.push_back(
-                        corner_ids.at(gmsh[i]));
-                for (Index i = cell_vertex_count(cell.type);
-                     i < gmsh.size(); ++i) {
-                    const Index point = gmsh[i];
-                    auto [it, inserted]
-                        = extra_ids.try_emplace(
-                            point, invalid_index);
-                    if (inserted) {
-                        it->second
-                            = builder.add_geometry_node(
-                                points[point]);
-                        point_to_geometry[point]
-                            = corner_count + it->second;
-                    }
-                    extras.push_back(it->second);
-                }
-                const Index id = extras.empty()
-                    ? builder.add_cell(
-                          cell.type, vertices)
-                    : builder.add_quadratic_cell(
-                          cell.type, vertices, extras);
-                if (cell.tag != 0)
-                    builder.add_cell_label(
-                        id, cell.tag);
-            }
-
-            bool lower = false;
-            for (const auto& cell : cells) {
-                if (cell.dimension >= dimension)
-                    continue;
-                lower = true;
-                if (cell.tag == 0)
-                    continue;
-                std::vector<Index> vertices;
-                const Index corners
-                    = cell.dimension == 0
-                    ? 1
-                    : cell_vertex_count(cell.type);
-                for (Index i = 0; i < corners; ++i)
-                    vertices.push_back(
-                        corner_ids.at(cell.nodes[i]));
-                builder.add_label(
-                    cell.dimension,
-                    vertices, cell.tag);
-            }
-
-            auto mesh
-                = std::move(builder).finalize(options);
-            detail::require_runtime(
-                mesh.geometry_node_count()
-                    == points.size(),
-                "VTK contains unused or unrepresentable points");
-            return {std::move(mesh),
-                std::move(point_to_geometry), lower};
-        }
-
         void apply_physical_tags(
-            std::vector<CellRecord>& cells,
+            std::vector<detail::vtk::ImportedCell>& cells,
             const data::Array& tags)
         {
             detail::require_runtime(
@@ -623,7 +462,7 @@ namespace idmesh {
                     && keyword == "CELLS"
                     && cell_count < invalid_index,
                 "invalid VTK CELLS");
-            std::vector<CellRecord> cells(cell_count);
+            std::vector<detail::vtk::ImportedCell> cells(cell_count);
             std::size_t actual = 0;
             if (binary) {
                 const auto packed
@@ -643,8 +482,8 @@ namespace idmesh {
                     detail::require_runtime(
                         cursor + n <= packed.size(),
                         "truncated VTK CELLS");
-                    cell.nodes.resize(n);
-                    for (auto& id : cell.nodes) {
+                    cell.points.resize(n);
+                    for (auto& id : cell.points) {
                         const auto value
                             = packed[cursor++];
                         detail::require_runtime(
@@ -668,8 +507,8 @@ namespace idmesh {
                             && n <= 27,
                         "invalid VTK cell arity");
                     actual += n + 1;
-                    cell.nodes.resize(n);
-                    for (auto& id : cell.nodes) {
+                    cell.points.resize(n);
+                    for (auto& id : cell.points) {
                         std::uint64_t value = 0;
                         detail::require_runtime(
                             static_cast<bool>(in >> value)
@@ -712,7 +551,7 @@ namespace idmesh {
                 const auto info
                     = detail::vtk::cell_info(codes[i]);
                 detail::require_runtime(
-                    info.nodes == cells[i].nodes.size(),
+                    info.points == cells[i].points.size(),
                     "invalid VTK cell node count");
                 cells[i].type = info.type;
                 cells[i].dimension = info.dimension;
@@ -839,7 +678,7 @@ namespace idmesh {
             if (physical_tags)
                 apply_physical_tags(cells, *physical_tags);
 
-            auto built = build_legacy_mesh(
+            auto built = detail::vtk::build_imported_mesh(
                 std::move(points), cells, options);
 
             data::State state;
@@ -889,7 +728,7 @@ namespace idmesh {
                 if (raw.domain == LegacyDomain::point) {
                     field.location
                         = data::geometry_nodes();
-                    field.values = reorder_points(
+                    field.values = detail::vtk::reorder_point_array(
                         std::move(raw.values),
                         built.point_to_geometry);
                 }
@@ -1022,7 +861,7 @@ namespace idmesh {
 
             std::size_t words = 0;
             for (const auto& cell : cells)
-                words += cell.nodes.size() + 1;
+                words += cell.points.size() + 1;
             out << "CELLS " << cells.size()
                 << ' ' << words << '\n';
             if (binary) {
@@ -1030,14 +869,14 @@ namespace idmesh {
                 packed.reserve(words);
                 for (const auto& cell : cells) {
                     detail::require_length(
-                        cell.nodes.size()
+                        cell.points.size()
                             <= static_cast<std::size_t>(
                                 std::numeric_limits<std::int32_t>::max()),
                         "VTK cell arity exceeds int32");
                     packed.push_back(
                         static_cast<std::int32_t>(
-                            cell.nodes.size()));
-                    for (Index point : cell.nodes) {
+                            cell.points.size()));
+                    for (Index point : cell.points) {
                         detail::require_length(
                             point <= static_cast<Index>(
                                 std::numeric_limits<std::int32_t>::max()),
@@ -1052,8 +891,8 @@ namespace idmesh {
             }
             else {
                 for (const auto& cell : cells) {
-                    out << cell.nodes.size();
-                    for (Index point : cell.nodes)
+                    out << cell.points.size();
+                    for (Index point : cell.points)
                         out << ' ' << point;
                     out << '\n';
                 }

@@ -3,6 +3,7 @@
 #include "idmesh/data.hpp"
 #include "idmesh/mesh.hpp"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -57,5 +58,27 @@ namespace idmesh::detail::vtk {
     // intermediate entity dimensions are rejected.
     AttributeAssociation attribute_association(
         const Mesh& mesh, const data::MeshDataView& field);
+
+    struct ImportedCell {
+        CellType type = CellType::segment;
+        Index dimension = 0;
+        std::vector<Index> points;
+        int tag = 0;
+    };
+
+    struct ImportedMesh {
+        Mesh mesh;
+        std::vector<Index> point_to_geometry;
+        bool has_lower_cells = false;
+    };
+
+    ImportedMesh build_imported_mesh(
+        std::vector<std::array<double, 3>> points,
+        std::span<const ImportedCell> cells,
+        BuildOptions options);
+
+    data::Array reorder_point_array(
+        data::Array input,
+        std::span<const Index> point_to_geometry);
 
 } // namespace idmesh::detail::vtk
