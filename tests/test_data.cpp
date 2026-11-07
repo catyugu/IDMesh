@@ -205,6 +205,8 @@ namespace {
         data::MeshData field;
         field.name = "pair";
         field.location = data::entities(1);
+        field.selection = data::SelectionKind::indices;
+        field.indices = {0, 1};
         field.values = std::move(array);
         const auto mesh = make_mesh();
         data::validate(mesh, field.view());
