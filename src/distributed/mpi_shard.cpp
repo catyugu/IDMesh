@@ -1,5 +1,5 @@
 #include "contracts.hpp"
-#include "entity_signature.hpp"
+#include "core/entity_signature.hpp"
 #include "idmesh/mpi.hpp"
 #include "mpi_errors.hpp"
 #include "mpi_internal.hpp"

@@ -1,7 +1,7 @@
 #include "idmesh/mpi_kokkos.hpp"
 #include "contracts.hpp"
-#include "mpi_errors.hpp"
-#include "mpi_internal.hpp"
+#include "distributed/mpi_errors.hpp"
+#include "distributed/mpi_internal.hpp"
 
 #include <Kokkos_Core.hpp>
 #include <cstddef>

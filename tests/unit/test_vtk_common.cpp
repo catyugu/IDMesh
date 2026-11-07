@@ -1,6 +1,6 @@
 #include "test.hpp"
 
-#include "vtk_common.hpp"
+#include "io/vtk/vtk_common.hpp"
 
 #include <idmesh/data.hpp>
 #include <idmesh/mesh.hpp>
