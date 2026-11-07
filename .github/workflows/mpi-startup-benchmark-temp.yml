@@ -1,0 +1,39 @@
+name: MPI startup benchmark (temporary)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  startup:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/catyugu/idmesh-ci-mpi@sha256:8b7239500b857f196f6a40e51841f461dd14c76fffffbe3c447d173e52eecdc9
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      OMPI_MCA_rmaps_base_oversubscribe: "1"
+      OMPI_ALLOW_RUN_AS_ROOT: "1"
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=OFF -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_ENABLE_MPI=ON
+      - name: Build startup benchmark
+        run: cmake --build build --target idmesh_mpi_startup_benchmark --parallel 2
+      - name: Measure 2-rank startup
+        run: |
+          build/benchmarks/idmesh_mpi_startup_benchmark --prepare /tmp/idmesh-startup-2 --parts 2 --side 24 --ghost-layers 1
+          for layout in cell_vertices cell_facets complete; do
+            mpiexec -n 2 build/benchmarks/idmesh_mpi_startup_benchmark --prefix /tmp/idmesh-startup-2 --parts 2 --layout "$layout"
+          done
+      - name: Measure 4-rank startup
+        run: |
+          build/benchmarks/idmesh_mpi_startup_benchmark --prepare /tmp/idmesh-startup-4 --parts 4 --side 24 --ghost-layers 1
+          for layout in cell_vertices cell_facets complete; do
+            mpiexec -n 4 build/benchmarks/idmesh_mpi_startup_benchmark --prefix /tmp/idmesh-startup-4 --parts 4 --layout "$layout"
+          done

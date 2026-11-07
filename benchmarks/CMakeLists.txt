@@ -18,6 +18,15 @@ if(IDMESH_ENABLE_MPI)
     add_executable(idmesh_mpi_benchmark mpi.cpp)
     target_link_libraries(idmesh_mpi_benchmark PRIVATE idmesh_mpi MPI::MPI_CXX)
     idmesh_stage_runtime(idmesh_mpi_benchmark)
+
+    add_executable(idmesh_mpi_startup_benchmark mpi_startup.cpp)
+    target_include_directories(idmesh_mpi_startup_benchmark PRIVATE
+        ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(idmesh_mpi_startup_benchmark PRIVATE idmesh_mpi MPI::MPI_CXX)
+    idmesh_stage_runtime(idmesh_mpi_startup_benchmark)
+    if(WIN32)
+        target_link_libraries(idmesh_mpi_startup_benchmark PRIVATE psapi)
+    endif()
 endif()
 
 if(IDMESH_ENABLE_MPI AND IDMESH_ENABLE_KOKKOS)

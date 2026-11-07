@@ -2,10 +2,12 @@
 #include "idmesh/mpi.hpp"
 #include "mpi_errors.hpp"
 #include "mpi_internal.hpp"
+#include "mpi_shard_profile.hpp"
 
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -26,6 +28,27 @@
 namespace idmesh::mpi {
     namespace {
 
+        using Clock = std::chrono::steady_clock;
+
+        thread_local detail::ShardReadProfile* active_profile = nullptr;
+
+        double milliseconds(Clock::time_point begin, Clock::time_point end)
+        {
+            return std::chrono::duration<double, std::milli>(end - begin).count();
+        }
+
+        struct ProfileBinding {
+            explicit ProfileBinding(detail::ShardReadProfile& profile)
+                : previous(active_profile)
+            {
+                active_profile = &profile;
+            }
+
+            ~ProfileBinding() { active_profile = previous; }
+
+            detail::ShardReadProfile* previous = nullptr;
+        };
+
         template <class T>
         struct Received {
             std::vector<T> values;
@@ -34,7 +57,10 @@ namespace idmesh::mpi {
         };
 
         template <class T>
-        Received<T> exchange_records(MPI_Comm comm, const std::vector<std::vector<T>>& sends)
+        Received<T> exchange_records(MPI_Comm comm,
+            const std::vector<std::vector<T>>& sends,
+            std::uint64_t* sent_bytes = nullptr,
+            std::uint64_t* received_bytes = nullptr)
         {
             static_assert(std::is_trivially_copyable_v<T>);
             int size = 0;
@@ -61,6 +87,10 @@ namespace idmesh::mpi {
                 ns += sc[peer];
                 nr += rc[peer];
             }
+            if (sent_bytes)
+                *sent_bytes += static_cast<std::uint64_t>(ns);
+            if (received_bytes)
+                *received_bytes += static_cast<std::uint64_t>(nr);
             std::vector<T> send_data(ns / sizeof(T)), recv_data(nr / sizeof(T));
             std::size_t write = 0;
             for (const auto& bucket : sends) {
@@ -240,14 +270,21 @@ namespace idmesh::mpi {
     {
         const int rank = context.rank(), size = context.size();
         const MPI_Comm comm = context.data_->comm;
+        auto* profile = active_profile;
+        if (profile)
+            *profile = {};
 
+        const auto parse_begin = profile ? Clock::now() : Clock::time_point {};
         const Shard input = parse_shard(path, rank, size);
+        if (profile)
+            profile->parse_ms = milliseconds(parse_begin, Clock::now());
         const Index dim = input.dimension;
         Index min_dim = 0, max_dim = 0;
         ::idmesh::mpi::detail::check_mpi(MPI_Allreduce(&dim, &min_dim, 1, MPI_UNSIGNED, MPI_MIN, comm), "MPI_Allreduce");
         ::idmesh::mpi::detail::check_mpi(MPI_Allreduce(&dim, &max_dim, 1, MPI_UNSIGNED, MPI_MAX, comm), "MPI_Allreduce");
         ::idmesh::detail::require_runtime(min_dim == max_dim, "shards disagree on topological dimension");
 
+        const auto mesh_begin = profile ? Clock::now() : Clock::time_point {};
         MeshBuilder builder(input.dimension, input.geometric_dimension);
         std::map<std::uint64_t, Index> vertices, high_order, cells;
         // Ascending global corner IDs ensure identical reference orientation.
@@ -302,6 +339,10 @@ namespace idmesh::mpi {
         partition->global_ids[dim] = std::move(cell_ids);
         partition->owner_ranks[dim] = std::move(cell_owners);
 
+        if (profile)
+            profile->local_mesh_ms = milliseconds(mesh_begin, Clock::now());
+
+        const auto owner_begin = profile ? Clock::now() : Clock::time_point {};
         std::vector<std::uint64_t> local_to_global_vertex(vertices.size());
         for (const auto& [global, local] : vertices)
             local_to_global_vertex[local] = global;
@@ -324,6 +365,11 @@ namespace idmesh::mpi {
             }
         }
 
+        if (profile)
+            profile->owner_candidates_ms = milliseconds(owner_begin, Clock::now());
+
+        const auto registry_request_begin
+            = profile ? Clock::now() : Clock::time_point {};
         std::vector<std::vector<RegistryMessage>> requests(size);
         for (Index k = 0; k < dim; ++k) {
             partition->global_ids[k].resize(partition->mesh.entity_count(k));
@@ -343,7 +389,14 @@ namespace idmesh::mpi {
             }
         }
 
-        const auto received = exchange_records(comm, requests);
+        const auto received = exchange_records(comm, requests,
+            profile ? &profile->registry_send_bytes : nullptr,
+            profile ? &profile->registry_receive_bytes : nullptr);
+        if (profile)
+            profile->registry_request_ms
+                = milliseconds(registry_request_begin, Clock::now());
+        const auto registry_resolve_begin
+            = profile ? Clock::now() : Clock::time_point {};
         std::map<Key, std::vector<RegistryMessage>> groups;
         for (const auto& item : received.values)
             groups[item.key].push_back(item);
@@ -376,7 +429,14 @@ namespace idmesh::mpi {
                 replies[item.requester].push_back(item);
             }
         }
-        const auto answers = exchange_records(comm, replies);
+        if (profile)
+            profile->registry_resolve_ms
+                = milliseconds(registry_resolve_begin, Clock::now());
+        const auto registry_reply_begin
+            = profile ? Clock::now() : Clock::time_point {};
+        const auto answers = exchange_records(comm, replies,
+            profile ? &profile->registry_send_bytes : nullptr,
+            profile ? &profile->registry_receive_bytes : nullptr);
         std::vector<std::vector<bool>> assigned(dim);
         for (Index k = 0; k < dim; ++k)
             assigned[k].resize(partition->global_ids[k].size());
@@ -393,6 +453,12 @@ namespace idmesh::mpi {
                                                    [](bool value) { return value; }),
                 "missing distributed entity response");
 
+        if (profile)
+            profile->registry_reply_ms
+                = milliseconds(registry_reply_begin, Clock::now());
+
+        const auto exchange_plan_begin
+            = profile ? Clock::now() : Clock::time_point {};
         // Build the same ownership and halo contract for every materialized
         // entity dimension. Lower-dimensional entities are not renumbered into
         // owned-first order because their local IDs participate in canonical
@@ -425,7 +491,9 @@ namespace idmesh::mpi {
                 }
             }
 
-            const auto incoming = exchange_records(comm, ghost_requests);
+            const auto incoming = exchange_records(comm, ghost_requests,
+                profile ? &profile->exchange_plan_send_bytes : nullptr,
+                profile ? &profile->exchange_plan_receive_bytes : nullptr);
             auto exchange = std::make_shared<ExchangePlan::Data>();
             exchange->comm = comm;
             exchange->context_owner = context.data_;
@@ -449,8 +517,27 @@ namespace idmesh::mpi {
             exchange->finalize_layout();
             partition->exchanges[k] = ExchangePlan(std::move(exchange));
         }
+        if (profile)
+            profile->exchange_plan_ms
+                = milliseconds(exchange_plan_begin, Clock::now());
+        const auto validate_begin
+            = profile ? Clock::now() : Clock::time_point {};
         partition->mesh.validate();
+        if (profile)
+            profile->validate_ms = milliseconds(validate_begin, Clock::now());
         return PartitionedMesh(std::move(partition));
     }
+
+    namespace detail {
+
+        PartitionedMesh read_partition_shard_profiled(
+            const Context& context, const std::string& path,
+            BuildOptions options, ShardReadProfile& profile)
+        {
+            ProfileBinding binding(profile);
+            return read_partition_shard(context, path, options);
+        }
+
+    } // namespace detail
 
 } // namespace idmesh::mpi

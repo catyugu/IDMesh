@@ -139,6 +139,38 @@ materialization work. Add `--cell-labels` to assign one physical tag to every
 generated top-dimensional Cell; comparing the same command without the flag
 isolates a deliberately label-heavy finalization workload.
 
+## MPI shard startup measurements
+
+`idmesh_mpi_startup_benchmark` separates offline shard generation from
+runtime loading so process peak RSS is not contaminated by the serial global
+mesh used during preprocessing. Prepare shards once, then launch each topology
+layout in a fresh MPI process:
+
+```sh
+cmake -S . -B build-mpi-bench -DCMAKE_BUILD_TYPE=Release \
+  -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF -DIDMESH_ENABLE_MPI=ON
+cmake --build build-mpi-bench --target idmesh_mpi_startup_benchmark --parallel
+
+./build-mpi-bench/benchmarks/idmesh_mpi_startup_benchmark \
+  --prepare /tmp/idmesh-startup --parts 4 --side 32 --ghost-layers 1
+
+for layout in cell_vertices cell_facets complete; do
+  mpiexec -n 4 ./build-mpi-bench/benchmarks/idmesh_mpi_startup_benchmark \
+    --prefix /tmp/idmesh-startup --parts 4 --layout "$layout"
+done
+```
+
+The CSV decomposes rank-local startup into shard parsing, local immutable mesh
+construction, owner-candidate propagation, distributed identity request /
+resolution / reply, per-dimension `ExchangePlan` construction and final
+validation. Phase timings are reduced with `MPI_MAX`; registry and plan
+communication byte counts are summed across ranks. `peak_rss_delta_bytes_max`
+is the largest per-rank process peak increase during runtime loading.
+
+Run layouts in independent processes and repeat the complete command on a
+controlled host before making performance claims. Shared GitHub runners are
+useful only for functional smoke checks, not publication-quality timing.
+
 ## MPI halo measurements
 
 `.github/workflows/mpi-benchmark.yml` is the single manual MPI engineering
