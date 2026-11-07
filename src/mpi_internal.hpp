@@ -1,7 +1,9 @@
 #pragma once
 #include "idmesh/mpi.hpp"
 #include <mpi.h>
+#include <climits>
 #include <mutex>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -43,10 +45,35 @@ namespace idmesh::mpi {
         mutable std::vector<int> host_recv_offsets;
         mutable std::vector<double> host_send_buffer;
         mutable std::vector<double> host_recv_buffer;
+
+        void finalize_layout()
+        {
+            const int peers = static_cast<int>(send.size());
+            send_records.resize(peers);
+            recv_records.resize(peers);
+            send_record_offsets.resize(peers);
+            recv_record_offsets.resize(peers);
+            int send_offset = 0;
+            int recv_offset = 0;
+            for (int peer = 0; peer < peers; ++peer) {
+                if (send[peer].size() > static_cast<std::size_t>(INT_MAX)
+                    || recv[peer].size() > static_cast<std::size_t>(INT_MAX))
+                    throw std::length_error("halo peer record count exceeds MPI int range");
+                send_records[peer] = static_cast<int>(send[peer].size());
+                recv_records[peer] = static_cast<int>(recv[peer].size());
+                send_record_offsets[peer] = send_offset;
+                recv_record_offsets[peer] = recv_offset;
+                if (send_offset > INT_MAX - send_records[peer]
+                    || recv_offset > INT_MAX - recv_records[peer])
+                    throw std::length_error("halo record displacement overflow");
+                send_offset += send_records[peer];
+                recv_offset += recv_records[peer];
+            }
+        }
     };
 
     struct ExchangeRequest::Data {
-        std::shared_ptr<ExchangePlan::Data> plan;
+        ExchangePlan plan;
         std::span<double> values;
         Index components = 1;
         std::vector<int> send_counts;
@@ -61,10 +88,6 @@ namespace idmesh::mpi {
         ~Data();
         void unpack();
     };
-
-    namespace detail {
-        void finalize_exchange_layout(ExchangePlan::Data& data);
-    }
 
     struct PartitionedMesh::Data {
         explicit Data(Mesh value)

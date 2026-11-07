@@ -429,7 +429,7 @@ namespace idmesh::mpi {
                 exchange->send[peer].push_back(found->second);
             }
         }
-        detail::finalize_exchange_layout(*exchange);
+        exchange->finalize_layout();
         partition->exchange = ExchangePlan(std::move(exchange));
         partition->mesh.validate();
         return PartitionedMesh(std::move(partition));

@@ -37,35 +37,7 @@ namespace idmesh::mpi {
     } // namespace
 
     namespace {
-        void finalize_exchange_layout_impl(ExchangePlan::Data& data)
-        {
-            const int peers = static_cast<int>(data.send.size());
-            data.send_records.resize(peers);
-            data.recv_records.resize(peers);
-            data.send_record_offsets.resize(peers);
-            data.recv_record_offsets.resize(peers);
-
-            int send_offset = 0;
-            int recv_offset = 0;
-            for (int peer = 0; peer < peers; ++peer) {
-                ::idmesh::detail::require_length(
-                    data.send[peer].size() <= static_cast<std::size_t>(INT_MAX)
-                        && data.recv[peer].size() <= static_cast<std::size_t>(INT_MAX),
-                    "halo peer record count exceeds MPI int range");
-                data.send_records[peer] = static_cast<int>(data.send[peer].size());
-                data.recv_records[peer] = static_cast<int>(data.recv[peer].size());
-                data.send_record_offsets[peer] = send_offset;
-                data.recv_record_offsets[peer] = recv_offset;
-                ::idmesh::detail::require_length(
-                    send_offset <= INT_MAX - data.send_records[peer]
-                        && recv_offset <= INT_MAX - data.recv_records[peer],
-                    "halo record displacement overflow");
-                send_offset += data.send_records[peer];
-                recv_offset += data.recv_records[peer];
-            }
-        }
-
-        void scaled_layout(const ExchangePlan::Data& data, Index components,
+        void scaled_layout(const auto& data, Index components,
             std::vector<int>& send_counts, std::vector<int>& recv_counts,
             std::vector<int>& send_offsets, std::vector<int>& recv_offsets)
         {
@@ -104,13 +76,6 @@ namespace idmesh::mpi {
         }
 
     } // namespace
-
-    namespace detail {
-        void finalize_exchange_layout(ExchangePlan::Data& data)
-        {
-            finalize_exchange_layout_impl(data);
-        }
-    } // namespace detail
 
     Context::Context(std::shared_ptr<Data> data)
         : data_(std::move(data))
@@ -160,9 +125,9 @@ namespace idmesh::mpi {
     {
         if (unpacked)
             return;
-        for (int peer = 0; peer < static_cast<int>(plan->recv.size()); ++peer) {
+        for (int peer = 0; peer < plan.rank_count(); ++peer) {
             std::size_t input = recv_offsets[peer];
-            for (Index cell : plan->recv[peer])
+            for (Index cell : plan.receive_indices(peer))
                 for (Index component = 0; component < components; ++component)
                     values[static_cast<std::size_t>(cell) * components + component]
                         = recv_buffer[input++];
@@ -307,7 +272,7 @@ namespace idmesh::mpi {
             "exchange field must have one fixed-width record per local cell");
 
         auto request = std::make_shared<ExchangeRequest::Data>();
-        request->plan = data_;
+        request->plan = *this;
         request->values = values;
         request->components = components;
         scaled_layout(*data_, components,
@@ -563,7 +528,7 @@ namespace idmesh::mpi {
                 if (owner(id) == peer)
                     exchange->recv[peer].push_back(local_cells.at(id));
         }
-        detail::finalize_exchange_layout(*exchange);
+        exchange->finalize_layout();
         partition->exchange = ExchangePlan(std::move(exchange));
         return PartitionedMesh(std::move(partition));
     }
