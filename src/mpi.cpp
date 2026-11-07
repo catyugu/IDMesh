@@ -113,7 +113,7 @@ namespace idmesh::mpi {
 
     int Context::rank() const noexcept { return data_->rank; }
     int Context::size() const noexcept { return data_->size; }
-    ExchangeRequest::ExchangeRequest(std::shared_ptr<Data> data)
+    ExchangeRequest::ExchangeRequest(std::unique_ptr<Data> data)
         : data_(std::move(data))
     {
     }
@@ -194,16 +194,6 @@ namespace idmesh::mpi {
         data_->unpack();
     }
 
-    bool ExchangeRequest::active() const noexcept
-    {
-        return data_ != nullptr && data_->active;
-    }
-
-    Index ExchangeRequest::component_count() const noexcept
-    {
-        return data_ ? data_->components : 0;
-    }
-
     ExchangePlan::ExchangePlan(std::shared_ptr<Data> data)
         : data_(std::move(data))
     {
@@ -261,53 +251,6 @@ namespace idmesh::mpi {
             "MPI_Alltoallv");
     }
 
-    void ExchangePlan::exchange(std::span<double> values, Index components) const
-    {
-        ensure_initialized();
-        ::idmesh::detail::require_state(data_ != nullptr, "empty exchange plan");
-        ::idmesh::detail::require_argument(components > 0 && values.size() == std::size_t(data_->local_cells) * components,
-            "exchange field must have one fixed-width record per local cell");
-        std::lock_guard lock(data_->host_mutex);
-        const auto size = static_cast<int>(data_->send.size());
-        if (data_->host_components != components) {
-            scaled_layout(*data_, components,
-                data_->host_send_counts, data_->host_recv_counts,
-                data_->host_send_offsets, data_->host_recv_offsets);
-            data_->host_components = components;
-        }
-        const auto send_total = data_->host_send_offsets.empty()
-            ? 0
-            : data_->host_send_offsets.back() + data_->host_send_counts.back();
-        const auto recv_total = data_->host_recv_offsets.empty()
-            ? 0
-            : data_->host_recv_offsets.back() + data_->host_recv_counts.back();
-        data_->host_send_buffer.resize(send_total);
-        data_->host_recv_buffer.resize(recv_total);
-
-        for (int peer = 0; peer < size; ++peer) {
-            std::size_t output = data_->host_send_offsets[peer];
-            for (auto cell : data_->send[peer]) {
-                for (Index j = 0; j < components; ++j)
-                    data_->host_send_buffer[output++]
-                        = values[std::size_t(cell) * components + j];
-            }
-        }
-        ::idmesh::mpi::detail::check_mpi(
-            MPI_Alltoallv(data_->host_send_buffer.data(), data_->host_send_counts.data(),
-                data_->host_send_offsets.data(), MPI_DOUBLE,
-                data_->host_recv_buffer.data(), data_->host_recv_counts.data(),
-                data_->host_recv_offsets.data(), MPI_DOUBLE, data_->comm),
-            "MPI_Alltoallv");
-        for (int peer = 0; peer < size; ++peer) {
-            std::size_t input = data_->host_recv_offsets[peer];
-            for (auto cell : data_->recv[peer]) {
-                for (Index j = 0; j < components; ++j)
-                    values[std::size_t(cell) * components + j]
-                        = data_->host_recv_buffer[input++];
-            }
-        }
-    }
-
     ExchangeRequest ExchangePlan::make_request(Index components) const
     {
         ensure_initialized();
@@ -315,7 +258,7 @@ namespace idmesh::mpi {
         ::idmesh::detail::require_argument(components > 0,
             "exchange component count must be positive");
 
-        auto request = std::make_shared<ExchangeRequest::Data>();
+        auto request = std::make_unique<ExchangeRequest::Data>();
         request->plan = *this;
         request->components = components;
         scaled_layout(*data_, components,
@@ -331,14 +274,6 @@ namespace idmesh::mpi {
         request->send_buffer.resize(send_total);
         request->recv_buffer.resize(recv_total);
         return ExchangeRequest(std::move(request));
-    }
-
-    ExchangeRequest ExchangePlan::begin_exchange(
-        std::span<double> values, Index components) const
-    {
-        auto request = make_request(components);
-        request.start(values);
-        return request;
     }
 
     PartitionedMesh::PartitionedMesh(std::shared_ptr<Data> data)

@@ -134,7 +134,9 @@ namespace {
             values[2 * i] = double(global + 100);
             values[2 * i + 1] = double(global * 2 + 7);
         }
-        partition.exchange_plan().exchange(values, 2);
+        auto exchange = partition.exchange_plan().make_request(2);
+        exchange.start(values);
+        exchange.wait();
         for (Index i = 0; i < cells; ++i) {
             const auto global = partition.global_ids(dim)[i];
             require(values[2 * i] == double(global + 100) && values[2 * i + 1] == double(global * 2 + 7),

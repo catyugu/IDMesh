@@ -2,7 +2,6 @@
 #include "idmesh/mpi.hpp"
 #include <mpi.h>
 #include <climits>
-#include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -34,17 +33,6 @@ namespace idmesh::mpi {
         Index local_cells = 0;
         MPI_Comm comm = MPI_COMM_NULL;
         std::shared_ptr<void> context_owner;
-
-        // Reused only by the convenience host exchange path. Packed exchange
-        // remains allocation-local and does not share mutable transport state.
-        mutable std::mutex host_mutex;
-        mutable Index host_components = 0;
-        mutable std::vector<int> host_send_counts;
-        mutable std::vector<int> host_recv_counts;
-        mutable std::vector<int> host_send_offsets;
-        mutable std::vector<int> host_recv_offsets;
-        mutable std::vector<double> host_send_buffer;
-        mutable std::vector<double> host_recv_buffer;
 
         void finalize_layout()
         {

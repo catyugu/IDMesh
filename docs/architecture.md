@@ -124,9 +124,7 @@ shape families are rejected, pending a standard-preserving adapter.
 then ghost-cell local meshes, carrying stable dimension-local global entity IDs,
 deterministic shared orientation and owner ranks. Facet adjacency defines the
 ghost expansion; the source mesh must materialize Cell/Facet and Facet/Cell
-relations. `ExchangePlan::exchange` exchanges one or more interleaved
-Host double components for cell-based fields. `begin_exchange` remains the
-one-shot convenience path. For steady time-stepping loops,
+relations. Host cell-field exchange has a single execution model:
 `make_request(components)` allocates counts, displacements, and packed
 send/receive buffers once; repeated `start(field)` / `wait()` cycles perform
 no IDMesh-side host allocation. `start` packs owned records and launches

@@ -133,7 +133,6 @@ int main(int argc, char** argv)
         };
 
         auto reusable = plan.make_request(args.components);
-        plan.exchange(field, args.components);
         pack();
         plan.exchange_packed(packed_send.data(), packed_receive.data(),
             args.components, idmesh::mpi::DeviceMemoryKind::host);
@@ -141,49 +140,39 @@ int main(int argc, char** argv)
         reusable.wait();
         MPI_Barrier(MPI_COMM_WORLD);
 
-        Timing exchange, packed, one_shot, reused;
+        Timing packed, start_phase, wait_phase, reused;
         for (unsigned iteration = 0; iteration < args.iterations; ++iteration) {
             fill_field(field, context.rank(), args.components);
-            MPI_Barrier(MPI_COMM_WORLD);
-            auto begin = Clock::now();
-            plan.exchange(field, args.components);
-            auto end = Clock::now();
-            exchange.samples.push_back(milliseconds(begin, end));
-
             pack();
             MPI_Barrier(MPI_COMM_WORLD);
-            begin = Clock::now();
+            auto begin = Clock::now();
             plan.exchange_packed(packed_send.data(), packed_receive.data(),
                 args.components, idmesh::mpi::DeviceMemoryKind::host);
-            end = Clock::now();
+            auto end = Clock::now();
             packed.samples.push_back(milliseconds(begin, end));
 
             fill_field(field, context.rank(), args.components);
             MPI_Barrier(MPI_COMM_WORLD);
-            begin = Clock::now();
-            auto temporary = plan.begin_exchange(field, args.components);
-            temporary.wait();
-            end = Clock::now();
-            one_shot.samples.push_back(milliseconds(begin, end));
-
-            fill_field(field, context.rank(), args.components);
-            MPI_Barrier(MPI_COMM_WORLD);
-            begin = Clock::now();
+            const auto total_begin = Clock::now();
+            begin = total_begin;
             reusable.start(field);
+            end = Clock::now();
+            start_phase.samples.push_back(milliseconds(begin, end));
+            begin = end;
             reusable.wait();
             end = Clock::now();
-            reused.samples.push_back(milliseconds(begin, end));
+            wait_phase.samples.push_back(milliseconds(begin, end));
+            reused.samples.push_back(milliseconds(total_begin, end));
         }
 
-        double exchange_local = exchange.median();
         double packed_local = packed.median();
-        double one_shot_local = one_shot.median();
+        double start_local = start_phase.median();
+        double wait_local = wait_phase.median();
         double reused_local = reused.median();
-        double exchange_max = 0.0, packed_max = 0.0;
-        double one_shot_max = 0.0, reused_max = 0.0;
-        MPI_Reduce(&exchange_local, &exchange_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        double packed_max = 0.0, start_max = 0.0, wait_max = 0.0, reused_max = 0.0;
         MPI_Reduce(&packed_local, &packed_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-        MPI_Reduce(&one_shot_local, &one_shot_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&start_local, &start_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&wait_local, &wait_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         MPI_Reduce(&reused_local, &reused_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
         std::uint64_t sent_local = send_records * args.components * sizeof(double);
@@ -195,14 +184,14 @@ int main(int argc, char** argv)
         if (context.rank() == 0) {
             std::cout << std::fixed << std::setprecision(6)
                       << "ranks,side,cells,components,ghost_layers,iterations,"
-                         "exchange_ms_p50_max,packed_mpi_ms_p50_max,"
-                         "oneshot_nonblocking_ms_p50_max,reused_nonblocking_ms_p50_max,"
+                         "packed_mpi_ms_p50_max,reused_start_ms_p50_max,"
+                         "reused_wait_ms_p50_max,reused_total_ms_p50_max,"
                          "send_bytes_per_exchange,receive_bytes_per_exchange\n"
                       << context.size() << ',' << args.side << ','
                       << source.entity_count(source.dimension()) << ','
                       << args.components << ',' << args.ghost_layers << ','
-                      << args.iterations << ',' << exchange_max << ',' << packed_max << ','
-                      << one_shot_max << ',' << reused_max << ','
+                      << args.iterations << ',' << packed_max << ',' << start_max << ','
+                      << wait_max << ',' << reused_max << ','
                       << sent_total << ',' << recv_total << '\n';
         }
         status = 0;

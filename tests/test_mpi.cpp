@@ -55,7 +55,9 @@ namespace {
         for (Index i = 0; i < part.owned_cell_count(); ++i)
             for (Index component = 0; component < 3; ++component)
                 values[i * 3 + component] = 100 * part.global_ids(d)[i] + component;
-        part.exchange_plan().exchange(values, 3);
+        auto vector_exchange = part.exchange_plan().make_request(3);
+        vector_exchange.start(values);
+        vector_exchange.wait();
         for (Index i = 0; i < n; ++i)
             for (Index component = 0; component < 3; ++component)
                 require(values[i * 3 + component] == 100 * part.global_ids(d)[i] + component,
@@ -64,28 +66,16 @@ namespace {
         for (Index i = 0; i < part.owned_cell_count(); ++i)
             scalar[i] = part.global_ids(d)[i] + 10;
         auto pending = part.exchange_plan().make_request();
-        require(pending.component_count() == 1 && !pending.active(),
-            "reusable exchange request initial state");
         for (int round = 0; round < 2; ++round) {
             std::fill(scalar.begin(), scalar.end(), -1);
             for (Index i = 0; i < part.owned_cell_count(); ++i)
                 scalar[i] = part.global_ids(d)[i] + 10 + round;
             pending.start(scalar);
-            require(pending.active(), "reusable exchange request did not start");
             pending.wait();
-            require(!pending.active(), "reusable exchange request did not finish");
             for (Index i = 0; i < n; ++i)
                 require(scalar[i] == part.global_ids(d)[i] + 10 + round,
                     "reusable nonblocking exchange failed");
         }
-        std::fill(scalar.begin(), scalar.end(), -1);
-        for (Index i = 0; i < part.owned_cell_count(); ++i)
-            scalar[i] = part.global_ids(d)[i] + 20;
-        auto one_shot = part.exchange_plan().begin_exchange(scalar);
-        one_shot.wait();
-        for (Index i = 0; i < n; ++i)
-            require(scalar[i] == part.global_ids(d)[i] + 20,
-                "one-shot nonblocking exchange failed");
 
         for (Index k = 0; k < d; ++k) {
             require(part.global_ids(k).size() == part.mesh().entity_count(k),

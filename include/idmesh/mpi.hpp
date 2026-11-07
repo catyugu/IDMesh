@@ -33,13 +33,11 @@ namespace idmesh::mpi {
         // The field span must remain alive until wait() completes.
         void start(std::span<double> values);
         void wait();
-        bool active() const noexcept;
-        Index component_count() const noexcept;
 
     private:
         struct Data;
-        std::shared_ptr<Data> data_;
-        explicit ExchangeRequest(std::shared_ptr<Data> data);
+        std::unique_ptr<Data> data_;
+        explicit ExchangeRequest(std::unique_ptr<Data> data);
         friend class ExchangePlan;
     };
 
@@ -68,13 +66,8 @@ namespace idmesh::mpi {
     public:
         ExchangePlan() = default;
 
-        void exchange(std::span<double> values, Index components = 1) const;
-        // Packs owned values immediately, starts a nonblocking collective, and
-        // unpacks ghost values in wait(). The span must remain alive until then.
-        ExchangeRequest begin_exchange(
-            std::span<double> values, Index components = 1) const;
         // Precomputes counts/displacements and allocates communication buffers
-        // once. Reuse with start()/wait() in steady exchange loops.
+        // once. Reuse with start()/wait() for host cell fields.
         ExchangeRequest make_request(Index components = 1) const;
         bool empty() const noexcept;
         int rank_count() const noexcept;
