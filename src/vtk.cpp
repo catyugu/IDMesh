@@ -1,6 +1,6 @@
 #include "contracts.hpp"
 #include "idmesh/mesh.hpp"
-#include "second_order.hpp"
+#include "vtk_common.hpp"
 
 #include <algorithm>
 #include <array>
@@ -22,136 +22,6 @@ namespace idmesh {
             std::vector<Index> nodes; // VTK point indices in VTK ordering
             int tag = 0;
         };
-        std::pair<CellType, Index> vtk_type(int code)
-        {
-            switch (code) {
-            case 1:
-                return {CellType::segment, 0};
-            case 3:
-            case 21:
-                return {CellType::segment, 1};
-            case 5:
-            case 22:
-                return {CellType::triangle, 2};
-            case 9:
-            case 23:
-            case 28:
-                return {CellType::quadrilateral, 2};
-            case 10:
-            case 24:
-                return {CellType::tetrahedron, 3};
-            case 12:
-            case 25:
-            case 29:
-                return {CellType::hexahedron, 3};
-            case 13:
-            case 26:
-            case 32:
-                return {CellType::prism, 3};
-            case 14:
-            case 27:
-                return {CellType::pyramid, 3};
-            default:
-                throw std::runtime_error("unsupported VTK cell type");
-            }
-        }
-        Index vtk_node_count(int code)
-        {
-            switch (code) {
-            case 1:
-                return 1;
-            case 3:
-                return 2;
-            case 5:
-                return 3;
-            case 9:
-                return 4;
-            case 10:
-                return 4;
-            case 12:
-                return 8;
-            case 13:
-                return 6;
-            case 14:
-                return 5;
-            case 21:
-                return 3;
-            case 22:
-                return 6;
-            case 23:
-                return 8;
-            case 24:
-                return 10;
-            case 25:
-                return 20;
-            case 26:
-                return 15;
-            case 27:
-                return 13;
-            case 28:
-                return 9;
-            case 29:
-                return 27;
-            case 32:
-                return 18;
-            default:
-                throw std::runtime_error("unsupported VTK cell arity");
-            }
-        }
-        int vtk_type(CellType type, Index count)
-        {
-            switch (type) {
-            case CellType::segment:
-                if (count == 2)
-                    return 3;
-                if (count == 3)
-                    return 21;
-                break;
-            case CellType::triangle:
-                if (count == 3)
-                    return 5;
-                if (count == 6)
-                    return 22;
-                break;
-            case CellType::quadrilateral:
-                if (count == 4)
-                    return 9;
-                if (count == 8)
-                    return 23;
-                if (count == 9)
-                    return 28;
-                break;
-            case CellType::tetrahedron:
-                if (count == 4)
-                    return 10;
-                if (count == 10)
-                    return 24;
-                break;
-            case CellType::hexahedron:
-                if (count == 8)
-                    return 12;
-                if (count == 20)
-                    return 25;
-                if (count == 27)
-                    return 29;
-                break;
-            case CellType::prism:
-                if (count == 6)
-                    return 13;
-                if (count == 15)
-                    return 26;
-                if (count == 18)
-                    return 32;
-                break;
-            case CellType::pyramid:
-                if (count == 5)
-                    return 14;
-                if (count == 13)
-                    return 27;
-                break;
-            }
-            throw std::runtime_error("no compatible quadratic VTK legacy cell type");
-        }
     } // namespace
 
     Mesh read_vtk_legacy(const std::string& filename, BuildOptions options)
@@ -194,10 +64,12 @@ namespace idmesh {
         for (auto& cell : cells) {
             int code = 0;
             detail::require_runtime(bool(in >> code), "truncated VTK CELL_TYPES");
-            const auto [kind, dim] = vtk_type(code);
-            cell.type = kind;
-            cell.dimension = dim;
-            detail::require_runtime(vtk_node_count(code) == cell.nodes.size(), "invalid VTK cell node count");
+            const auto info = detail::vtk::cell_info(code);
+            cell.type = info.type;
+            cell.dimension = info.dimension;
+            detail::require_runtime(
+                info.nodes == cell.nodes.size(),
+                "invalid VTK cell node count");
         }
         enum class Attribute { none,
             cells,
@@ -256,11 +128,9 @@ namespace idmesh {
         for (auto& cell : cells) {
             if (cell.dimension != dimension)
                 continue;
-            std::vector<Index> gmsh = cell.nodes;
-            const auto permutation = detail::vtk_from_gmsh(cell.type, static_cast<Index>(gmsh.size()));
-            if (!permutation.empty())
-                for (Index i = 0; i < gmsh.size(); ++i)
-                    gmsh[permutation[i]] = cell.nodes[i];
+            const auto gmsh
+                = detail::vtk::to_gmsh_order(
+                    cell.type, cell.nodes);
             std::vector<Index> vertices, extras;
             for (Index i = 0; i < cell_vertex_count(cell.type); ++i)
                 vertices.push_back(corner_ids.at(gmsh[i]));
@@ -302,38 +172,34 @@ namespace idmesh {
         for (Index c = 0; c < mesh.entity_count(d); ++c) {
             const auto groups = mesh.labels(d, c);
             detail::require_runtime(groups.size() <= 1, "VTK legacy cannot store multiple labels on one cell");
-            const auto ids = mesh.cell_geometry_nodes(c);
-            const auto type = mesh.cell_types()[c];
-            const int code = vtk_type(type, static_cast<Index>(ids.size()));
-            const auto permutation = detail::vtk_from_gmsh(type, static_cast<Index>(ids.size()));
-            std::vector<Index> nodes;
-            nodes.reserve(ids.size());
-            for (Index i = 0; i < ids.size(); ++i)
-                nodes.push_back(ids[permutation.empty() ? i : permutation[i]]);
-            cells.push_back({code, std::move(nodes), groups.empty() ? 0 : groups.front().value});
+            auto encoded = detail::vtk::encode_cell(mesh, c);
+            cells.push_back({encoded.code, std::move(encoded.points),
+                groups.empty() ? 0 : groups.front().value});
         }
         for (const auto& label : mesh.labels()) {
             if (label.dimension >= d)
                 continue;
-            int code = 0;
-            if (label.dimension == 0)
-                code = 1;
-            else if (label.dimension == 1)
-                code = 3;
-            else if (label.dimension == 2)
-                code = label.vertices.size() == 3 ? 5 : 9;
-            else
-                throw std::runtime_error("unsupported labeled entity dimension");
-            cells.push_back({code,
-                std::vector<Index>(label.vertices.begin(), label.vertices.end()), label.value});
+            const int code = detail::vtk::entity_code(
+                label.dimension,
+                static_cast<Index>(label.vertices.size()));
+            const auto numbering
+                = detail::vtk::point_numbering(mesh);
+            std::vector<Index> points;
+            points.reserve(label.vertices.size());
+            for (Index vertex : label.vertices)
+                points.push_back(
+                    numbering.point_for_geometry(vertex));
+            cells.push_back({code, std::move(points), label.value});
         }
         std::ofstream out(filename);
         detail::require_runtime(bool(out), "cannot open VTK output");
         out << "# vtk DataFile Version 3.0\nIDMesh\nASCII\nDATASET UNSTRUCTURED_GRID\n"
             << std::setprecision(17);
-        out << "POINTS " << mesh.geometry_node_count() << " double\n";
-        for (Index id = 0; id < mesh.geometry_node_count(); ++id) {
-            const auto p = mesh.geometry_node_position(id);
+        const auto numbering = detail::vtk::point_numbering(mesh);
+        out << "POINTS " << numbering.count << " double\n";
+        for (Index point = 0; point < numbering.count; ++point) {
+            const auto p = mesh.geometry_node_position(
+                numbering.geometry_for_point(point));
             out << p[0] << ' ' << p[1] << ' ' << p[2] << '\n';
         }
         std::size_t words = 0;
