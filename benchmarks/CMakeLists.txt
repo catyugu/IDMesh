@@ -19,3 +19,13 @@ if(IDMESH_ENABLE_MPI)
     target_link_libraries(idmesh_mpi_benchmark PRIVATE idmesh_mpi MPI::MPI_CXX)
     idmesh_stage_runtime(idmesh_mpi_benchmark)
 endif()
+
+if(IDMESH_ENABLE_MPI AND IDMESH_ENABLE_KOKKOS)
+    if(IDMESH_DEVICE_LANGUAGE)
+        set_source_files_properties(mpi_kokkos.cpp PROPERTIES LANGUAGE ${IDMESH_DEVICE_LANGUAGE})
+    endif()
+    add_executable(idmesh_mpi_kokkos_benchmark mpi_kokkos.cpp)
+    target_link_libraries(idmesh_mpi_kokkos_benchmark PRIVATE
+        idmesh_mpi_kokkos Kokkos::kokkos MPI::MPI_CXX)
+    idmesh_stage_runtime(idmesh_mpi_kokkos_benchmark)
+endif()
