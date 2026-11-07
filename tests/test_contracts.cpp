@@ -134,9 +134,8 @@ namespace {
                 check(!direct[0].oriented(),
                     "signless relation row should have no metadata");
             }
-            const auto facet_support = full.relation(0, 2);
-            check(facet_support.coefficients.empty() && facet_support.orientations.empty(),
-                "redundant metadata in transposed geometric connectivity");
+            check(!full.has_relation(0, 2) && !full.has_relation(0, 3),
+                "geometric shortcut must stay downward-only");
             const auto boundary = full.relation(3, 2);
             check(boundary.coefficients.size() == boundary.targets.size()
                     && boundary.orientations.size() == boundary.targets.size(),

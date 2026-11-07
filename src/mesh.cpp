@@ -840,7 +840,7 @@ namespace idmesh {
                     const bool oriented = from == to + 1;
                     auto relation = compress(entries, data.counts[from], oriented);
                     PendingRelation().swap(entries);
-                    if (options.relations == RelationDirection::bidirectional && !(from == source.dimension_ && to == 0 && source.dimension_ > 1)) {
+                    if (options.relations == RelationDirection::bidirectional && from == to + 1) {
                         data.relations[to][from] = transpose(
                             relation, data.counts[to]);
                     }
