@@ -623,12 +623,13 @@ namespace idmesh {
 
         void finalize_topology(auto& source, auto& data, BuildOptions options)
         {
-            std::array<std::vector<Loop>, 4> entities;
+            // Unordered-map key pointers survive rehash, avoiding copied keys.
+            std::array<std::vector<const Loop*>, 4> entities;
             const auto construction_vertices =
                 [&](Index dim, Index id) -> std::span<const Index> {
                 if (dim == data.dimension)
                     return data.relations[dim][0].view()[id].targets;
-                return entities[dim][id].view();
+                return entities[dim][id]->view();
             };
 
             // Vertex entities have identity connectivity. Avoid constructing one
@@ -655,10 +656,11 @@ namespace idmesh {
             auto register_entity = [&](Index dim, std::span<const Index> local) -> Incidence {
                 auto canon = detail::canonicalize_entity<Index>(local);
                 detail::require_length(entities[dim].size() < invalid_index, "too many topology entities");
-                auto [it, inserted] = lookup[dim].try_emplace(canon.signature,
+                auto [it, inserted] = lookup[dim].try_emplace(
+                    std::move(canon.signature),
                     static_cast<Index>(entities[dim].size()));
                 if (inserted)
-                    entities[dim].push_back(canon.signature);
+                    entities[dim].push_back(&it->first);
                 return {it->second, static_cast<std::int8_t>(canon.orientation.sign()), canon.orientation};
             };
             auto attach = [&](Index from, Index to, Index id, Incidence entry) {
@@ -682,7 +684,7 @@ namespace idmesh {
     
             if (source.dimension_ == 3 && want(1) && want(2)) {
                 for (Index f = 0; f < entities[2].size(); ++f) {
-                    const auto vertices = entities[2][f].view();
+                    const auto vertices = entities[2][f]->view();
                     for (std::size_t edge = 0; edge < vertices.size(); ++edge) {
                         const auto endpoints = polygon_edge(vertices, edge);
                         attach(2, 1, f, register_entity(1, endpoints.view()));
@@ -691,7 +693,7 @@ namespace idmesh {
             }
             if (source.dimension_ >= 2 && want(1)) {
                 for (Index e = 0; e < entities[1].size(); ++e) {
-                    const auto& vertices = entities[1][e];
+                    const auto& vertices = *entities[1][e];
                     IDMESH_ASSERT(vertices.size() == 2);
                     attach(1, 0, e, {vertices[0], -1, {}});
                     attach(1, 0, e, {vertices[1], 1, {}});
@@ -702,7 +704,7 @@ namespace idmesh {
             // even when intermediate edges have not been materialized.
             if (source.dimension_ == 3 && want(2)) {
                 for (Index f = 0; f < entities[2].size(); ++f) {
-                    for (auto v : entities[2][f])
+                    for (auto v : *entities[2][f])
                         attach(2, 0, f, {v, 0, {}});
                 }
             }
@@ -742,6 +744,11 @@ namespace idmesh {
             }
             std::vector<Index>().swap(source.label_assignment_vertices_);
             decltype(source.label_assignments_) {}.swap(source.label_assignments_);
+            for (Index dim = 1; dim < source.dimension_; ++dim)
+                data.counts[dim] = static_cast<Index>(entities[dim].size());
+            // All accesses through these pointers have finished.
+            for (auto& entries : entities)
+                std::vector<const Loop*>().swap(entries);
             for (auto& table : lookup)
                 std::unordered_map<Loop, Index, LoopHash> {}.swap(table);
     
@@ -761,9 +768,7 @@ namespace idmesh {
                                      && a.unbound_vertices == b.unbound_vertices;
                              }),
                 labels.end());
-            for (Index dim = 1; dim < source.dimension_; ++dim)
-                data.counts[dim]
-                    = static_cast<Index>(entities[dim].size());
+
             for (Index from = 1; from <= source.dimension_; ++from) {
                 for (Index to = 0; to < from; ++to) {
                     auto& entries = incidence[from][to];
@@ -787,8 +792,7 @@ namespace idmesh {
                 data.relations[0][1] = transpose(
                     data.relations[1][0], data.counts[0]);
             }
-            for (Index dim = 1; dim < source.dimension_; ++dim)
-                std::vector<Loop>().swap(entities[dim]);
+
 
             // Materialized labels borrow relation(k, 0), the canonical entity
             // connectivity storage. Only labels on absent layers keep private keys.

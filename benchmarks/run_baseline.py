@@ -55,16 +55,12 @@ LARGE_CASES = [
 CONFIGS = ("minimal", "finite_volume", "full")
 
 
-def parse_row(text: str) -> dict[str, str]:
+def parse_rows(text: str) -> list[dict[str, str]]:
     lines = [line for line in text.splitlines() if line.strip()]
-    if len(lines) != 2:
-        raise RuntimeError(
-            f"expected benchmark header + one row, got {len(lines)} lines"
-        )
     rows = list(csv.DictReader(lines))
-    if len(rows) != 1:
-        raise RuntimeError("expected exactly one benchmark CSV row")
-    return rows[0]
+    if not rows:
+        raise RuntimeError("expected at least one benchmark CSV row")
+    return rows
 
 
 def main() -> int:
@@ -102,14 +98,14 @@ def main() -> int:
                 process = subprocess.run(
                     command, check=True, text=True, capture_output=True
                 )
-                row = parse_row(process.stdout)
-                records.append(
-                    {
-                        "case": case_name,
-                        "process_repeat": str(repeat),
-                        **row,
-                    }
-                )
+                for row in parse_rows(process.stdout):
+                    records.append(
+                        {
+                            "case": case_name,
+                            "process_repeat": str(repeat),
+                            **row,
+                        }
+                    )
 
     if not records:
         return 0

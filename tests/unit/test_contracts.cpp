@@ -144,6 +144,47 @@ namespace {
         }
     }
 
+    void topology_rehash_stability()
+    {
+        // Enough cells to force several entity-map rehashes during construction.
+        constexpr Index side = 8, row = side + 1;
+        const auto vertex = [](Index x, Index y, Index z) {
+            return z * row * row + y * row + x;
+        };
+        idmesh::MeshBuilder builder(3, 3);
+        for (Index z = 0; z <= side; ++z)
+            for (Index y = 0; y <= side; ++y)
+                for (Index x = 0; x <= side; ++x)
+                    builder.add_vertex({double(x), double(y), double(z)});
+
+        for (Index z = 0; z < side; ++z)
+            for (Index y = 0; y < side; ++y)
+                for (Index x = 0; x < side; ++x) {
+                    const std::array<Index, 8> corners {
+                        vertex(x, y, z), vertex(x + 1, y, z),
+                        vertex(x + 1, y + 1, z), vertex(x, y + 1, z),
+                        vertex(x, y, z + 1), vertex(x + 1, y, z + 1),
+                        vertex(x + 1, y + 1, z + 1), vertex(x, y + 1, z + 1)};
+                    builder.add_cell(idmesh::CellType::hexahedron, corners);
+                }
+
+        const auto mesh = std::move(builder).finalize();
+        mesh.validate();
+        check(mesh.entity_count(3) == side * side * side, "cell count after rehash");
+        check(mesh.entity_count(2) == 3 * side * side * (side + 1),
+            "face identity after rehash");
+        check(mesh.entity_count(1) == 3 * side * (side + 1) * (side + 1),
+            "edge identity after rehash");
+        const auto support = mesh.relation(2, 3);
+        Index boundary = 0;
+        for (Index face = 0; face < mesh.entity_count(2); ++face) {
+            const auto count = support[face].targets.size();
+            check(count == 1 || count == 2, "invalid face support after rehash");
+            boundary += (count == 1);
+        }
+        check(boundary == 6 * side * side, "boundary face count after rehash");
+    }
+
     void error_contracts()
     {
         expect_error<std::invalid_argument>(
@@ -218,6 +259,7 @@ int main()
         {"reference cells", all_reference_cells},
         {"mixed hex/prism", mixed_hex_prism},
         {"layer masks", layer_masks},
+        {"topology rehash stability", topology_rehash_stability},
         {"permutation invariants", permutation_invariants},
         {"error contracts", error_contracts},
     });

@@ -101,7 +101,14 @@ namespace idmesh::detail {
             }
         }
 
-        std::vector<Id> canonical(local.size());
+        // Standard-cell facets have at most four vertices. Keep their
+        // canonicalization allocation-free; retain the larger-key fallback
+        // for omitted-layer labels.
+        std::array<Id, 4> small {};
+        std::vector<Id> large(local.size() > small.size() ? local.size() : 0);
+        std::span<Id> canonical = local.size() <= small.size()
+            ? std::span<Id>(small).first(local.size())
+            : std::span<Id>(large);
         for (std::size_t i = 0; i < local.size(); ++i) {
             const auto position = reversed
                 ? (first + local.size() - i) % local.size()
