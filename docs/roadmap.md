@@ -36,8 +36,8 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [ ] Add custom Medit Ordering descriptors and extended pyramid14 VTK Lagrange encoding.
 
 ## Milestone 2 incremental implementation
-- [x] Replicated-input MPI partition and deterministic global entity identity.
-- [x] Owner/ghost ranges, facet-based ghost expansion and cell-value ExchangePlan.
+- [x] Rank-local MPI partition loading and deterministic global entity identity.
+- [x] Dimension-generic ownership sets and reusable entity-field ExchangePlan.
 - [x] Persistent Kokkos topology/geometry mirrors with typed raw device descriptors (Serial CI).
 - [x] Standalone FVM conservation/normal and FEEC incidence examples.
 - [x] Scalable rank-local shard input and dependency-free graph-based partitioning baseline.

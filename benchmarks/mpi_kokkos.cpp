@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -94,22 +95,37 @@ int main(int argc, char** argv)
         generated.side = args.side;
         generated.dimension = 2;
         generated.shape = idmesh_bench::Shape::mixed;
-        const auto source = std::move(idmesh_bench::make_input(generated)).finalize(
+        const auto prefix = (std::filesystem::temp_directory_path()
+            / ("idmesh-mpi-benchmark-" + std::to_string(context.size())))
+                                .string();
+        std::uint64_t global_cells = 0;
+        if (context.rank() == 0) {
+            const auto source = std::move(idmesh_bench::make_input(generated)).finalize(
+                {.topology = idmesh::TopologyLayout::cell_facets,
+                    .relations = idmesh::RelationDirection::bidirectional});
+            global_cells = source.entity_count(source.dimension());
+            const auto owners = idmesh::partition_graph(source, context.size());
+            idmesh::write_partition_shards(
+                source, owners, args.ghost_layers, prefix);
+        }
+        MPI_Bcast(&global_cells, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        const auto partition = idmesh::mpi::read_partition_shard(
+            context, prefix + "." + std::to_string(context.rank()) + ".idm",
             {.topology = idmesh::TopologyLayout::cell_facets,
                 .relations = idmesh::RelationDirection::bidirectional});
-        const auto partition
-            = idmesh::mpi::partition_replicated(context, source, args.ghost_layers);
-        const auto& exchange = partition.exchange_plan();
+        const auto dimension = partition.mesh().dimension();
+        const auto& exchange = partition.exchange_plan(dimension);
 
-        const auto local_cells = exchange.local_cell_count();
+        const auto local_cells = exchange.local_entity_count();
         idmesh::kokkos::DeviceField field(local_cells, args.components);
         std::vector<double> host(
             static_cast<std::size_t>(local_cells) * args.components, -1.0);
-        for (Index cell = 0; cell < partition.owned_cell_count(); ++cell)
+        for (Index entity : partition.owned_entities(dimension))
             for (Index component = 0; component < args.components; ++component)
-                host[static_cast<std::size_t>(cell) * args.components + component]
+                host[static_cast<std::size_t>(entity) * args.components + component]
                     = static_cast<double>(context.rank())
-                    + 0.001 * static_cast<double>(cell)
+                    + 0.001 * static_cast<double>(entity)
                     + 0.000001 * static_cast<double>(component);
         field.upload(host);
 
@@ -163,12 +179,18 @@ int main(int argc, char** argv)
                          "host_staging_total_ms_p50_max,"
                          "send_bytes_per_exchange,receive_bytes_per_exchange\n"
                       << context.size() << ',' << args.side << ','
-                      << source.entity_count(source.dimension()) << ','
+                      << global_cells << ','
                       << args.components << ',' << args.ghost_layers << ','
                       << args.iterations << ',' << start_slowest << ','
                       << wait_slowest << ',' << total_slowest << ','
                       << send_total << ',' << receive_total << '\n';
         }
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (context.rank() == 0)
+            for (int peer = 0; peer < context.size(); ++peer)
+                std::filesystem::remove(
+                    prefix + "." + std::to_string(peer) + ".idm");
+        MPI_Barrier(MPI_COMM_WORLD);
         status = 0;
     }
     catch (const std::exception& error) {

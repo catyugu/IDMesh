@@ -27,16 +27,6 @@ if(IDMESH_ENABLE_KOKKOS)
 endif()
 
 if(IDMESH_ENABLE_MPI)
-    add_executable(idmesh_mpi_test test_mpi.cpp)
-    target_link_libraries(idmesh_mpi_test PRIVATE idmesh_mpi MPI::MPI_CXX)
-    idmesh_stage_runtime(idmesh_mpi_test)
-    add_test(NAME idmesh.mpi.2
-        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
-                ${MPIEXEC_PREFLAGS} $<TARGET_FILE:idmesh_mpi_test> ${MPIEXEC_POSTFLAGS})
-    add_test(NAME idmesh.mpi.3
-        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3
-                ${MPIEXEC_PREFLAGS} $<TARGET_FILE:idmesh_mpi_test> ${MPIEXEC_POSTFLAGS})
-
     add_executable(idmesh_mpi_shards_test test_mpi_shards.cpp)
     target_link_libraries(idmesh_mpi_shards_test PRIVATE idmesh_mpi MPI::MPI_CXX)
     idmesh_stage_runtime(idmesh_mpi_shards_test)

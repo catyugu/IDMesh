@@ -31,7 +31,7 @@ namespace idmesh::mpi {
         std::vector<int> recv_records;
         std::vector<int> send_record_offsets;
         std::vector<int> recv_record_offsets;
-        Index local_cells = 0;
+        Index local_entities = 0;
         MPI_Comm comm = MPI_COMM_NULL;
         std::shared_ptr<void> context_owner;
 
@@ -112,9 +112,9 @@ namespace idmesh::mpi {
         }
 
         Mesh mesh;
-        Index owned_cells = 0;
+        std::vector<std::vector<Index>> owned_entities;
         std::vector<std::vector<std::uint64_t>> global_ids;
         std::vector<std::vector<int>> owner_ranks;
-        ExchangePlan exchange;
+        std::vector<ExchangePlan> exchanges;
     };
 }

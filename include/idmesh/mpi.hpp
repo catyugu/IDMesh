@@ -7,7 +7,6 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace idmesh::mpi {
@@ -53,8 +52,6 @@ namespace idmesh::mpi {
         std::shared_ptr<Data> data_;
         explicit Context(std::shared_ptr<Data> data);
 
-        friend PartitionedMesh partition_replicated(
-            const Context&, const Mesh&, Index);
         friend PartitionedMesh read_partition_shard(
             const Context&, const std::string&, BuildOptions);
     };
@@ -64,11 +61,11 @@ namespace idmesh::mpi {
         ExchangePlan() = default;
 
         // Precomputes counts/displacements and allocates communication buffers
-        // once. Reuse with start()/wait() for host cell fields.
+        // once. Reuse with start()/wait() for fixed-width entity fields.
         ExchangeRequest make_request(Index components = 1) const;
         bool empty() const noexcept;
         int rank_count() const noexcept;
-        Index local_cell_count() const noexcept;
+        Index local_entity_count() const noexcept;
         std::span<const Index> send_indices(int peer) const;
         std::span<const Index> receive_indices(int peer) const;
 
@@ -79,8 +76,6 @@ namespace idmesh::mpi {
         friend class PartitionedMesh;
         friend class ExchangeRequest;
         friend class kokkos::DeviceHaloPlan;
-        friend PartitionedMesh partition_replicated(
-            const Context&, const Mesh&, Index);
         friend PartitionedMesh read_partition_shard(
             const Context&, const std::string&, BuildOptions);
     };
@@ -88,24 +83,19 @@ namespace idmesh::mpi {
     class IDMESH_MPI_API PartitionedMesh {
     public:
         const Mesh& mesh() const noexcept;
-        Index owned_cell_count() const noexcept;
+        std::span<const Index> owned_entities(Index dimension) const;
         std::span<const std::uint64_t> global_ids(Index dimension) const;
         std::span<const int> owner_ranks(Index dimension) const;
-        const ExchangePlan& exchange_plan() const noexcept;
+        const ExchangePlan& exchange_plan(Index dimension) const;
 
     private:
         struct Data;
         std::shared_ptr<Data> data_;
         explicit PartitionedMesh(std::shared_ptr<Data> data);
 
-        friend PartitionedMesh partition_replicated(
-            const Context&, const Mesh&, Index);
         friend PartitionedMesh read_partition_shard(
             const Context&, const std::string&, BuildOptions);
     };
-
-    IDMESH_MPI_API PartitionedMesh partition_replicated(
-        const Context& context, const Mesh& source, Index ghost_layers = 1);
 
     IDMESH_MPI_API PartitionedMesh read_partition_shard(
         const Context& context, const std::string& path,

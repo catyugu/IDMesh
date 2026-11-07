@@ -68,15 +68,15 @@ namespace idmesh::mpi::kokkos {
     struct DeviceHaloPlan::Data {
         ExchangePlan plan;
         Index components = 1;
-        Index cells = 0;
+        Index entities = 0;
         Index sending = 0;
         Index receiving = 0;
         std::vector<int> send_counts;
         std::vector<int> receive_counts;
         std::vector<int> send_offsets;
         std::vector<int> receive_offsets;
-        Kokkos::View<Index*, Memory> send_cells;
-        Kokkos::View<Index*, Memory> receive_cells;
+        Kokkos::View<Index*, Memory> send_entities;
+        Kokkos::View<Index*, Memory> receive_entities;
         DeviceBuffer send_buffer;
         DeviceBuffer receive_buffer;
         HostBuffer host_send_buffer;
@@ -108,7 +108,7 @@ namespace idmesh::mpi::kokkos {
         ::idmesh::detail::require_argument(components != 0 && plan.rank_count() > 0,
             "invalid device halo component or plan");
         data_->plan = plan;
-        data_->cells = plan.local_cell_count();
+        data_->entities = plan.local_entity_count();
         data_->components = components;
 
         std::vector<Index> send, receive;
@@ -128,8 +128,8 @@ namespace idmesh::mpi::kokkos {
             data_->send_counts, data_->receive_counts,
             data_->send_offsets, data_->receive_offsets);
 
-        data_->send_cells = copy_to_device("idmesh_device_halo_send_ids", send);
-        data_->receive_cells = copy_to_device("idmesh_device_halo_receive_ids", receive);
+        data_->send_entities = copy_to_device("idmesh_device_halo_send_ids", send);
+        data_->receive_entities = copy_to_device("idmesh_device_halo_receive_ids", receive);
         const auto send_values = send.size() * components;
         const auto receive_values = receive.size() * components;
         data_->send_buffer = DeviceBuffer("idmesh_device_halo_send", send_values);
@@ -164,7 +164,7 @@ namespace idmesh::mpi::kokkos {
         ::idmesh::detail::require_state(!data_->active,
             "device halo exchange is already active");
         ::idmesh::detail::require_argument(
-            field.entity_count() == data_->cells
+            field.entity_count() == data_->entities
                 && field.component_count() == data_->components,
             "halo field shape does not match plan");
 
@@ -178,7 +178,7 @@ namespace idmesh::mpi::kokkos {
 
         const auto components = data_->components;
         const auto nsend = data_->sending;
-        auto send_ids = data_->send_cells;
+        auto send_ids = data_->send_entities;
         auto send_data = data_->send_buffer;
         auto* field_data = field.data();
 
@@ -186,9 +186,9 @@ namespace idmesh::mpi::kokkos {
             Kokkos::RangePolicy<Execution>(
                 0, static_cast<Index>(nsend * components)),
             KOKKOS_LAMBDA(const Index i) {
-                const Index cell = send_ids(i / components);
+                const Index entity = send_ids(i / components);
                 const Index component = i % components;
-                send_data(i) = field_data[cell * components + component];
+                send_data(i) = field_data[entity * components + component];
             });
         // MPI may consume the packed buffer immediately after Ialltoallv.
         Execution().fence();
@@ -231,7 +231,7 @@ namespace idmesh::mpi::kokkos {
 
         const auto components = data_->components;
         const auto nrecv = data_->receiving;
-        auto receive_ids = data_->receive_cells;
+        auto receive_ids = data_->receive_entities;
         auto receive_data = data_->receive_buffer;
         auto* field_data = data_->field_data;
 
@@ -239,9 +239,9 @@ namespace idmesh::mpi::kokkos {
             Kokkos::RangePolicy<Execution>(
                 0, static_cast<Index>(nrecv * components)),
             KOKKOS_LAMBDA(const Index i) {
-                const Index cell = receive_ids(i / components);
+                const Index entity = receive_ids(i / components);
                 const Index component = i % components;
-                field_data[cell * components + component] = receive_data(i);
+                field_data[entity * components + component] = receive_data(i);
             });
         Execution().fence();
 

@@ -120,20 +120,24 @@ shape families are rejected, pending a standard-preserving adapter.
 
 `-DIDMESH_ENABLE_MPI=ON` builds the `IDMesh::MPI` adapter without exposing
 `mpi.h` from public SDK headers. The application initializes/finalizes MPI.
-`idmesh::mpi::partition_replicated(context, source, ghost_layers)` constructs owned-cell
-then ghost-cell local meshes, carrying stable dimension-local global entity IDs,
-deterministic shared orientation and owner ranks. Facet adjacency defines the
-ghost expansion; the source mesh must materialize Cell/Facet and Facet/Cell
-relations. Host cell-field exchange has a single execution model:
-`make_request(components)` allocates counts, displacements, and packed
-send/receive buffers once; repeated `start(field)` / `wait()` cycles perform
-no IDMesh-side host allocation. `start` packs owned records and launches
-`MPI_Ialltoallv`; `wait()` completes the collective and unpacks Ghost
-records, allowing interior work to overlap the communication interval.
+Production distributed meshes are loaded rank-locally from partition shards.
+Every materialized entity dimension carries stable global IDs, owner ranks,
+an explicit owned-entity index set, and a reusable halo `ExchangePlan`.
+Lower-dimensional entities retain canonical local numbering; ownership is
+therefore represented by `owned_entities(dimension)` rather than by requiring
+an owned-first local range.
 
-The replicated-input partition path remains available as a correctness baseline,
-but production-style rank-local loading is provided by the shard reader described
-below. The bundled graph partitioner and shard writer are core, dependency-free serial preprocessing tools exposed by `idmesh/partition.hpp`; their quality is not claimed comparable to ParMETIS. The MPI backend duplicates and owns the communicator represented by `mpi::Context`; collective metadata and halo operations remain blocking.
+`exchange_plan(dimension).make_request(components)` allocates counts,
+displacements and packed buffers once. Repeated `start(field)` / `wait()`
+cycles perform no IDMesh-side host allocation. The same transport applies to
+Vertex, Edge, Facet and Cell fields. `start` packs owner records and launches
+`MPI_Ialltoallv`; `wait()` completes the collective and unpacks ghost
+records, allowing independent work to overlap the communication interval.
+
+The bundled graph partitioner and shard writer are core, dependency-free serial
+preprocessing tools exposed by `idmesh/partition.hpp`; their quality is not
+claimed comparable to ParMETIS. The MPI backend duplicates and owns the
+communicator represented by `mpi::Context`.
 
 `idmesh_fvm` assembles a 3D two-tetra diffusion operator using
 `BuildOptions{TopologyLayout::cell_facets, RelationDirection::bidirectional}` (no Edge layer), checking conservative
@@ -209,9 +213,10 @@ among incident cells. Requests and answers use bounded MPI_Alltoallv,
 with storage proportional to local entities plus the Rank's hash
 registry share, rather than the complete global mesh.
 
-Ghost cell-field communication plans use a separate exchange of global
-cell-ID requests with cell owners. The existing `ExchangePlan` then
-operates without accessing the original mesh or the registry.
+After global identity and ownership are established, each materialized
+dimension builds its halo plan from global-ID requests sent to entity owners.
+The resulting `ExchangePlan` is topology-dimension agnostic and operates
+without accessing the original mesh or the identity registry.
 
 `idmesh::partition_graph` performs balanced region growing on the
 Facet-adjacency cell dual graph, initializing well-separated seeds and
@@ -234,8 +239,8 @@ The Kokkos backend owns `DeviceMesh`, `DeviceRelation` and
 `DeviceField` storage while keeping Kokkos types out of the installed
 ABI. Discretization-specific operators are intentionally outside the mesh
 SDK; applications can build them from mirrored topology/geometry and device
-fields. The combined MPI/Kokkos adapter packs owned Cell records and unpacks
-Ghost records using Kokkos kernels.
+fields. The combined MPI/Kokkos adapter packs owner records and unpacks ghost records
+for fields on any materialized entity dimension using Kokkos kernels.
 
 `DeviceHaloPlan` stores the rank-index maps in device memory and
 supports `automatic`, `host_staging`, and `require_gpu_aware` transports.

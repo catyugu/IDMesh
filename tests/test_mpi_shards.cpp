@@ -70,6 +70,77 @@ namespace {
         return std::move(builder).finalize();
     }
 
+    idmesh::Mesh source_3d()
+    {
+        idmesh::MeshBuilder builder(3, 3);
+        constexpr Index nx = 3, ny = 2;
+        for (Index z = 0; z <= 1; ++z)
+            for (Index y = 0; y <= ny; ++y)
+                for (Index x = 0; x <= nx; ++x)
+                    builder.add_vertex({double(x), double(y), double(z)});
+
+        const auto vertex = [](Index x, Index y, Index z) {
+            return z * (nx + 1) * (ny + 1) + y * (nx + 1) + x;
+        };
+        for (Index parity = 0; parity < 2; ++parity)
+            for (Index y = 0; y < ny; ++y)
+                for (Index x = 0; x < nx; ++x) {
+                    if ((x + y) % 2 != parity)
+                        continue;
+                    const std::array<Index, 8> corners {
+                        vertex(x, y, 0), vertex(x + 1, y, 0),
+                        vertex(x + 1, y + 1, 0), vertex(x, y + 1, 0),
+                        vertex(x, y, 1), vertex(x + 1, y, 1),
+                        vertex(x + 1, y + 1, 1), vertex(x, y + 1, 1)};
+                    builder.add_cell(idmesh::CellType::hexahedron, corners);
+                }
+        return std::move(builder).finalize();
+    }
+
+    void check_entity_exchange(const idmesh::mpi::PartitionedMesh& partition,
+        Index dimension, int rank)
+    {
+        const Index count = partition.mesh().entity_count(dimension);
+        require(partition.global_ids(dimension).size() == count
+                && partition.owner_ranks(dimension).size() == count,
+            "distributed entity metadata mismatch");
+        const auto owned = partition.owned_entities(dimension);
+        require(!owned.empty(), "rank owns no entities on a materialized dimension");
+
+        std::vector<bool> is_owned(count);
+        for (Index entity : owned) {
+            require(entity < count && !is_owned[entity],
+                "invalid or duplicate owned entity index");
+            require(partition.owner_ranks(dimension)[entity] == rank,
+                "owned entity has a remote owner");
+            is_owned[entity] = true;
+        }
+        for (Index entity = 0; entity < count; ++entity)
+            require(is_owned[entity]
+                    == (partition.owner_ranks(dimension)[entity] == rank),
+                "owned entity set disagrees with owner ranks");
+
+        const auto& plan = partition.exchange_plan(dimension);
+        require(plan.local_entity_count() == count,
+            "exchange plan local entity count mismatch");
+        std::vector<double> values(std::size_t(count) * 2, -1);
+        for (Index entity : owned) {
+            const auto global = partition.global_ids(dimension)[entity];
+            values[2 * entity] = double(global * 3 + dimension + 11);
+            values[2 * entity + 1] = double(global * 5 + dimension + 17);
+        }
+        auto request = plan.make_request(2);
+        request.start(values);
+        request.wait();
+        for (Index entity = 0; entity < count; ++entity) {
+            const auto global = partition.global_ids(dimension)[entity];
+            require(values[2 * entity] == double(global * 3 + dimension + 11)
+                    && values[2 * entity + 1]
+                        == double(global * 5 + dimension + 17),
+                "entity halo exchange mismatch");
+        }
+    }
+
     int edge_cut(const idmesh::Mesh& mesh, const std::vector<int>& partition)
     {
         const Index dim = mesh.dimension();
@@ -126,25 +197,9 @@ namespace {
         require(dim == 2
                 && partition.global_ids(dim).size() == partition.mesh().entity_count(dim),
             "invalid distributed mesh dimensions");
-        require(partition.owned_cell_count() > 0, "empty rank partition");
-
-        const Index cells = partition.mesh().entity_count(dim);
-        std::vector<double> values(std::size_t(cells) * 2, -1);
-        for (Index i = 0; i < partition.owned_cell_count(); ++i) {
-            const auto global = partition.global_ids(dim)[i];
-            values[2 * i] = double(global + 100);
-            values[2 * i + 1] = double(global * 2 + 7);
-        }
-        auto exchange = partition.exchange_plan().make_request(2);
-        exchange.start(values);
-        exchange.wait();
-        for (Index i = 0; i < cells; ++i) {
-            const auto global = partition.global_ids(dim)[i];
-            require(values[2 * i] == double(global + 100) && values[2 * i + 1] == double(global * 2 + 7),
-                "distributed shard halo exchange mismatch");
-            require((i < partition.owned_cell_count()) == (partition.owner_ranks(dim)[i] == rank),
-                "shard cells not ordered owned then ghost");
-        }
+        for (Index k = 0; k <= dim; ++k)
+            if (partition.mesh().has_entities(k))
+                check_entity_exchange(partition, k, rank);
 
         // Check local canonicalization of every materialized Edge or Vertex
         // by its global-key -> global-entity-ID mapping on all MPI ranks.
@@ -210,6 +265,38 @@ namespace {
         }
         MPI_Barrier(MPI_COMM_WORLD);
     }
+
+    void test_complete_3d(const idmesh::mpi::Context& context,
+        const std::string& prefix, int rank, int size)
+    {
+        if (rank == 0) {
+            const auto mesh = source_3d();
+            const auto assignments = idmesh::partition_graph(mesh, size);
+            idmesh::write_partition_shards(mesh, assignments, 1, prefix);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        const auto local_path = prefix + "." + std::to_string(rank) + ".idm";
+        auto partition = idmesh::mpi::read_partition_shard(
+            context, local_path,
+            idmesh::BuildOptions {
+                .topology = idmesh::TopologyLayout::complete,
+                .relations = idmesh::RelationDirection::bidirectional});
+        partition.mesh().validate();
+        require(partition.mesh().dimension() == 3
+                && partition.mesh().has_entities(1)
+                && partition.mesh().has_entities(2),
+            "complete 3D topology was not materialized");
+        for (Index k = 0; k <= 3; ++k)
+            check_entity_exchange(partition, k, rank);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (rank == 0)
+            for (int p = 0; p < size; ++p)
+                std::filesystem::remove(
+                    prefix + "." + std::to_string(p) + ".idm");
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
 }
 
 int main(int argc, char** argv)
@@ -217,16 +304,21 @@ int main(int argc, char** argv)
     MPI_Init(&argc, &argv);
     try {
         const auto context = idmesh::mpi::Context::world();
+        const auto from_handle = idmesh::mpi::Context::from_fortran_handle(
+            static_cast<std::int64_t>(MPI_Comm_c2f(MPI_COMM_WORLD)));
         const int rank = context.rank(), size = context.size();
+        require(rank == from_handle.rank() && size == from_handle.size(),
+            "MPI communicator handle conversion changed context");
         require(size >= 2 && size <= 3, "test requires two or three MPI ranks");
         const auto base = (std::filesystem::temp_directory_path()
             / ("idmesh-parallel-" + std::to_string(size)))
                               .string();
         test_shard(context, base, rank, size, 1);
         test_shard(context, base, rank, size, 2);
+        test_complete_3d(context, base + "-3d", rank, size);
         if (rank == 0)
-            std::cout << "MPI shard: graph cuts, independent loading, global "
-                      << "identity, Ghost/Exchange and quadratic geometry OK\n";
+            std::cout << "MPI shard: graph cuts, rank-local loading, all-dimension "
+                      << "identity/halo, orientation and quadratic geometry OK\n";
         MPI_Finalize();
         return 0;
     }

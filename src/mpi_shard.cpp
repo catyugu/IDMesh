@@ -26,11 +26,6 @@
 namespace idmesh::mpi {
     namespace {
 
-        struct ReceivedBytes {
-            std::vector<int> counts;
-            std::vector<int> displacements;
-        };
-
         template <class T>
         struct Received {
             std::vector<T> values;
@@ -232,11 +227,11 @@ namespace idmesh::mpi {
             return hash;
         }
 
-        struct Request {
-            std::uint64_t global_cell = 0;
-            Index local_ghost = 0;
+        struct EntityRequest {
+            std::uint64_t global_id = 0;
+            Index local_entity = 0;
         };
-        static_assert(std::is_trivially_copyable_v<Request>);
+        static_assert(std::is_trivially_copyable_v<EntityRequest>);
 
     } // namespace
 
@@ -259,7 +254,6 @@ namespace idmesh::mpi {
         for (const auto& [id, position] : input.vertices)
             vertices[id] = builder.add_vertex(position);
 
-        Index owned = 0;
         std::vector<std::uint64_t> cell_ids;
         std::vector<int> cell_owners;
         for (const Cell& cell : input.cells) {
@@ -281,8 +275,6 @@ namespace idmesh::mpi {
             cells[cell.id] = local;
             cell_ids.push_back(cell.id);
             cell_owners.push_back(cell.owner);
-            if (cell.owner == rank)
-                ++owned;
         }
         for (const Label& label : input.labels) {
             if (label.dimension == dim) {
@@ -303,9 +295,10 @@ namespace idmesh::mpi {
 
         auto partition = std::make_shared<PartitionedMesh::Data>(
             std::move(builder).finalize(options));
-        partition->owned_cells = owned;
+        partition->owned_entities.resize(dim + 1);
         partition->global_ids.resize(dim + 1);
         partition->owner_ranks.resize(dim + 1);
+        partition->exchanges.resize(dim + 1);
         partition->global_ids[dim] = std::move(cell_ids);
         partition->owner_ranks[dim] = std::move(cell_owners);
 
@@ -400,37 +393,62 @@ namespace idmesh::mpi {
                                                    [](bool value) { return value; }),
                 "missing distributed entity response");
 
-        std::map<std::uint64_t, Index> owned_cells;
-        for (Index c = 0; c < owned; ++c)
-            ::idmesh::detail::require_argument(owned_cells.emplace(partition->global_ids[dim][c], c).second,
-                "duplicate owned global cell ID");
-        std::vector<std::vector<Request>> ghost_requests(size);
-        for (Index c = owned; c < partition->mesh.entity_count(dim); ++c) {
-            const int owner = partition->owner_ranks[dim][c];
-            ::idmesh::detail::require_argument(owner != rank, "ghost cell wrongly owned by local rank");
-            ghost_requests[owner].push_back({partition->global_ids[dim][c], c});
-        }
-        const auto incoming_ghosts = exchange_records(comm, ghost_requests);
-        auto exchange = std::make_shared<ExchangePlan::Data>();
-        exchange->comm = comm;
-        exchange->context_owner = context.data_;
-        exchange->send.resize(size);
-        exchange->recv.resize(size);
-        exchange->local_cells = partition->mesh.entity_count(dim);
-        for (int peer = 0; peer < size; ++peer) {
-            for (const auto& request : ghost_requests[peer])
-                exchange->recv[peer].push_back(request.local_ghost);
-            const int first = incoming_ghosts.offsets[peer];
-            const int count = incoming_ghosts.counts[peer];
-            for (int i = 0; i < count; ++i) {
-                const auto& request = incoming_ghosts.values[first + i];
-                const auto found = owned_cells.find(request.global_cell);
-                ::idmesh::detail::require_runtime(found != owned_cells.end(), "requested ghost owner lacks its cell");
-                exchange->send[peer].push_back(found->second);
+        // Build the same ownership and halo contract for every materialized
+        // entity dimension. Lower-dimensional entities are not renumbered into
+        // owned-first order because their local IDs participate in canonical
+        // orientation; callers use owned_entities(k) explicitly.
+        for (Index k = 0; k <= dim; ++k) {
+            if (!partition->mesh.has_entities(k))
+                continue;
+            const Index count = partition->mesh.entity_count(k);
+            ::idmesh::detail::require_runtime(
+                partition->global_ids[k].size() == count
+                    && partition->owner_ranks[k].size() == count,
+                "distributed entity metadata size mismatch");
+
+            auto& owned_entities = partition->owned_entities[k];
+            std::map<std::uint64_t, Index> owned_lookup;
+            std::vector<std::vector<EntityRequest>> ghost_requests(size);
+            for (Index entity = 0; entity < count; ++entity) {
+                const int owner = partition->owner_ranks[k][entity];
+                ::idmesh::detail::require_runtime(
+                    owner >= 0 && owner < size, "invalid distributed entity owner");
+                const auto global = partition->global_ids[k][entity];
+                if (owner == rank) {
+                    owned_entities.push_back(entity);
+                    ::idmesh::detail::require_runtime(
+                        owned_lookup.emplace(global, entity).second,
+                        "duplicate owned global entity ID");
+                }
+                else {
+                    ghost_requests[owner].push_back({global, entity});
+                }
             }
+
+            const auto incoming = exchange_records(comm, ghost_requests);
+            auto exchange = std::make_shared<ExchangePlan::Data>();
+            exchange->comm = comm;
+            exchange->context_owner = context.data_;
+            exchange->send.resize(size);
+            exchange->recv.resize(size);
+            exchange->local_entities = count;
+            for (int peer = 0; peer < size; ++peer) {
+                for (const auto& request : ghost_requests[peer])
+                    exchange->recv[peer].push_back(request.local_entity);
+                const int first = incoming.offsets[peer];
+                const int received_count = incoming.counts[peer];
+                for (int i = 0; i < received_count; ++i) {
+                    const auto& request = incoming.values[first + i];
+                    const auto found = owned_lookup.find(request.global_id);
+                    ::idmesh::detail::require_runtime(
+                        found != owned_lookup.end(),
+                        "requested ghost owner lacks its entity");
+                    exchange->send[peer].push_back(found->second);
+                }
+            }
+            exchange->finalize_layout();
+            partition->exchanges[k] = ExchangePlan(std::move(exchange));
         }
-        exchange->finalize_layout();
-        partition->exchange = ExchangePlan(std::move(exchange));
         partition->mesh.validate();
         return PartitionedMesh(std::move(partition));
     }

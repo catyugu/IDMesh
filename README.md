@@ -99,7 +99,9 @@ auto owners = idmesh::partition_graph(mesh, parts);
 idmesh::write_partition_shards(mesh, owners, ghost_layers, "mesh");
 ```
 
-The optional MPI backend reads those shards at runtime.
+The optional MPI backend reads those shards at runtime and exposes global IDs,
+owner ranks, owned-entity sets and reusable halo exchange for every materialized
+topology dimension.
 
 ## Optional backends
 

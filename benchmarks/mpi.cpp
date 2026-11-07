@@ -1,10 +1,12 @@
 #include "idmesh/mpi.hpp"
+#include "idmesh/partition.hpp"
 #include "mesh_factory.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
@@ -102,15 +104,30 @@ int main(int argc, char** argv)
         generated.side = args.side;
         generated.dimension = 2;
         generated.shape = idmesh_bench::Shape::mixed;
-        const auto source = std::move(idmesh_bench::make_input(generated)).finalize(
+        const auto prefix = (std::filesystem::temp_directory_path()
+            / ("idmesh-mpi-benchmark-" + std::to_string(context.size())))
+                                .string();
+        std::uint64_t global_cells = 0;
+        if (context.rank() == 0) {
+            const auto source = std::move(idmesh_bench::make_input(generated)).finalize(
+                {.topology = idmesh::TopologyLayout::cell_facets,
+                    .relations = idmesh::RelationDirection::bidirectional});
+            global_cells = source.entity_count(source.dimension());
+            const auto owners = idmesh::partition_graph(source, context.size());
+            idmesh::write_partition_shards(
+                source, owners, args.ghost_layers, prefix);
+        }
+        MPI_Bcast(&global_cells, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        const auto partition = idmesh::mpi::read_partition_shard(
+            context, prefix + "." + std::to_string(context.rank()) + ".idm",
             {.topology = idmesh::TopologyLayout::cell_facets,
                 .relations = idmesh::RelationDirection::bidirectional});
-        const auto partition
-            = idmesh::mpi::partition_replicated(context, source, args.ghost_layers);
-        const auto& plan = partition.exchange_plan();
+        const auto dimension = partition.mesh().dimension();
+        const auto& plan = partition.exchange_plan(dimension);
 
         std::vector<double> field(
-            static_cast<std::size_t>(plan.local_cell_count()) * args.components);
+            static_cast<std::size_t>(plan.local_entity_count()) * args.components);
         fill_field(field, context.rank(), args.components);
 
         std::size_t send_records = 0, receive_records = 0;
@@ -161,12 +178,18 @@ int main(int argc, char** argv)
                          "reused_wait_ms_p50_max,reused_total_ms_p50_max,"
                          "send_bytes_per_exchange,receive_bytes_per_exchange\n"
                       << context.size() << ',' << args.side << ','
-                      << source.entity_count(source.dimension()) << ','
+                      << global_cells << ','
                       << args.components << ',' << args.ghost_layers << ','
                       << args.iterations << ',' << start_max << ','
                       << wait_max << ',' << reused_max << ','
                       << sent_total << ',' << recv_total << '\n';
         }
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (context.rank() == 0)
+            for (int peer = 0; peer < context.size(); ++peer)
+                std::filesystem::remove(
+                    prefix + "." + std::to_string(peer) + ".idm");
+        MPI_Barrier(MPI_COMM_WORLD);
         status = 0;
     }
     catch (const std::exception& error) {
