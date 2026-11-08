@@ -137,8 +137,10 @@ int main(int argc, char** argv)
             receive_records += plan.receive_indices(peer).size();
         }
 
+        const auto setup_begin = Clock::now();
         auto reusable
             = plan.make_request(std::size_t(args.components) * sizeof(double));
+        const auto setup_ms = milliseconds(setup_begin, Clock::now());
         reusable.start(std::as_writable_bytes(std::span(field)));
         reusable.wait();
         MPI_Barrier(MPI_COMM_WORLD);
@@ -159,6 +161,9 @@ int main(int argc, char** argv)
             reused.samples.push_back(milliseconds(total_begin, end));
         }
 
+        const double setup_local = setup_ms;
+        double setup_max = 0.0;
+        MPI_Reduce(&setup_local, &setup_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         double start_local = start_phase.median();
         double wait_local = wait_phase.median();
         double reused_local = reused.median();
@@ -178,13 +183,15 @@ int main(int argc, char** argv)
                       << "ranks,side,cells,components,ghost_layers,iterations,"
                          "reused_start_ms_p50_max,"
                          "reused_wait_ms_p50_max,reused_total_ms_p50_max,"
-                         "send_bytes_per_exchange,receive_bytes_per_exchange\n"
+                         "send_bytes_per_exchange,receive_bytes_per_exchange,"
+                         "request_setup_ms_max\n"
                       << context.size() << ',' << args.side << ','
                       << global_cells << ','
                       << args.components << ',' << args.ghost_layers << ','
                       << args.iterations << ',' << start_max << ','
                       << wait_max << ',' << reused_max << ','
-                      << sent_total << ',' << recv_total << '\n';
+                      << sent_total << ',' << recv_total << ','
+                      << setup_max << '\n';
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (context.rank() == 0)

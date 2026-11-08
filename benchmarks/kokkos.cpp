@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -16,6 +17,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 
 namespace {
     using Clock = std::chrono::steady_clock;
@@ -37,6 +41,7 @@ namespace {
         unsigned trials = 5;
         unsigned rounds = 20;
         std::string gmsh;
+        std::string configuration = "all";
     };
 
     unsigned parse_unsigned(const char* value)
@@ -58,7 +63,8 @@ namespace {
             if (option == "--help") {
                 std::cout << "Usage: idmesh_kokkos_benchmark [side] [rounds] [--dim 2|3] "
                              "[--shape simplex|tensor|mixed] [--trials N] "
-                             "[--scramble] [--seed N] [--jitter D] [--gmsh FILE]\n";
+                             "[--scramble] [--seed N] [--jitter D] [--gmsh FILE] "
+                             "[--config all|minimal|finite_volume|full]\n";
                 std::exit(0);
             }
             if (option == "--scramble") {
@@ -66,7 +72,8 @@ namespace {
                 continue;
             }
             if (option == "--shape" || option == "--dim" || option == "--trials"
-                || option == "--gmsh" || option == "--seed" || option == "--jitter") {
+                || option == "--gmsh" || option == "--seed" || option == "--jitter"
+                || option == "--config") {
                 if (++i >= argc)
                     throw std::invalid_argument("missing option value");
                 if (option == "--shape")
@@ -77,6 +84,8 @@ namespace {
                     a.trials = parse_unsigned(argv[i]);
                 else if (option == "--gmsh")
                     a.gmsh = argv[i];
+                else if (option == "--config")
+                    a.configuration = argv[i];
                 else if (option == "--seed")
                     a.generated.seed = std::stoull(argv[i]);
                 else
@@ -92,6 +101,9 @@ namespace {
             else
                 throw std::invalid_argument("too many positional arguments");
         }
+        if (a.configuration != "all" && a.configuration != "minimal"
+            && a.configuration != "finite_volume" && a.configuration != "full")
+            throw std::invalid_argument("invalid --config");
         if ((a.generated.dimension != 2 && a.generated.dimension != 3)
             || a.generated.side == 0
             || a.generated.side > (a.generated.dimension == 2 ? 1024u : 64u)
@@ -106,8 +118,21 @@ namespace {
         return std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
     }
 
+    std::uint64_t resident_bytes()
+    {
+#if defined(__linux__)
+        std::ifstream file("/proc/self/statm");
+        std::uint64_t pages = 0, resident = 0;
+        if (file >> pages >> resident)
+            return resident * static_cast<std::uint64_t>(sysconf(_SC_PAGESIZE));
+#endif
+        return 0; // Process RSS is unavailable on this platform.
+    }
+
     void emit(const Arguments& a, const idmesh::Mesh& mesh, const char* configuration,
-        const char* phase, const Timing& values, double checked_value)
+        const char* phase, const Timing& values, double checked_value,
+        std::uint64_t mesh_bytes, std::uint64_t relation_bytes,
+        const Timing& resident, const Timing& increase)
     {
         std::cout << mesh.dimension() << ',' << idmesh_bench::shape_name(a.generated.shape)
                   << ',' << (a.gmsh.empty() ? a.generated.side : 0)
@@ -116,7 +141,10 @@ namespace {
                   << a.trials << ',' << a.rounds << ',' << values.median()
                   << ',' << values.p95() << ',' << checked_value << ','
                   << (a.gmsh.empty() ? "generated" : "gmsh") << ','
-                  << a.generated.scramble << ',' << a.generated.seed << '\n';
+                  << a.generated.scramble << ',' << a.generated.seed << ','
+                  << mesh_bytes << ',' << relation_bytes << ','
+                  << static_cast<std::uint64_t>(resident.median()) << ','
+                  << static_cast<std::uint64_t>(increase.median()) << '\n';
     }
 
     void run_case(const Arguments& a, idmesh::BuildOptions options, const char* name)
@@ -128,13 +156,16 @@ namespace {
             }
             return idmesh::read_gmsh(a.gmsh, options);
         }();
-        Timing geometry_upload, relation_upload, centroid, incidence, geometry_checksum;
+        Timing geometry_upload, relation_upload, centroid, incidence,
+            geometry_checksum, resident, increase;
+        std::uint64_t mesh_payload = 0, relation_payload = 0;
         const auto dim = mesh.dimension();
         const bool has_relation = mesh.has_relation(dim, dim - 1);
         const auto reference = has_relation ? mesh.relation(dim, dim - 1).targets.size() : 0;
         double checked_centroid = 0.0;
         std::uint64_t checked_geometry = 0;
         for (unsigned trial = 0; trial < a.trials; ++trial) {
+            const auto before_rss = resident_bytes();
             auto start = Clock::now();
             auto device = std::make_unique<idmesh::kokkos::DeviceMesh>(mesh);
             Kokkos::fence();
@@ -146,6 +177,29 @@ namespace {
                 relation = std::make_unique<idmesh::kokkos::DeviceRelation>(mesh, dim, dim - 1);
                 Kokkos::fence();
                 relation_upload.samples.push_back(elapsed(start));
+            }
+            // Mirror accounting excludes application-owned fields and the host
+            // Mesh, which already exists before the RSS snapshot.
+            const auto after_rss = resident_bytes();
+            resident.samples.push_back(static_cast<double>(after_rss));
+            increase.samples.push_back(
+                static_cast<double>(after_rss > before_rss ? after_rss - before_rss : 0));
+            if (trial == 0) {
+                const std::uint64_t cells = device->cell_count();
+                const std::uint64_t nodes = device->geometry_node_count();
+                mesh_payload = cells * (sizeof(idmesh::CellType) + sizeof(std::uint8_t))
+                    + 2 * (cells + 1) * sizeof(idmesh::Index)
+                    + (device->cell_vertex_entry_count()
+                          + device->high_order_geometry_entry_count()) * sizeof(idmesh::Index)
+                    + 3 * nodes * sizeof(double);
+                if (relation) {
+                    const std::uint64_t entries = relation->entry_count();
+                    relation_payload = (std::uint64_t(relation->row_count()) + 1) * sizeof(idmesh::Index)
+                        + entries * (sizeof(idmesh::Index)
+                            + (relation->oriented()
+                                    ? sizeof(std::int8_t) + sizeof(idmesh::Orientation)
+                                    : 0));
+                }
             }
 
             start = Clock::now();
@@ -218,14 +272,18 @@ namespace {
                     throw std::runtime_error("device relation entry count mismatch");
             }
         }
-        emit(a, mesh, name, "device_geometry_upload", geometry_upload, checked_centroid);
-        emit(a, mesh, name, "device_centroid_kernel", centroid, checked_centroid);
-        emit(a, mesh, name, "device_geometry_checksum", geometry_checksum,
+        const auto report = [&](const char* phase, const Timing& timing, double value) {
+            emit(a, mesh, name, phase, timing, value,
+                mesh_payload, relation_payload, resident, increase);
+        };
+        report("device_geometry_upload", geometry_upload, checked_centroid);
+        report("device_centroid_kernel", centroid, checked_centroid);
+        report("device_geometry_checksum", geometry_checksum,
             static_cast<double>(checked_geometry));
         if (has_relation) {
-            emit(a, mesh, name, "device_relation_upload", relation_upload,
+            report("device_relation_upload", relation_upload,
                 static_cast<double>(reference));
-            emit(a, mesh, name, "device_incidence_kernel", incidence,
+            report("device_incidence_kernel", incidence,
                 static_cast<double>(reference));
         }
     }
@@ -240,14 +298,19 @@ int main(int argc, char** argv)
         try {
             std::cout << std::fixed << std::setprecision(3)
                       << "dimension,shape,side,configuration,phase,cells,trials,rounds,"
-                         "ms_p50,ms_p95,result,source,scramble,seed\n";
-            run_case(args,
-                idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward},
-                "minimal");
-            run_case(args,
-                idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets},
-                "finite_volume");
-            run_case(args, idmesh::BuildOptions {}, "full");
+                         "ms_p50,ms_p95,result,source,scramble,seed,"
+                         "device_mesh_payload_bytes,device_relation_payload_bytes,"
+                         "rss_after_mirrors_bytes_p50,rss_delta_mirrors_bytes_p50\n";
+            if (args.configuration == "all" || args.configuration == "minimal")
+                run_case(args,
+                    idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_vertices, .relations = idmesh::RelationDirection::downward},
+                    "minimal");
+            if (args.configuration == "all" || args.configuration == "finite_volume")
+                run_case(args,
+                    idmesh::BuildOptions {.topology = idmesh::TopologyLayout::cell_facets},
+                    "finite_volume");
+            if (args.configuration == "all" || args.configuration == "full")
+                run_case(args, idmesh::BuildOptions {}, "full");
         }
         catch (const std::exception& error) {
             std::cerr << "Kokkos benchmark: " << error.what() << '\n';

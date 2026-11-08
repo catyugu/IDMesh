@@ -330,10 +330,12 @@ namespace {
                 return idmesh::read_gmsh(args.gmsh, options);
             }();
             const auto finalized = Clock::now();
-            mesh.validate();
-            const auto validated = Clock::now();
+            // Do not charge explicit exhaustive validation allocations to
+            // finalized-mesh memory. Validation has its own timing phase.
             const auto final_rss = resident_bytes();
             const auto final_peak = peak_resident_bytes();
+            mesh.validate();
+            const auto validated = Clock::now();
             input.samples.push_back(milliseconds(start, input_ready));
             finalize.samples.push_back(milliseconds(input_ready, finalized));
             validate.samples.push_back(milliseconds(finalized, validated));
