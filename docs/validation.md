@@ -23,7 +23,7 @@ archived consumer build and is not claimed by these tests.
 | Kokkos | Serial runtime | persistent topology/geometry mirrors, matrix-free diffusion over application-owned device storage, and post-finalize construction rejection |
 | MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | type-agnostic all-dimension device pack/unpack over caller-owned storage, abandoned device requests, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
 | External FE | Basix-backed Nedelec transformation CI | rotation/reflection group relations and shared-facet consistency |
-| Package consumers | CMake installed-package CTest on Linux, Windows and macOS | compatible 0.3.x package discovery, actual core mesh/VTK I/O, optional adapter symbol invocation and Windows DLL discovery |
+| Package consumers | CMake installed-package CTest on Linux, Windows and macOS | compatible 0.3.x package discovery, actual core mesh/VTK I/O, optional adapter symbol invocation, Windows DLL discovery and installed sibling-library RPATH resolution |
 
 
 ## Device-hardware acceptance

@@ -13,6 +13,13 @@ function(idmesh_configure_target target export_name)
         SOVERSION ${IDMESH_ABI_VERSION}
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON)
+    # Shared SDK components may depend on sibling libraries in the same
+    # installed lib/ directory. Preserve relocatability without LD_LIBRARY_PATH.
+    if(APPLE)
+        set_target_properties(${target} PROPERTIES INSTALL_RPATH "@loader_path")
+    elseif(UNIX)
+        set_target_properties(${target} PROPERTIES INSTALL_RPATH "$ORIGIN")
+    endif()
 endfunction()
 
 # Tests and examples live in subdirectories, so stage transitively required

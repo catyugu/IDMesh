@@ -56,6 +56,12 @@ MPI/Kokkos runtimes must remain compatible. Static consumers must relink
 when replacing the static library. Source compatibility does not imply a
 cross-toolchain or cross-platform binary guarantee.
 
+On ELF and macOS platforms, installed shared adapters search their own
+directory for sibling IDMesh libraries using `$ORIGIN` or `@loader_path`.
+On Windows, applications must make installed DLLs available on the DLL
+search path or stage them beside their executable; installed CTest consumers
+configure their runtime search path explicitly.
+
 Applications own MPI and Kokkos initialization/finalization; destroy objects
 backed by those runtimes before shutting them down. See
 [architecture](architecture.md) for lifetime and borrowed-view contracts.
