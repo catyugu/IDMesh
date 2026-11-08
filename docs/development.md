@@ -12,6 +12,7 @@ ctest --test-dir build -C Release --output-on-failure -L integration
 cmake --install build --config Release --prefix install
 cmake -S tests/integration/consumer -B consumer-build -DCMAKE_PREFIX_PATH="$PWD/install"
 cmake --build consumer-build --config Release
+ctest --test-dir consumer-build -C Release --output-on-failure
 ```
 
 See `AGENTS.md` for a short developer checklist. MPI and Kokkos are opt-in.
@@ -37,7 +38,10 @@ reconstruction, global identity and communication-plan creation.
 
 Build options, public target aliases (`IDMesh::IDMesh`, `IDMesh::Kokkos`,
 `IDMesh::MPI`, `IDMesh::MPIKokkos`), installed package files, and CTest
-names remain stable. Test and example executables stage their required
+names remain stable. Version and binary compatibility boundaries are documented
+in [SDK compatibility](sdk-compatibility.md). Installed consumers are
+configured as a separate CMake project and executed, including runtime DLL
+resolution on Windows. Test and example executables stage their required
 runtime DLLs on Windows because they now build in subdirectories.
 
 

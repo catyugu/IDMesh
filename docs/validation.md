@@ -9,6 +9,10 @@ in-memory checks of local contracts and algorithms. `integration` tests exercise
 file-format pipelines, installed consumers and real backend runtimes, including
 multi-rank MPI and Kokkos execution. Both layers use the repository's small
 `tests/support/test.hpp` runner; no external C++ test framework is required.
+Installed-package consumers are built and executed from a separate CMake
+project against the installed SDK. They check the current package and linker
+contracts; historical binary-to-new-library compatibility still needs an
+archived consumer build and is not claimed by these tests.
 
 | Area | Automated verification | Scope |
 | --- | --- | --- |
@@ -19,7 +23,7 @@ multi-rank MPI and Kokkos execution. Both layers use the repository's small
 | Kokkos | Serial runtime | persistent topology/geometry mirrors, matrix-free diffusion over application-owned device storage, and post-finalize construction rejection |
 | MPI + Kokkos | two-rank OpenMPI + Kokkos Serial | type-agnostic all-dimension device pack/unpack over caller-owned storage, abandoned device requests, automatic and forced Host Staging, direct GPU mode rejected when unavailable |
 | External FE | Basix-backed Nedelec transformation CI | rotation/reflection group relations and shared-facet consistency |
-| Package consumers | CMake installed-package tests | core, MPI, Kokkos and combined adapters |
+| Package consumers | CMake installed-package CTest on Linux, Windows and macOS | compatible 0.3.x package discovery, actual core mesh/VTK I/O, optional adapter symbol invocation and Windows DLL discovery |
 
 
 ## Device-hardware acceptance

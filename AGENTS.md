@@ -17,7 +17,10 @@ additional abstraction without a current caller.
   The formatter is a development dependency, not a runtime dependency.
 
 Run both core and installed-package consumer tests before a release; exercise
-MPI/Kokkos builds when changing adapters. Hardware CUDA/HIP execution needs
+MPI/Kokkos builds when changing adapters. Run `ctest --test-dir consumer-build
+-C Release --output-on-failure` after configuring and building the installed
+consumer. See `docs/sdk-compatibility.md` before changing public signatures,
+exported targets, package versioning or binary layout. Hardware CUDA/HIP execution needs
 the dedicated trusted GPU runner.
 
 ## Conventions
