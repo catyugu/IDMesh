@@ -204,6 +204,46 @@ namespace {
             "malformed owned array accepted");
     }
 
+    void empty_multicomponent_arrays()
+    {
+        const std::array<double, 0> empty {};
+        const auto interleaved
+            = data::make_interleaved_array(std::span(empty), 3);
+        check(interleaved.tuples == 0 && interleaved.components.size() == 3,
+            "empty interleaved array shape");
+        data::validate_array(interleaved);
+
+        const std::array<std::span<const double>, 3> planes {
+            std::span<const double> {}, std::span<const double> {},
+            std::span<const double> {}};
+        data::validate_array(data::make_component_array<double>(planes));
+
+        const std::array<std::size_t, 2> offsets {
+            0, sizeof(double)};
+        data::validate_array(data::make_strided_array<double>(
+            std::span<const std::byte> {}, 0, offsets, 2 * sizeof(double)));
+
+        data::Array owned;
+        owned.type = data::ScalarType::float64;
+        owned.tuples = 0;
+        owned.components = 3;
+        data::validate_array(owned.view());
+
+        // An empty indexed selection is valid even on a nonempty mesh.
+        const auto mesh = make_mesh();
+        data::validate(mesh, data::MeshDataView {
+                                 "empty_vector", data::entities(1),
+                                 data::select(std::span<const Index> {}),
+                                 interleaved});
+
+        // Nonempty arrays must still reject out-of-bounds component spans.
+        auto invalid = interleaved;
+        invalid.tuples = 1;
+        expect_error<std::invalid_argument>(
+            [&] { data::validate_array(invalid); },
+            "nonempty interleaved array with empty storage accepted");
+    }
+
     void strict_validation()
     {
         const auto mesh = make_mesh();
@@ -360,6 +400,7 @@ int main()
         {"dense/subset data", dense_and_subset_data},
         {"SoA/strided data", soa_and_strided_data},
         {"owning views", owning_views},
+        {"empty multicomponent arrays", empty_multicomponent_arrays},
         {"strict validation", strict_validation},
     });
 }

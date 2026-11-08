@@ -14,9 +14,9 @@ IDMesh is a C++20, immutable mesh topology kernel for 1D–3D mixed-cell, unstru
 - Consecutive-dimension oriented boundary relations retain aligned `signs` and `orientations` arrays, including transposed support. Direct geometric Cell-to-Vertex and 3D Facet-to-Vertex relations are downward-only and store only indices: `row_signs` and `row_orientations` return empty spans. Device mirrors follow the same optional metadata contract.
 - Orientation maps local[i] to canonical[i] by the documented rotation/reflection rule, including two-vertex edges.
 - The graded incidence DAG cannot skip a dimension: in 3D, requesting edges requires faces. Invalid layer configurations are rejected by finalize(). Direct Cell-to-Vertex and Facet-to-Vertex connectivity is retained as geometry connectivity, not a boundary operator.
-- The builder is mutable; a finalized Mesh is immutable and exposes zero-copy read-only views. Finalization performs structural validation; the explicit `Mesh::validate()` API additionally checks exhaustive algebraic invariants such as boundary-of-boundary cancellation. Dynamic mesh edits, AMR and remeshing are outside the current design.
+- The builder is mutable and move-only; `MeshBuilder::finalize()` consumes it even when finalization throws. Calling a method on a consumed or moved-from builder throws `std::logic_error`; move assignment may restore an active builder. A finalized Mesh is immutable and exposes zero-copy read-only views. Finalization performs structural validation; `Mesh::validate()` additionally checks exhaustive algebraic invariants such as boundary-of-boundary cancellation. Dynamic mesh edits, AMR and remeshing are outside the current design.
 - Geometric coordinates are independent of entity topology. First- and supported second-order geometry are stored separately from topological corner entities.
-- Sparse integer labels are independent of topology materialization. Bound labels borrow entity connectivity; labels on omitted layers retain variable-arity canonical cyclic vertex signatures.
+- Sparse integer labels are independent of topology materialization. Bound labels borrow entity connectivity; labels without a matching entity (on omitted layers or isolated lower-dimensional components) retain canonical vertex signatures.
 - The base CMake target and installed public headers contain no third-party API types. A separate optional Kokkos backend owns Kokkos execution/runtime dependencies.
 
 ## SDK and failure contracts
@@ -53,14 +53,16 @@ Tests must cover all seven reference cells, rotated/reversed local facet orders,
 Labels are sparse integer metadata attached to entities and remain independent of
 the topology materialization mask. Each `Label` carries a dimension, value,
 canonical corner key and a linked local entity ID when that dimension exists.
-If the entity dimension is omitted, `entity == invalid_index` and the label
-retains its canonical vertex key. An entity may carry multiple values.
+If the entity dimension is omitted, or a lower-dimensional labeled element
+does not belong to any top-dimensional Cell (such as an isolated Gmsh physical
+entity), `entity == invalid_index` and its canonical vertex key is retained.
+An entity may carry multiple values.
 
-`Mesh::labels(d, id)` returns the zero-copy labels of a materialized entity;
-`Mesh::labels()` enumerates all labels, including omitted topology layers.
-`label_name(d, value)` provides optional descriptive metadata. Materialized
-labels borrow packed entity connectivity; omitted-layer labels borrow a compact
-internal key buffer. Copies of `Mesh` share that backing storage.
+`Mesh::labels(d, id)` returns labels bound to a materialized entity;
+`Mesh::labels()` also enumerates unbound labels. `label_name(d, value)`
+provides optional descriptive metadata. Bound labels borrow packed entity
+connectivity; unbound labels borrow a compact internal key buffer. Copies of
+`Mesh` share that backing storage.
 
 ## Second-order geometry
 
@@ -92,6 +94,14 @@ attached to an immutable Mesh. The model is deliberately orthogonal:
 - `MeshDataView` combines name, location, selection and values.
   `EntitySetView` is the corresponding named entity subset without values.
 - `StateView` groups fields with optional physical time and cycle metadata.
+
+The views own only descriptor metadata: names, selections, component storage,
+and field lists remain borrowed. An `Array::view()` or `MeshData::view()`
+borrows from the corresponding owning object. Consumers must keep that
+storage alive and avoid reallocating or modifying it while the view is used.
+Immutable Mesh query spans and label names similarly require one shared
+Mesh owner to remain alive. Empty tuple arrays are valid, including
+multi-component AoS/SoA arrays with zero-length numerical storage.
 
 Topological Vertex data (`entities(0)`) and geometry-node data are distinct.
 For a quadratic Cell, a Vertex field therefore has one tuple per corner while a

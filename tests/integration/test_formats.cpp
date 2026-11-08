@@ -107,6 +107,35 @@ namespace {
         std::filesystem::remove(path);
     }
 
+    void isolated_gmsh_lower_dimensional_label()
+    {
+        const auto path = temporary("idmesh-isolated-physical.msh");
+        {
+            std::ofstream out(path);
+            out << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n"
+                   "$Nodes\n4\n"
+                   "10 0 0 0\n20 1 0 0\n30 0 1 0\n40 2 0 0\n"
+                   "$EndNodes\n$Elements\n2\n"
+                   "1 1 2 73 1 20 40\n"
+                   "2 2 2 81 1 10 20 30\n$EndElements\n";
+        }
+        const auto mesh = idmesh::read_gmsh(path.string());
+        std::filesystem::remove(path);
+        check(mesh.has_entities(1), "edge layer was not materialized");
+        has_group(mesh, 1, 73, false);
+        has_group(mesh, 2, 81, true);
+
+        const auto labels = mesh.labels();
+        const auto isolated = std::find_if(labels.begin(), labels.end(),
+            [](const idmesh::Label& label) { return label.value == 73; });
+        check(isolated != labels.end() && isolated->vertices.size() == 2
+                && isolated->vertices[0] == 1 && isolated->vertices[1] == 3,
+            "isolated Gmsh entity key lost");
+        for (Index edge = 0; edge < mesh.entity_count(1); ++edge)
+            check(mesh.labels(1, edge).empty(),
+                "isolated physical tag appeared on a materialized edge");
+    }
+
     void quadratic_gmsh41_multigroup()
     {
         const auto path = temporary("idmesh-order2-groups41.msh");
@@ -323,5 +352,6 @@ int main()
         {"mixed geometry orders", mixed_geometry_orders},
         {"many labels", many_labels},
         {"omitted-layer labels", omitted_layer_labels},
+        {"isolated Gmsh entity labels", isolated_gmsh_lower_dimensional_label},
     });
 }
