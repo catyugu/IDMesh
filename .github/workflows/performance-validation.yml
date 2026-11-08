@@ -12,7 +12,7 @@ permissions:
   packages: read
 
 concurrency:
-  group: performance-${ github.ref }}
+  group: performance-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -48,8 +48,8 @@ jobs:
     container:
       image: ghcr.io/catyugu/idmesh-ci-mpi@sha256:8b7239500b857f196f6a40e51841f461dd14c76fffffbe3c447d173e52eecdc9
       credentials:
-        username: ${ github.actor }}
-        password: ${ secrets.GITHUB_TOKEN }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       OMPI_MCA_rmaps_base_oversubscribe: "1"
       OMPI_ALLOW_RUN_AS_ROOT: "1"
