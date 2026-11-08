@@ -91,8 +91,9 @@ read/write declarations indirectly through `mesh.hpp` must now include
 `io.hpp`. Existing function names, link symbols and SDK targets are unchanged.
 
 Invalid caller arguments use `std::invalid_argument`; bad indices use
-`std::out_of_range`; invalid object state uses `std::logic_error`;
-size limits use `std::length_error`. Invalid file content, I/O failures
+`std::out_of_range`; invalid object state uses `std::logic_error`. In
+particular, moved-from or finalized `MeshBuilder` instances reject calls;
+`finalize()` consumes its builder even when construction fails. Size limits use `std::length_error`. Invalid file content, I/O failures
 and MPI call failures use `std::runtime_error`. MPI errors include the
 failed operation and an error description where supported. The private
 `src/contracts.hpp` defines lightweight helpers; avoid repeating

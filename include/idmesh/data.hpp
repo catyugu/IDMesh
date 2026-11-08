@@ -126,17 +126,18 @@ namespace idmesh::data {
         return {SelectionKind::indices, indices};
     }
 
-    // Describes one scalar component across tuples. The scalar at tuple i
-    // begins at storage[offset_bytes + i * stride_bytes].
+    // Borrows numerical storage. The scalar at tuple i begins at
+    // storage[offset_bytes + i * stride_bytes]; an empty array addresses no
+    // scalars, regardless of component offsets.
     struct ComponentView {
         std::span<const std::byte> storage;
         std::size_t offset_bytes = 0;
         std::size_t stride_bytes = 0;
     };
 
-    // Component descriptors are owned metadata; numerical storage is not.
-    // Components may share one storage span (AoS/interleaved) or refer to
-    // independent spans (SoA).
+    // Component descriptors are owned metadata; numerical storage is borrowed.
+    // Components may share a span (AoS/interleaved) or use separate spans (SoA).
+    // Keep backing arrays alive and unmodified while the view is in use.
     struct ArrayView {
         ScalarType type = ScalarType::float64;
         std::size_t tuples = 0;
@@ -237,12 +238,14 @@ namespace idmesh::data {
         return result;
     }
 
+    // Non-owning selection/name; the caller keeps referenced storage alive.
     struct EntitySetView {
         std::string_view name;
         DataLocation location;
         DataSelectionView selection;
     };
 
+    // Borrows name, selection indices, and component numerical storage.
     struct MeshDataView {
         std::string_view name;
         DataLocation location;
@@ -250,6 +253,7 @@ namespace idmesh::data {
         ArrayView values;
     };
 
+    // Borrows the field descriptors and their referenced storage.
     struct StateView {
         std::optional<double> time;
         std::optional<std::int64_t> cycle;
@@ -258,6 +262,7 @@ namespace idmesh::data {
 
     // Owning read-side representation. Values are canonical tuple-major,
     // interleaved scalars so format readers do not expose file-backed storage.
+    // view() borrows this object's values until they are modified or destroyed.
     struct Array {
         ScalarType type = ScalarType::float64;
         std::size_t tuples = 0;
@@ -267,6 +272,7 @@ namespace idmesh::data {
         IDMESH_API ArrayView view() const;
     };
 
+    // view() borrows this object's name, indices and values.
     struct MeshData {
         std::string name;
         DataLocation location;

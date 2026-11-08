@@ -14,7 +14,7 @@ namespace idmesh::data {
             std::size_t tuples, std::size_t bytes)
         {
             if (tuples == 0)
-                return component.offset_bytes;
+                return 0; // No scalar is addressed, even for interleaved components.
 
             ::idmesh::detail::require_argument(
                 component.stride_bytes >= bytes,

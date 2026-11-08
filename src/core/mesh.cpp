@@ -400,6 +400,7 @@ namespace idmesh {
 
     Index MeshBuilder::add_vertex(std::array<double, 3> position)
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
         for (double coordinate : position)
             detail::require_argument(std::isfinite(coordinate), "nonfinite coordinate");
         detail::require_length(data_->coordinates_.size() < invalid_index, "too many vertices");
@@ -409,6 +410,7 @@ namespace idmesh {
 
     Index MeshBuilder::add_cell(CellType type, std::span<const Index> vertices)
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
         detail::require_argument(cell_dimension(type) == data_->dimension_, "cell dimension mismatch");
         detail::require_argument(vertices.size() == cell_vertex_count(type), "incorrect cell arity");
         std::array<Index, 8> sorted {};
@@ -433,6 +435,7 @@ namespace idmesh {
 
     Index MeshBuilder::add_geometry_node(std::array<double, 3> position)
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
         for (double coordinate : position)
             detail::require_argument(std::isfinite(coordinate), "nonfinite geometry node coordinate");
         detail::require_length(data_->extra_geometry_nodes_.size() < invalid_index, "too many geometry nodes");
@@ -444,6 +447,7 @@ namespace idmesh {
         CellType type, std::span<const Index> vertices,
         std::span<const Index> extra_nodes)
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
         const auto count = vertices.size() + extra_nodes.size();
         bool valid = false;
         switch (type) {
@@ -485,6 +489,7 @@ namespace idmesh {
 
     void MeshBuilder::add_cell_label(Index cell, int value)
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
         detail::require_argument(cell < data_->types_.size(), "invalid cell for label");
         data_->cell_labels_.emplace_back(cell, value);
     }
@@ -492,6 +497,7 @@ namespace idmesh {
     void MeshBuilder::add_label(
         Index dimension, std::span<const Index> vertices, int value)
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
         detail::require_argument(dimension < data_->dimension_, "use add_cell_label for top-dimensional labels");
         const bool arity = dimension == 0 ? vertices.size() == 1
             : dimension == 1              ? vertices.size() == 2
@@ -518,6 +524,7 @@ namespace idmesh {
 
     void MeshBuilder::set_label_name(Index dimension, int value, std::string name)
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
         detail::require_argument(dimension <= data_->dimension_, "label name dimension out of range");
         data_->label_names_[{dimension, value}] = std::move(name);
     }
@@ -789,8 +796,8 @@ namespace idmesh {
             }
 
 
-            // Materialized labels borrow relation(k, 0), the canonical entity
-            // connectivity storage. Only labels on absent layers keep private keys.
+            // Bound labels borrow relation(k, 0). Unbound labels (omitted
+            // layers or isolated lower-dimensional entities) keep private keys.
             std::size_t unbound_entries = 0;
             for (const auto& label : labels)
                 if (label.entity == invalid_index)
@@ -826,10 +833,12 @@ namespace idmesh {
 
     Mesh MeshBuilder::finalize(BuildOptions options) &&
     {
+        detail::require_state(data_ != nullptr, "mesh builder is consumed or moved from");
+        auto source = std::move(data_);
         auto data = std::make_shared<Mesh::Data>();
-        move_base_storage(*data_, *data);
-        pack_high_order_geometry(*data_, *data);
-        finalize_topology(*data_, *data, options);
+        move_base_storage(*source, *data);
+        pack_high_order_geometry(*source, *data);
+        finalize_topology(*source, *data, options);
 
         Mesh mesh(std::move(data));
         mesh.validate_structure();

@@ -185,6 +185,104 @@ namespace {
         check(boundary == 6 * side * side, "boundary face count after rehash");
     }
 
+    void builder_consumption()
+    {
+        const std::array<Index, 2> endpoints {0, 1};
+        const std::array<Index, 1> extra {0};
+        const std::array<Index, 1> vertex {0};
+
+        idmesh::MeshBuilder builder(1, 1);
+        builder.add_vertex({0, 0, 0});
+        builder.add_vertex({1, 0, 0});
+        builder.add_cell(idmesh::CellType::segment, endpoints);
+        auto active = std::move(builder);
+
+        expect_error<std::logic_error>(
+            [&] { (void)builder.add_vertex({2, 0, 0}); },
+            "moved-from builder accepted a vertex");
+        expect_error<std::logic_error>(
+            [&] { (void)builder.add_cell(idmesh::CellType::segment, endpoints); },
+            "moved-from builder accepted a cell");
+        expect_error<std::logic_error>(
+            [&] { (void)builder.add_geometry_node({2, 0, 0}); },
+            "moved-from builder accepted a geometry node");
+        expect_error<std::logic_error>(
+            [&] { (void)builder.add_quadratic_cell(idmesh::CellType::segment, endpoints, extra); },
+            "moved-from builder accepted a quadratic cell");
+        expect_error<std::logic_error>(
+            [&] { builder.add_cell_label(0, 1); },
+            "moved-from builder accepted a cell label");
+        expect_error<std::logic_error>(
+            [&] { builder.add_label(0, vertex, 1); },
+            "moved-from builder accepted an entity label");
+        expect_error<std::logic_error>(
+            [&] { builder.set_label_name(0, 1, "vertex"); },
+            "moved-from builder accepted a label name");
+        expect_error<std::logic_error>(
+            [&] { (void)std::move(builder).finalize(); },
+            "moved-from builder finalized");
+
+        // Move assignment can put a new valid state into the emptied builder.
+        builder = std::move(active);
+        const auto mesh = std::move(builder).finalize();
+        check(mesh.entity_count(1) == 1, "move-assigned builder lost its mesh");
+        expect_error<std::logic_error>(
+            [&] { (void)std::move(active).finalize(); },
+            "source builder remained active after move assignment");
+        expect_error<std::logic_error>(
+            [&] { (void)builder.add_vertex({2, 0, 0}); },
+            "finalized builder accepted a vertex");
+        expect_error<std::logic_error>(
+            [&] { (void)std::move(builder).finalize(); },
+            "finalized builder accepted a second finalize");
+    }
+
+    void borrowed_mesh_storage()
+    {
+        // The original Mesh is destroyed; the surviving copy keeps all views alive.
+        const auto mesh = [] {
+            idmesh::MeshBuilder builder(2, 2);
+            builder.add_vertex({0, 0, 0});
+            builder.add_vertex({1, 0, 0});
+            builder.add_vertex({0, 1, 0});
+            builder.add_vertex({2, 0, 0});
+            builder.add_cell(idmesh::CellType::triangle,
+                std::array<Index, 3> {0, 1, 2});
+            builder.add_label(1, std::array<Index, 2> {0, 1}, 10);
+            builder.add_label(1, std::array<Index, 2> {1, 3}, 20);
+            builder.set_label_name(1, 20, "isolated");
+            const auto original = std::move(builder).finalize();
+            return idmesh::Mesh(original);
+        }();
+
+        mesh.validate();
+        check(mesh.label_name(1, 20) == "isolated",
+            "copied mesh lost its label name");
+        check(mesh.labels().size() == 2,
+            "copied mesh lost sparse labels");
+        const auto labels = mesh.labels();
+        const auto detached = std::find_if(labels.begin(), labels.end(),
+            [](const idmesh::Label& label) { return label.value == 20; });
+        check(detached != labels.end() && detached->entity == idmesh::invalid_index,
+            "isolated label unexpectedly bound to a materialized edge");
+        check(detached->vertices.size() == 2
+                && detached->vertices[0] == 1 && detached->vertices[1] == 3,
+            "isolated label lost borrowed vertex signature");
+        const auto connected = std::find_if(labels.begin(), labels.end(),
+            [](const idmesh::Label& label) { return label.value == 10; });
+        check(connected != labels.end() && connected->entity != idmesh::invalid_index,
+            "connected label was not bound");
+        check(mesh.labels(1, connected->entity).size() == 1,
+            "bound label lookup changed");
+        for (Index edge = 0; edge < mesh.entity_count(1); ++edge)
+            for (const auto& label : mesh.labels(1, edge))
+                check(label.value != 20,
+                    "isolated label leaked into bound entity lookup");
+        const auto facets = mesh.relation(2, 1);
+        check(facets[0].targets.size() == 3,
+            "copied mesh lost borrowed relation storage");
+    }
+
     void error_contracts()
     {
         expect_error<std::invalid_argument>(
@@ -260,6 +358,8 @@ int main()
         {"mixed hex/prism", mixed_hex_prism},
         {"layer masks", layer_masks},
         {"topology rehash stability", topology_rehash_stability},
+        {"builder consumption", builder_consumption},
+        {"borrowed mesh storage", borrowed_mesh_storage},
         {"permutation invariants", permutation_invariants},
         {"error contracts", error_contracts},
     });
