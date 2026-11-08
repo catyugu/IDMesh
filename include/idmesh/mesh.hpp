@@ -49,8 +49,10 @@ namespace idmesh {
         constexpr int sign() const { return reversed ? -1 : 1; }
     };
 
-    // Generic integer metadata attached to mesh entities. If a topology layer is
-    // omitted, entity is invalid_index and vertices keep the canonical entity key.
+    // Sparse integer metadata. If the entity layer is omitted, or this labeled
+    // lower-dimensional element is not in the cell topology, entity is
+    // invalid_index and vertices retain its canonical key.
+    // The vertex span borrows the storage of the finalized Mesh.
     struct Label {
         Index dimension = 0;
         Index entity = invalid_index;
@@ -66,6 +68,8 @@ namespace idmesh {
         bool oriented() const noexcept { return !coefficients.empty(); }
     };
 
+    // Borrowed relation storage. Keep a Mesh sharing the backing storage alive
+    // while using this view or any RelationRow obtained from it.
     struct IDMESH_API RelationView {
         std::span<const Index> offsets;
         std::span<const Index> targets;
@@ -79,6 +83,8 @@ namespace idmesh {
         RelationRow operator[](Index row) const;
     };
 
+    // Cheap copies share immutable storage; spans and string_views returned by
+    // its accessors remain valid while any copy of that storage remains alive.
     class IDMESH_API Mesh {
     public:
         Index dimension() const;
@@ -110,6 +116,9 @@ namespace idmesh {
         friend class MeshBuilder;
     };
 
+    // Mutable, move-only builder. finalize() consumes it even if construction
+    // fails; calling any builder method on a consumed or moved-from instance
+    // throws std::logic_error. A new value can be move-assigned into it.
     class IDMESH_API MeshBuilder {
     public:
         MeshBuilder(Index dimension, Index geometric_dimension);
