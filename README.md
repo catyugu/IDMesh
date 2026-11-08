@@ -38,9 +38,13 @@ For developer setup, contract rules and formatting checks see
 After installing IDMesh:
 
 ```cmake
-find_package(IDMesh CONFIG REQUIRED)
+find_package(IDMesh 0.3 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE IDMesh::IDMesh)
 ```
+
+The version requirement selects the compatible `0.3.x` SDK series.
+See [SDK compatibility](docs/sdk-compatibility.md) for source and binary
+compatibility limits, toolchain requirements and optional backend targets.
 
 A minimal finite-volume-style mesh:
 
@@ -142,6 +146,7 @@ When both MPI and Kokkos are enabled, `IDMesh::MPIKokkos` provides type-agnostic
 - [Roadmap](docs/roadmap.md)
 - [Validation and known limits](docs/validation.md)
 - [Development conventions](docs/development.md)
+- [SDK compatibility](docs/sdk-compatibility.md)
 - [Local benchmark protocol](benchmarks/README.md)
 
 IDMesh is licensed under the MIT License.

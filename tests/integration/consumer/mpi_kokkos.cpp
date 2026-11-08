@@ -1,5 +1,6 @@
 #include <idmesh/mpi_kokkos.hpp>
 #include <cstddef>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -15,4 +16,15 @@ void link_device_halo_api(idmesh::mpi::kokkos::DeviceHaloPlan& plan,
     plan.wait();
 }
 
-int main() { return 0; }
+int main()
+{
+    // Verify that the installed combined adapter is loadable and callable.
+    try {
+        const idmesh::mpi::ExchangePlan empty;
+        idmesh::mpi::kokkos::DeviceHaloPlan device(empty, sizeof(double));
+    }
+    catch (const std::logic_error&) {
+        return 0; // MPI/Kokkos are deliberately uninitialized.
+    }
+    return 1;
+}
