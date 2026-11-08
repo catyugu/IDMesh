@@ -57,6 +57,8 @@ jobs:
         run: cmake -S tests/integration/consumer -B consumer-build -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install
       - name: Build installed-package consumer
         run: cmake --build consumer-build --config Release
+      - name: Run installed-package consumer
+        run: ctest --test-dir consumer-build -C Release --output-on-failure
       - name: Upload installed SDK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
@@ -83,7 +85,10 @@ jobs:
       - name: Install SDK
         run: cmake --install build-kokkos --prefix install-kokkos
       - name: Verify external consumer
-        run: cmake -S tests/integration/consumer -B consumer-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-kokkos" && cmake --build consumer-kokkos --parallel 2
+        run: |
+          cmake -S tests/integration/consumer -B consumer-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-kokkos"
+          cmake --build consumer-kokkos --parallel 2
+          ctest --test-dir consumer-kokkos --output-on-failure
 
   mpi-backends:
     name: backend / MPI-only + MPI-Kokkos
@@ -121,6 +126,7 @@ jobs:
           cmake --install build-mpi --prefix install-mpi
           cmake -S tests/integration/consumer -B consumer-mpi -DCMAKE_PREFIX_PATH="$PWD/install-mpi"
           cmake --build consumer-mpi --parallel 2
+          ctest --test-dir consumer-mpi --output-on-failure
 
       - name: Configure MPI + Kokkos (Serial)
         run: cmake -S . -B build-mpi-kokkos -DCMAKE_BUILD_TYPE=Release -DIDMESH_BUILD_TESTS=ON -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
@@ -135,6 +141,7 @@ jobs:
           cmake --install build-mpi-kokkos --prefix install-mpi-kokkos
           cmake -S tests/integration/consumer -B consumer-mpi-kokkos -DCMAKE_PREFIX_PATH="$PWD/install-mpi-kokkos"
           cmake --build consumer-mpi-kokkos --parallel 2
+          ctest --test-dir consumer-mpi-kokkos --output-on-failure
 
   examples:
     name: examples / basix
