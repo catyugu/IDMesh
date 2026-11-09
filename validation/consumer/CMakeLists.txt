@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.26)
+project(IDMeshEngineeringValidation LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(IDMesh 0.3 CONFIG REQUIRED)
+add_executable(idmesh_thermal thermal.cpp)
+target_link_libraries(idmesh_thermal PRIVATE IDMesh::IDMesh)
