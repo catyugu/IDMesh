@@ -289,10 +289,13 @@ namespace {
         }
         expect_error<std::runtime_error>([&] { (void)idmesh::read_gmsh(filename.string()); },
             "Gmsh invalid endian marker");
-        handrolled22(filename, true);
         {
-            auto size = std::filesystem::file_size(filename);
-            std::filesystem::resize_file(filename, size - 15);
+            std::ofstream out(filename, std::ios::binary);
+            out << "$MeshFormat\n2.2 1 8\n";
+            raw_int(out, 1, true);
+            out << "\n$EndMeshFormat\n$Nodes\n1\n";
+            raw_int(out, 1, true);
+            raw_int(out, 0, true); // Only half the first coordinate.
         }
         expect_error<std::runtime_error>([&] { (void)idmesh::read_gmsh(filename.string()); },
             "Gmsh truncated payload");
