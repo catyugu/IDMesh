@@ -12,9 +12,11 @@ CACHE = ROOT / "data"
 
 
 def download(mesh):
-    destination = CACHE / (mesh["id"] + ".msh")
+    destination = CACHE / (mesh["id"] + (".zip" if mesh.get("storage") == "https-zip" else ".msh"))
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if mesh.get("storage") == "git-lfs":
+    if mesh.get("storage") == "https-zip":
+        url = mesh["url"]
+    elif mesh.get("storage") == "git-lfs":
         url = ("https://media.githubusercontent.com/media/"
                + mesh["source"].removeprefix("https://github.com/")
                + "/" + mesh["revision"] + "/" + mesh["path"])
