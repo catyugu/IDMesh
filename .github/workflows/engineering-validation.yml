@@ -48,8 +48,11 @@ jobs:
         continue-on-error: true
         run: |
           python3 validation/fetch_meshes.py --tier candidate
+          python3 -m venv .venv-mesh-converter
+          .venv-mesh-converter/bin/python -m pip install 'meshio==5.3.5'
+          .venv-mesh-converter/bin/python -c 'import meshio; src="validation/data/meshioplusplus-example.msh"; dst="validation/data/bracket-ascii.msh"; meshio.write(dst, meshio.read(src), file_format="gmsh", binary=False)'
           ./build-validation/idmesh_thermal \
-            --mesh validation/data/meshioplusplus-example.msh --problem patch \
+            --mesh validation/data/bracket-ascii.msh --problem patch \
             --max-iterations 4000 \
             --report validation/results/bracket-patch.json
       - name: Upload machine-readable reports
