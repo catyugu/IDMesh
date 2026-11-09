@@ -2,6 +2,8 @@ idmesh_add_test(idmesh_integration_mesh idmesh.integration.mesh integration
     test_mesh.cpp)
 idmesh_add_test(idmesh_integration_formats idmesh.integration.formats integration
     test_formats.cpp)
+idmesh_add_test(idmesh_integration_gmsh_binary idmesh.integration.gmsh_binary integration
+    test_gmsh_binary.cpp)
 idmesh_add_test(idmesh_integration_vtk_data idmesh.integration.vtk_data integration
     test_vtk_data_io.cpp)
 idmesh_add_test(idmesh_integration_vtk_manifest idmesh.integration.vtk_manifest integration

@@ -10,7 +10,7 @@ The core SDK supports:
 - reduced topology such as Cell + Facet for finite-volume methods, or the full
   oriented complex required by compatible finite elements;
 - first- and supported second-order geometry;
-- Gmsh MSH 2.2/4.1 ASCII, VTK legacy ASCII and Medit ASCII I/O;
+- Gmsh MSH 2.2/4.1 ASCII and binary import/export, VTK legacy and Medit I/O;
 - labels independent of topology materialization;
 - optional distributed-memory and heterogeneous-compute adapters.
 
@@ -86,11 +86,19 @@ Mesh-only I/O is declared in `idmesh/io.hpp`:
 #include <idmesh/io.hpp>
 
 auto mesh = idmesh::read_gmsh("model.msh");
+idmesh::write_gmsh(mesh, "copy.msh"); // Gmsh 4.1 binary by default
+idmesh::write_gmsh(mesh, "copy-ascii.msh",
+    {idmesh::GmshVersion::v22, idmesh::GmshEncoding::ascii});
 auto vtk  = idmesh::read_vtk_legacy("model.vtk");
 auto medit = idmesh::read_medit("model.mesh");
 ```
 
-Gmsh import preserves supported labels and second-order geometry.
+Gmsh MSH 2.2/4.1 import accepts ASCII or binary (including opposite-endian files)
+and retains supported physical labels and second-order geometry. Export can
+select either version and encoding. MSH 4.1 retains multiple physical groups;
+MSH 2.2 export rejects multiple physical groups on one cell rather than
+silently losing membership. Gmsh CAD entity/BRep and parametric coordinates
+are not exposed by IDMesh and are not reconstructed during export.
 For field/state-aware VTK, VTU and PVD/PVTU I/O, include `idmesh/vtk.hpp`.
 `idmesh/mesh.hpp` only declares mesh topology and construction; code using
 mesh-only file adapters must include `idmesh/io.hpp`.
