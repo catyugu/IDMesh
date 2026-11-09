@@ -52,9 +52,11 @@ only through a trusted calling workflow with an approved GPU runner and
 must not be represented as a passing hardware test until that hardware
 execution completes successfully.
 
-Local-only benchmarks are intentionally excluded from all GitHub Actions
-workflows and CTest registration. See `benchmarks/README.md` for isolated-process
-memory measurements and reproducible performance runs.
+Benchmarks remain outside routine CTest and CI. The optional
+`performance-validation.yml` workflow is limited to manual runs and the
+benchmark development branch; its shared-runner results are exploratory.
+See `benchmarks/README.md` for isolated-process memory measurements,
+backend profiling and controlled-host acceptance criteria.
 
 ## Performance scope
 

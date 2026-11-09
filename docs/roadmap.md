@@ -65,3 +65,9 @@ AMR, remeshing, dynamic entity mutation, FEM-specific DOF transformations, solve
 - [x] Packed Kokkos device Halo plan, including automatic host staging fallback.
 - [ ] Verify CUDA/HIP kernels on physical GPUs using the reusable GPU hardware workflow.
 - [ ] Verify direct CUDA/ROCm-aware MPI exchange on a capable multi-GPU MPI runtime.
+
+## Performance and scale validation
+
+- [x] Add fresh-process materialization memory/finalization sweep and incidence traversal throughput summaries.
+- [x] Record Kokkos Serial mirror payload and setup/RSS costs, MPI Halo setup/steady-state latency and MPI shard startup profiling.
+- [ ] Establish controlled-host reference baselines for larger industrial unstructured Gmsh inputs, multi-node MPI and physical CUDA/HIP devices.

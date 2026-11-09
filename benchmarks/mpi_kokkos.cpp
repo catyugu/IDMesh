@@ -136,8 +136,10 @@ int main(int argc, char** argv)
         const auto bytes_per_entity
             = std::size_t(args.components) * sizeof(double);
         const auto field_bytes = field.extent(0) * sizeof(double);
+        const auto setup_begin = Clock::now();
         idmesh::mpi::kokkos::DeviceHaloPlan halo(
             exchange, bytes_per_entity);
+        const auto setup_ms = milliseconds(setup_begin, Clock::now());
         halo.start(field.data(), field_bytes,
             idmesh::mpi::kokkos::DeviceTransport::host_staging);
         halo.wait();
@@ -160,6 +162,9 @@ int main(int argc, char** argv)
             total_timing.samples.push_back(milliseconds(total_begin, end));
         }
 
+        const double setup_local = setup_ms;
+        double setup_max = 0.0;
+        MPI_Reduce(&setup_local, &setup_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         double start_local = start_timing.median();
         double wait_local = wait_timing.median();
         double total_local = total_timing.median();
@@ -187,13 +192,15 @@ int main(int argc, char** argv)
                          "host_staging_start_ms_p50_max,"
                          "host_staging_wait_ms_p50_max,"
                          "host_staging_total_ms_p50_max,"
-                         "send_bytes_per_exchange,receive_bytes_per_exchange\n"
+                         "send_bytes_per_exchange,receive_bytes_per_exchange,"
+                         "device_halo_setup_ms_max\n"
                       << context.size() << ',' << args.side << ','
                       << global_cells << ','
                       << args.components << ',' << args.ghost_layers << ','
                       << args.iterations << ',' << start_slowest << ','
                       << wait_slowest << ',' << total_slowest << ','
-                      << send_total << ',' << receive_total << '\n';
+                      << send_total << ',' << receive_total << ','
+                      << setup_max << '\n';
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (context.rank() == 0)

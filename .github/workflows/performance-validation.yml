@@ -1,0 +1,139 @@
+name: Engineering performance validation
+
+# Shared-runner measurements are exploratory and never CI thresholds.
+# The push trigger is limited to the benchmark development branch.
+on:
+  push:
+    branches: [bench/performance-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  topology:
+    name: topology / independent-process scale
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Release benchmark
+        run: |
+          cmake -S . -B build-perf -DCMAKE_BUILD_TYPE=Release \
+            -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF \
+            -DIDMESH_BUILD_EXAMPLES=OFF
+          cmake --build build-perf --target idmesh_benchmark --parallel 2
+      - name: Measure size and materialization sweep
+        run: |
+          python3 benchmarks/run_baseline.py \
+            ./build-perf/benchmarks/idmesh_benchmark \
+            --scale --repeats 3 --output perf-topology
+          cat perf-topology/report.md
+      - name: Archive topology measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: idmesh-performance-topology
+          path: perf-topology/
+          retention-days: 30
+
+  backends:
+    name: backends / MPI and Kokkos Serial
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    container:
+      image: ghcr.io/catyugu/idmesh-ci-mpi@sha256:8b7239500b857f196f6a40e51841f461dd14c76fffffbe3c447d173e52eecdc9
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      OMPI_MCA_rmaps_base_oversubscribe: "1"
+      OMPI_ALLOW_RUN_AS_ROOT: "1"
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Release backend benchmarks
+        run: |
+          cmake -S . -B build-perf -DCMAKE_BUILD_TYPE=Release \
+            -DIDMESH_BUILD_BENCHMARKS=ON -DIDMESH_BUILD_TESTS=OFF \
+            -DIDMESH_BUILD_EXAMPLES=OFF \
+            -DIDMESH_ENABLE_MPI=ON -DIDMESH_ENABLE_KOKKOS=ON
+          cmake --build build-perf \
+            --target idmesh_kokkos_benchmark idmesh_mpi_benchmark \
+                     idmesh_mpi_kokkos_benchmark idmesh_mpi_startup_benchmark \
+            --parallel 2
+      - name: Record execution environment
+        run: |
+          mkdir -p perf-backends
+          {
+            echo "commit=$GITHUB_SHA"
+            uname -a
+            lscpu
+            mpirun --version
+            c++ --version
+          } > perf-backends/environment.txt
+      - name: Measure Kokkos mirror construction and resident kernels
+        shell: bash
+        run: |
+          set -euo pipefail
+          for shape in tensor mixed; do
+            for side in 24 40; do
+              for layout in minimal finite_volume full; do
+                build-perf/benchmarks/idmesh_kokkos_benchmark \
+                  "$side" 20 --dim 3 --shape "$shape" \
+                  --config "$layout" --trials 1 \
+                  > "perf-backends/kokkos-${shape}-${side}-${layout}.csv"
+              done
+            done
+          done
+      - name: Measure 2-rank and 4-rank host and device-staging halos
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ranks in 2 4; do
+            for spec in "128 1 1" "256 8 2"; do
+              read -r side components ghosts <<< "$spec"
+              key="${ranks}r-${side}s-${components}c-${ghosts}g"
+              mpirun -n "$ranks" --bind-to none \
+                build-perf/benchmarks/idmesh_mpi_benchmark \
+                --side "$side" --components "$components" \
+                --ghost-layers "$ghosts" --iterations 100 \
+                > "perf-backends/mpi-host-${key}.csv"
+              mpirun -n "$ranks" --bind-to none \
+                build-perf/benchmarks/idmesh_mpi_kokkos_benchmark \
+                --side "$side" --components "$components" \
+                --ghost-layers "$ghosts" --iterations 100 \
+                > "perf-backends/mpi-device-${key}.csv"
+            done
+          done
+      - name: Measure local MPI shard startup per topology layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ranks in 2 4; do
+            prefix="$PWD/perf-backends/shards-${ranks}r"
+            build-perf/benchmarks/idmesh_mpi_startup_benchmark \
+              --prepare "$prefix" --parts "$ranks" --side 24 --ghost-layers 1 \
+              > "perf-backends/shard-prepare-${ranks}r.txt"
+            for layout in cell_vertices cell_facets complete; do
+              mpirun -n "$ranks" --bind-to none \
+                build-perf/benchmarks/idmesh_mpi_startup_benchmark \
+                --prefix "$prefix" --parts "$ranks" --layout "$layout" \
+                > "perf-backends/startup-${ranks}r-${layout}.csv"
+            done
+            rm -f "$prefix".*.idm
+          done
+      - name: Summarize backend measurements
+        run: |
+          python3 benchmarks/summarize_backends.py perf-backends
+          cat perf-backends/report.md
+      - name: Archive backend measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: idmesh-performance-backends
+          path: perf-backends/
+          retention-days: 30

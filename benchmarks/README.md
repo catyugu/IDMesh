@@ -1,9 +1,10 @@
 # Reproducible local performance benchmarks
 
-IDMesh benchmarks are **developer-only**. They are not built, executed, or
-timed by GitHub Actions. The automated CI checks functional SDK correctness,
-while all performance and memory analysis must run locally on a controlled
-machine.
+IDMesh benchmarks are **developer-only** and are excluded from normal
+builds and functional CI. The separate `performance-validation.yml` workflow
+is opt-in (or triggered only by the dedicated `bench/performance-validation`
+development branch). Its shared-runner data is explicitly exploratory;
+controlled-host measurements are required for a release performance claim.
 
 Configure an independent Release build:
 
@@ -20,6 +21,11 @@ so peak-RSS high-water marks are comparable across `minimal`,
 `finite_volume` and `full`. It writes the unmodified benchmark columns plus
 `case` and `process_repeat` to `raw.csv`, together with
 `metadata.json` containing the exact commands and host/runtime metadata.
+It also writes `layout_summary.csv`, `traversal_summary.csv` and
+`report.md`. Independent-process medians are grouped by case and
+materialization level. Traversal throughput is counted in **million oriented
+or unoriented incidence entries read per second**, using the original
+per-process timing and relation entry count.
 
 ```sh
 python3 benchmarks/run_baseline.py ./build-bench/idmesh_benchmark \
@@ -30,9 +36,20 @@ python3 benchmarks/run_baseline.py ./build-bench/idmesh_benchmark \
   --output benchmark-results-large --repeats 5 --large
 ```
 
-The runner is a local developer convenience and is not called by GitHub
-Actions. Use CPU affinity externally when comparing revisions on a shared
-workstation, and retain both output files with the benchmark report.
+For a bounded size sweep covering 2D mixed meshes and 3D simplex, tensor and
+scrambled mixed meshes, execute:
+
+```sh
+python3 benchmarks/run_baseline.py ./build-bench/benchmarks/idmesh_benchmark \
+  --scale --repeats 5 --output benchmark-scale
+```
+
+This uses 11 size/shape cases, three layouts (`minimal`, `finite_volume`,
+`full`) and a fresh process per layout and repeat. The reference workflow
+uses three repeats to bound hosted-runner cost; use five or more for an
+engineering comparison. Use CPU affinity externally when comparing revisions
+on a shared workstation, and retain the raw CSV and metadata alongside the
+summary. Do not confuse the exposed logical payload with physical memory.
 
 ## Workload matrix
 
@@ -70,9 +87,11 @@ import real Gmsh 2.2/4.1 ASCII datasets separately and record their origin.
 ## Timing and memory semantics
 
 `input_ms_p50` times generated builder input; `finalize_ms_p50` times
-finalization. `validate_ms_p50` times one additional explicit exhaustive
-`Mesh::validate()` pass after finalization, which helps estimate the validation
-component already included by `finalize()`. For Gmsh input, the public import API combines file parsing and
+finalization. `validate_ms_p50` separately times the explicit exhaustive
+`Mesh::validate()` pass after finalization. RSS and peak RSS at the finalize
+phase boundary are sampled **before** this validation pass. Finalization itself
+performs structural checks; the explicit call performs additional algebraic
+invariant checks. For Gmsh input, the public import API combines file parsing and
 finalization, so `finalize_ms_p50` covers both and `input_ms_p50` is zero.
 
 `visible_payload_bytes` is the exposed logical array payload lower bound.
@@ -110,11 +129,19 @@ claiming a speedup. Report medians and spread over independent processes.
 
 ## Optional Kokkos measurements
 
-The `idmesh_kokkos_benchmark` executable is also local-only. It measures
-persistent geometry/relation mirror construction and upload separately from
-resident reductions. Device upload includes host packing, allocation,
-staging and synchronization. Real GPU timings require CUDA/HIP hardware and
-a matching Kokkos build; Kokkos Serial is only a CPU correctness proxy.
+The `idmesh_kokkos_benchmark` measures persistent geometry/relation mirror
+construction and upload separately from resident reductions. Device upload
+includes host packing, allocation, staging and synchronization. `--config`
+selects one of `minimal`, `finite_volume` and `full`; use
+`--trials 1` with a fresh process when measuring host RSS. New output columns
+report the **logical Kokkos View byte footprint** of `DeviceMesh` and
+`DeviceRelation`, plus process RSS before/after mirror creation (RSS is
+available on Linux). View bytes exclude Kokkos allocator overhead and temporary
+host staging; CPU RSS does not measure GPU device allocation.
+
+Real GPU timing and memory measurements require CUDA/HIP hardware, a matching
+Kokkos build and a device memory profiler. Kokkos Serial runs in the CPU memory
+space and serves only as a CPU proxy for construction and resident-kernel cost.
 
 
 ## Finalization decomposition
@@ -138,6 +165,25 @@ cost. The FVM-to-full difference captures the additional Edge/Face
 materialization work. Add `--cell-labels` to assign one physical tag to every
 generated top-dimensional Cell; comparing the same command without the flag
 isolates a deliberately label-heavy finalization workload.
+
+## Exploratory hosted-runner suite
+
+`.github/workflows/performance-validation.yml` runs a separate engineering
+measurement job on explicit dispatch or the dedicated benchmark branch. It
+archives topology `raw.csv`, `layout_summary.csv`,
+`traversal_summary.csv`, `report.md` and `metadata.json`; the backend
+artifact holds independent Kokkos mirror, MPI halo, and MPI startup CSVs,
+environment details, plus `kokkos_summary.csv`, `mpi_halo_summary.csv`,
+`mpi_startup_summary.csv` and `report.md`.
+
+The hosted data documents workload scale and detects gross unexpected costs.
+It does not establish stable regression thresholds: CPU topology sweep,
+MPI multi-rank tests and Kokkos Serial results may be affected by other
+work on the runner, allocation caching, CPU frequency and runtime scheduling.
+Do not combine performance samples from different hosts into a claim.
+MPI halo timings are each rank's per-iteration median reduced with
+`MPI_MAX`; the slowest-rank median is not the median of global per-iteration
+critical-path latency.
 
 ## MPI shard startup measurements
 
@@ -185,7 +231,8 @@ on a controlled host.
 
 When MPI is enabled, `idmesh_mpi_benchmark` measures the reusable host
 request path created by `make_request`. It reports `start` (pack +
-nonblocking launch), `wait` (completion + unpack), and their combined latency.
+nonblocking launch), `wait` (completion + unpack), and their combined latency,
+as well as the one-time `make_request()` setup cost.
 Each median is reduced with `MPI_MAX`, so the printed value represents the
 slowest rank.
 
@@ -205,7 +252,8 @@ Run the benchmark on controlled hosts for publication-quality comparisons.
 When both MPI and Kokkos are enabled, `idmesh_mpi_kokkos_benchmark` uses caller-owned Kokkos storage, forces
 `DeviceTransport::host_staging` and measures nonblocking `start`, `wait`,
 and their no-overlap total. The `DeviceHaloPlan` itself is constructed before
-timing, so the reported latency excludes one-time rank-index mirrors, MPI layout
-construction, and persistent host/device buffer allocation. Physical GPU runs
+steady-state timing; `device_halo_setup_ms_max` separately measures
+its one-time rank-index mirrors, MPI layout construction and persistent
+host/device buffer allocation. Physical GPU runs
 are required to measure useful kernel/communication overlap; Serial timings only
 measure the split-path overhead.
