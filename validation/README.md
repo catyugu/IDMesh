@@ -62,17 +62,28 @@ unsupported element families fail explicitly rather than being skipped.
 The verified second mesh is the 30,431-cell induction-heating tetrahedral grid; its
 linear patch test completed with a 4.09e-10 infinity error, 8.75e-11 relative
 residual and 124 PCG iterations in the initial Ubuntu CI probe.
-The large mechanical bracket is distributed as binary Gmsh 4.1 through Git LFS;
-the stress probe converts it to supported Gmsh ASCII with a **test-only** pinned
-meshio tool. This dependency is not linked to or exported by the SDK.
+The large engineering mesh is distributed as binary Gmsh through Git LFS;
+the stress probe converts it to supported Gmsh 2.2 ASCII with a **test-only** pinned
+meshio tool. The conversion replaces absent physical tags with zeros, so this
+stress case validates geometry, connectivity and solution fields, not physical
+boundary-label preservation. The converter is not linked to or exported by the SDK.
+
+**Measured larger case (Linux Release CI):** the imported volume domain has
+235,014 tetrahedra, 52,282 vertices and 499,225 facets. The linear patch
+problem took 93 Jacobi-CG iterations, with 7.50e-10 maximum nodal error,
+9.67e-11 recomputed relative residual, 5.94e-11 reaction imbalance,
+1.226 s import, 0.060 s assembly, 0.515 s solve and 158 MiB peak RSS.
+Times are single GitHub-hosted runner observations, not performance baselines.
+The source asset is 11.86 MB; derived ASCII and solution files are ignored.
 
 ## Acceptance levels
 
 - **CI**: download a pinned moderately sized real mesh; compile against the
   **installed** SDK; execute both physical and patch test cases, including
   output field round-trip.
-- **Manual**: extend mesh coverage and iterate on mesh family and shape.
-  This is not currently claimed to pass.
+- **Broader CI**: the induction-heating mesh and 235k-element engineering mesh
+  are downloaded only during execution. Both exercise imported tetrahedra;
+  the large case also checks exported temperature fields and heat conduction.
 - **Stress / distributed / accelerated**: million-cell, multi-node
   weak scaling, MPI-owned field assembly, Kokkos device solve and hardware
   CUDA/HIP are *not yet* validated by this workflow. Keep results distinct
