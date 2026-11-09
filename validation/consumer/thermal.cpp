@@ -109,11 +109,13 @@ Options parse(int argc, char** argv)
 
 struct Problem {
     std::vector<unsigned char> fixed;
+    std::vector<unsigned char> active;
     std::vector<double> boundary_values;
     std::vector<Element> elements;
     std::vector<double> diagonal;
     std::vector<double> rhs;
     std::size_t boundary_facets = 0;
+    std::size_t inactive_vertices = 0;
     std::size_t free_dofs = 0;
     std::size_t negative_orientations = 0;
     double minimum_scaled_volume = std::numeric_limits<double>::infinity();
@@ -143,6 +145,16 @@ Problem assemble(const idmesh::Mesh& mesh, const std::string& name)
 
     Problem problem;
     problem.fixed.assign(n, 0);
+    problem.active.assign(n, 0);
+    for (Index c = 0; c < count; ++c) {
+        for (const Index v : mesh.entity_vertices(3, c))
+            problem.active[v] = 1;
+    }
+    for (std::size_t v = 0; v < n; ++v)
+        if (!problem.active[v]) {
+            problem.fixed[v] = 1;
+            ++problem.inactive_vertices;
+        }
     problem.boundary_values.assign(n, 0.0);
     problem.diagonal.assign(n, 0.0);
     problem.rhs.assign(n, 0.0);
@@ -163,7 +175,7 @@ Problem assemble(const idmesh::Mesh& mesh, const std::string& name)
 
     std::size_t cold = 0, hot = 0;
     for (std::size_t v = 0; v < n; ++v) {
-        if (!boundary[v])
+        if (!boundary[v] || !problem.active[v])
             continue;
         const auto& p = positions[v];
         if (name == "patch") {
@@ -365,6 +377,8 @@ Solution solve(const idmesh::Mesh& mesh, const Problem& model,
             }
         }
         for (std::size_t i = 0; i < n; ++i) {
+            if (!model.active[i])
+                continue;
             const auto& v = mesh.coordinates()[i];
             const double exact = (v[0] - lower[0]) / (upper[0] - lower[0])
                 + 0.3 * (v[1] - lower[1]) / (upper[1] - lower[1])
@@ -441,6 +455,7 @@ void report(std::ostream& out, const Options& o, const idmesh::Mesh& mesh,
         << "  \"facets\": " << mesh.entity_count(2) << ",\n"
         << "  \"boundary_facets\": " << model.boundary_facets << ",\n"
         << "  \"free_dofs\": " << model.free_dofs << ",\n"
+        << "  \"unused_input_vertices\": " << model.inactive_vertices << ",\n"
         << "  \"negative_orientations\": " << model.negative_orientations << ",\n"
         << "  \"min_scaled_volume\": " << model.minimum_scaled_volume << ",\n"
         << "  \"iterations\": " << result.iterations << ",\n"
