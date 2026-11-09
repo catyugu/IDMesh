@@ -1,0 +1,61 @@
+name: Gmsh binary engineering I/O
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-fixtures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download revision-pinned independent Gmsh 2.2 and 4.1 binary fixtures
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from urllib.request import urlopen
+
+          revision = "20033a55eb84936b85d79db08e6141ef80eb3080"
+          files = {
+              "gmsh/v22/indheat.bin.v22.msh":
+                  ("53897ca8204a6b9d5405566b251fd71619b5234a", 1517529),
+              "gmsh/v41/indheat.bin.v41.msh":
+                  ("1cf25b962bc27fc65b26b1f9326456d9778356bd", 1657430),
+          }
+          dest = Path("build-fixtures")
+          dest.mkdir(exist_ok=True)
+          for name, (expected_sha, expected_size) in files.items():
+              url = f"https://raw.githubusercontent.com/mfem/data/{revision}/{name}"
+              with urlopen(url, timeout=60) as response:
+                  payload = response.read()
+              actual_sha = hashlib.sha1(
+                  b"blob " + str(len(payload)).encode() + b"\0" + payload
+              ).hexdigest()
+              if len(payload) != expected_size or actual_sha != expected_sha:
+                  raise RuntimeError(f"fixture integrity mismatch: {name}")
+              output = dest / Path(name).name
+              output.write_bytes(payload)
+              print(f"{name}: {len(payload)} bytes, sha1 {actual_sha}")
+          PY
+
+      - name: Configure and build binary I/O integration test
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DIDMESH_BUILD_TESTS=ON -DIDMESH_BUILD_EXAMPLES=OFF
+          cmake --build build --target idmesh_integration_gmsh_binary --parallel 2
+
+      - name: Run endian and format roundtrip tests
+        run: ctest --test-dir build --output-on-failure -R '^idmesh[.]integration[.]gmsh_binary$'
+
+      - name: Real engineering mesh binary import and re-export
+        run: |
+          ./build/tests/integration/idmesh_integration_gmsh_binary \
+            --real build-fixtures/indheat.bin.v22.msh
+          ./build/tests/integration/idmesh_integration_gmsh_binary \
+            --real build-fixtures/indheat.bin.v41.msh
