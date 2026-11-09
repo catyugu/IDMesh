@@ -27,12 +27,12 @@
       "path": "gmsh/v41/indheat.asc.v41.msh",
       "git_blob_sha1": "ac8a1525740b985bbea70e44b5d90021079c1bd0",
       "bytes": 1318017,
-      "notes": "Requires successful source download and first-order tetrahedral cell verification before solver acceptance; upstream license unverified."
+      "notes": "30,431-cell first-order tetrahedral engineering geometry. Import, affine patch, and conservation were verified in GitHub Actions. Redistribution terms remain unverified upstream."
     },
     {
       "id": "meshioplusplus-example",
       "tier": "candidate",
-      "title": "LFS engineering sample (format and cell family pending inspection)",
+      "title": "Gmsh binary mechanical bracket (235,014 tetrahedral cells)",
       "format": "gmsh-binary",
       "source": "https://github.com/loumalouomega/meshioplusplus",
       "revision": "9b1b7575deaf1cdd2412de9577be7702c591d4f7",
@@ -40,7 +40,7 @@
       "sha256": "0e915b8149471eee9a7a70714931facd8dc9835c99d943dde120a4cfd512393a",
       "bytes": 11864492,
       "storage": "git-lfs",
-      "notes": "Source data successfully downloaded and verified; native binary Gmsh is not supported by IDMesh. A test-only meshio 5.3.5 converter writes Gmsh 2.2 ASCII. Large-mesh numerical results remain unverified until this candidate probe produces JSON."
+      "notes": "Binary Gmsh engineering bracket downloaded through pinned Git LFS with SHA-256 verification. The existing CI workflow converts it to Gmsh 2.2 ASCII with test-only meshio 5.3.5; source physical tags are absent and thus cannot be checked. Affine patch, thermal solve and VTU round-trip were verified."
     }
   ]
 }
