@@ -38,14 +38,12 @@ jobs:
             --mesh validation/data/mfem-piece.msh --problem heat \
             --report validation/results/heat.json
       - name: Probe induction-heating engineering mesh (candidate)
-        continue-on-error: true
         run: |
           python3 validation/fetch_meshes.py --tier manual
           ./build-validation/idmesh_thermal \
             --mesh validation/data/mfem-induction-heating.msh --problem patch \
             --report validation/results/induction-patch.json
       - name: Probe LFS mechanical bracket at scale (candidate)
-        continue-on-error: true
         run: |
           python3 validation/fetch_meshes.py --tier candidate
           python3 -m venv .venv-mesh-converter
@@ -54,7 +52,12 @@ jobs:
           ./build-validation/idmesh_thermal \
             --mesh validation/data/bracket-ascii.msh --problem patch \
             --max-iterations 4000 \
+            --output-vtu validation/results/bracket-patch.vtu \
             --report validation/results/bracket-patch.json
+          ./build-validation/idmesh_thermal \
+            --mesh validation/data/bracket-ascii.msh --problem heat \
+            --max-iterations 4000 \
+            --report validation/results/bracket-heat.json
       - name: Upload machine-readable reports
         if: always()
         uses: actions/upload-artifact@v4
