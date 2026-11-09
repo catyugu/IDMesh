@@ -225,7 +225,7 @@ namespace idmesh {
                             std::vector<int> groups;
                             groups.reserve(static_cast<std::size_t>(group_count));
                             for (std::uint64_t j = 0; j < group_count; ++j)
-                                groups.push_back(reader->integer());
+                                { const int tag = reader->integer(); if (tag > 0) groups.push_back(tag); }
                             if (dim != 0) {
                                 const auto bounds = reader->size();
                                 detail::require_runtime(bounds <= std::numeric_limits<Index>::max(),
@@ -258,6 +258,8 @@ namespace idmesh {
                             std::vector<int> groups(group_count);
                             for (auto& group : groups)
                                 detail::require_runtime(static_cast<bool>(record >> group), "invalid physical group");
+                            groups.erase(std::remove_if(groups.begin(), groups.end(),
+                                [](int tag) { return tag <= 0; }), groups.end());
                             detail::require_runtime(entity_physical.emplace(EntityKey {dim, id}, std::move(groups)).second,
                                 "duplicate geometrical entity tag");
                         }
