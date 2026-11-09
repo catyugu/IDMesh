@@ -403,33 +403,56 @@ Solution solve(const idmesh::Mesh& mesh, const Problem& model,
 void export_vtu(const idmesh::Mesh& mesh, const std::vector<double>& values,
     const std::string& filename)
 {
+    // External meshes may contain point-only features that are not referenced
+    // by a volume cell. Convert to a compact volume-domain visualization mesh:
+    // the original point order and scalar field remain untouched in the solver.
+    const auto n = mesh.entity_count(0);
+    std::vector<Index> map(n, idmesh::invalid_index);
+    std::vector<double> output_values;
+    idmesh::MeshBuilder builder(3, 3);
+    for (Index c = 0; c < mesh.entity_count(3); ++c) {
+        std::array<Index, 4> mapped {};
+        const auto nodes = mesh.entity_vertices(3, c);
+        for (std::size_t i = 0; i < 4; ++i) {
+            const Index v = nodes[i];
+            if (map[v] == idmesh::invalid_index) {
+                map[v] = builder.add_vertex(mesh.coordinates()[v]);
+                output_values.push_back(values[v]);
+            }
+            mapped[i] = map[v];
+        }
+        builder.add_cell(idmesh::CellType::tetrahedron, mapped);
+    }
+    const auto output_mesh = std::move(builder).finalize(
+        {idmesh::TopologyLayout::cell_vertices,
+            idmesh::RelationDirection::downward});
     const idmesh::data::MeshDataView field {
         "temperature", idmesh::data::entities(0), idmesh::data::all(),
-        idmesh::data::make_scalar_array(std::span<const double>(values))
+        idmesh::data::make_scalar_array(std::span<const double>(output_values))
     };
     idmesh::data::StateView state;
     state.fields = std::span<const idmesh::data::MeshDataView>(&field, 1);
-    idmesh::vtk::write_vtu(mesh, state, filename);
+    idmesh::vtk::write_vtu(output_mesh, state, filename);
 
-    // A real I/O round trip, including the point field, is part of acceptance.
     const auto restored = idmesh::vtk::read_vtu(filename,
         {idmesh::TopologyLayout::cell_vertices, idmesh::RelationDirection::downward});
-    require(restored.mesh.entity_count(0) == values.size(),
-        "VTU round-trip lost vertices");
+    require(restored.mesh.entity_count(0) == output_values.size()
+            && restored.mesh.entity_count(3) == mesh.entity_count(3),
+        "VTU round-trip lost mesh entities");
     bool found = false;
     for (const auto& candidate : restored.state.fields) {
         if (candidate.name != "temperature")
             continue;
         require(candidate.values.type == idmesh::data::ScalarType::float64
                 && candidate.values.components == 1
-                && candidate.values.tuples == values.size()
-                && candidate.values.values.size() == values.size() * sizeof(double),
+                && candidate.values.tuples == output_values.size()
+                && candidate.values.values.size() == output_values.size() * sizeof(double),
             "VTU round-trip changed field schema");
-        for (std::size_t i = 0; i < values.size(); ++i) {
+        for (std::size_t i = 0; i < output_values.size(); ++i) {
             double restored_value = 0;
             std::memcpy(&restored_value,
                 candidate.values.values.data() + i * sizeof(double), sizeof(double));
-            require(std::abs(restored_value - values[i]) <= 1e-12,
+            require(std::abs(restored_value - output_values[i]) <= 1e-12,
                 "VTU round-trip changed temperature values");
         }
         found = true;
