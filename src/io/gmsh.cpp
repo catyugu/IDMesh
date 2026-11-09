@@ -3,10 +3,13 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -79,6 +82,65 @@ namespace idmesh {
 
         using EntityKey = std::pair<unsigned, std::uint64_t>;
 
+
+        // Binary 2.2 uses 32-bit signed tags. Binary 4.1 uses 32-bit
+        // classification tags and data-size-wide unsigned node/element tags.
+        // Decode explicitly: files are portable across host byte orders.
+        struct BinaryReader {
+            std::istream& input;
+            bool little_endian;
+            unsigned size_width;
+
+            std::uint64_t unsigned_number(unsigned width)
+            {
+                detail::require_runtime(width == 4 || width == 8,
+                    "unsupported Gmsh binary integer width");
+                std::array<unsigned char, 8> bytes {};
+                input.read(reinterpret_cast<char*>(bytes.data()), width);
+                detail::require_runtime(static_cast<bool>(input), "truncated Gmsh binary payload");
+                std::uint64_t number = 0;
+                if (little_endian) {
+                    for (unsigned i = 0; i < width; ++i)
+                        number |= std::uint64_t(bytes[i]) << (8 * i);
+                }
+                else {
+                    for (unsigned i = 0; i < width; ++i)
+                        number = (number << 8) | bytes[i];
+                }
+                return number;
+            }
+
+            std::int32_t integer()
+            {
+                return std::bit_cast<std::int32_t>(
+                    static_cast<std::uint32_t>(unsigned_number(4)));
+            }
+
+            std::uint64_t size() { return unsigned_number(size_width); }
+
+            double real() { return std::bit_cast<double>(unsigned_number(8)); }
+        };
+
+        void expect_binary_newline(std::istream& input)
+        {
+            if (input.peek() == '\r')
+                input.get();
+            detail::require_runtime(input.get() == '\n',
+                "missing newline before Gmsh binary data");
+        }
+
+        std::uint64_t positive_id(std::int32_t value)
+        {
+            detail::require_runtime(value > 0, "invalid Gmsh binary tag");
+            return static_cast<std::uint64_t>(value);
+        }
+
+        std::uint64_t positive_size_id(std::uint64_t value)
+        {
+            detail::require_runtime(value != 0, "invalid Gmsh binary tag");
+            return value;
+        }
+
         void expect_end(std::istream& input, const std::string& section)
         {
             std::string marker;
@@ -90,11 +152,13 @@ namespace idmesh {
 
     Mesh read_gmsh(const std::string& filename, BuildOptions options)
     {
-        std::ifstream in(filename);
+        std::ifstream in(filename, std::ios::binary);
         if (!in)
             throw std::runtime_error("cannot open Gmsh file: " + filename);
 
         double version = 0;
+        bool binary = false;
+        std::optional<BinaryReader> reader;
         bool seen_format = false, seen_nodes = false, seen_elements = false, seen_entities = false;
         std::map<std::uint64_t, std::array<double, 3>> nodes;
         std::vector<Element> elements;
@@ -109,8 +173,22 @@ namespace idmesh {
                 unsigned format = 0, data_size = 0;
                 detail::require_runtime(static_cast<bool>(in >> version >> format >> data_size),
                     "invalid MeshFormat header");
-                detail::require_runtime(format == 0 && data_size == 8 && ((version >= 2.2 && version < 2.3) || (version >= 4.1 && version < 4.2)),
-                    "only ASCII Gmsh MSH 2.2 and 4.1 are supported");
+                detail::require_runtime((format == 0 || format == 1)
+                        && ((version == 2.2 && data_size == 8)
+                            || (version == 4.1 && (data_size == 4 || data_size == 8))),
+                    "only Gmsh MSH 2.2 and 4.1 ASCII/binary are supported");
+                binary = format == 1;
+                if (binary) {
+                    expect_binary_newline(in);
+                    std::array<unsigned char, 4> marker {};
+                    in.read(reinterpret_cast<char*>(marker.data()), marker.size());
+                    detail::require_runtime(static_cast<bool>(in),
+                        "truncated Gmsh binary endian marker");
+                    const bool little = marker == std::array<unsigned char, 4> {1, 0, 0, 0};
+                    const bool big = marker == std::array<unsigned char, 4> {0, 0, 0, 1};
+                    detail::require_runtime(little || big, "invalid Gmsh binary endian marker");
+                    reader.emplace(BinaryReader {in, little, data_size});
+                }
                 expect_end(in, section);
             }
             else if (section == "$PhysicalNames") {
@@ -132,26 +210,57 @@ namespace idmesh {
                 detail::require_runtime(version >= 4.1 && !seen_entities, "invalid duplicate Entities section");
                 seen_entities = true;
                 std::array<std::uint64_t, 4> counts {};
-                for (auto& count : counts)
-                    detail::require_runtime(static_cast<bool>(in >> count), "invalid Entities header");
-                std::string line;
-                std::getline(in, line);
-                for (unsigned dim = 0; dim <= 3; ++dim) {
-                    for (std::uint64_t i = 0; i < counts[dim]; ++i) {
-                        detail::require_runtime(static_cast<bool>(std::getline(in, line)), "truncated Entities");
-                        std::istringstream record(line);
-                        std::uint64_t id = 0;
-                        double ignored = 0;
-                        detail::require_runtime(static_cast<bool>(record >> id), "invalid entity tag");
-                        for (unsigned component = 0; component < (dim == 0 ? 3U : 6U); ++component)
-                            detail::require_runtime(static_cast<bool>(record >> ignored), "invalid entity bounds");
-                        std::uint64_t group_count = 0;
-                        detail::require_runtime(static_cast<bool>(record >> group_count), "invalid physical group count");
-                        std::vector<int> groups(group_count);
-                        for (auto& group : groups)
-                            detail::require_runtime(static_cast<bool>(record >> group), "invalid physical group");
-                        detail::require_runtime(entity_physical.emplace(EntityKey {dim, id}, std::move(groups)).second,
-                            "duplicate geometrical entity tag");
+                if (binary) {
+                    expect_binary_newline(in);
+                    for (auto& count : counts)
+                        count = reader->size();
+                    for (unsigned dim = 0; dim <= 3; ++dim) {
+                        for (std::uint64_t i = 0; i < counts[dim]; ++i) {
+                            const auto id = positive_id(reader->integer());
+                            for (unsigned axis = 0; axis < (dim == 0 ? 3U : 6U); ++axis)
+                                (void)reader->real();
+                            const auto group_count = reader->size();
+                            detail::require_runtime(group_count <= std::numeric_limits<Index>::max(),
+                                "Gmsh physical group count exceeds supported range");
+                            std::vector<int> groups;
+                            groups.reserve(static_cast<std::size_t>(group_count));
+                            for (std::uint64_t j = 0; j < group_count; ++j)
+                                groups.push_back(reader->integer());
+                            if (dim != 0) {
+                                const auto bounds = reader->size();
+                                detail::require_runtime(bounds <= std::numeric_limits<Index>::max(),
+                                    "Gmsh bounding entity count exceeds supported range");
+                                for (std::uint64_t j = 0; j < bounds; ++j)
+                                    (void)reader->integer();
+                            }
+                            detail::require_runtime(
+                                entity_physical.emplace(EntityKey {dim, id}, std::move(groups)).second,
+                                "duplicate geometrical entity tag");
+                        }
+                    }
+                }
+                else {
+                    for (auto& count : counts)
+                        detail::require_runtime(static_cast<bool>(in >> count), "invalid Entities header");
+                    std::string line;
+                    std::getline(in, line);
+                    for (unsigned dim = 0; dim <= 3; ++dim) {
+                        for (std::uint64_t i = 0; i < counts[dim]; ++i) {
+                            detail::require_runtime(static_cast<bool>(std::getline(in, line)), "truncated Entities");
+                            std::istringstream record(line);
+                            std::uint64_t id = 0;
+                            double ignored = 0;
+                            detail::require_runtime(static_cast<bool>(record >> id), "invalid entity tag");
+                            for (unsigned component = 0; component < (dim == 0 ? 3U : 6U); ++component)
+                                detail::require_runtime(static_cast<bool>(record >> ignored), "invalid entity bounds");
+                            std::uint64_t group_count = 0;
+                            detail::require_runtime(static_cast<bool>(record >> group_count), "invalid physical group count");
+                            std::vector<int> groups(group_count);
+                            for (auto& group : groups)
+                                detail::require_runtime(static_cast<bool>(record >> group), "invalid physical group");
+                            detail::require_runtime(entity_physical.emplace(EntityKey {dim, id}, std::move(groups)).second,
+                                "duplicate geometrical entity tag");
+                        }
                     }
                 }
                 expect_end(in, section);
@@ -162,34 +271,84 @@ namespace idmesh {
                 if (version < 4) {
                     std::uint64_t count = 0;
                     detail::require_runtime(static_cast<bool>(in >> count), "invalid Nodes header");
+                    detail::require_runtime(count < invalid_index,
+                        "Gmsh node count exceeds supported range");
+                    if (binary)
+                        expect_binary_newline(in);
                     for (std::uint64_t i = 0; i < count; ++i) {
-                        std::uint64_t id;
-                        std::array<double, 3> position;
-                        detail::require_runtime(static_cast<bool>(in >> id >> position[0] >> position[1] >> position[2]),
-                            "truncated Gmsh nodes");
+                        std::uint64_t id = 0;
+                        std::array<double, 3> position {};
+                        if (binary) {
+                            id = positive_id(reader->integer());
+                            for (auto& coordinate : position)
+                                coordinate = reader->real();
+                        }
+                        else {
+                            detail::require_runtime(static_cast<bool>(in >> id >> position[0]
+                                    >> position[1] >> position[2]),
+                                "truncated Gmsh nodes");
+                        }
                         detail::require_runtime(nodes.emplace(id, position).second, "duplicate Gmsh node tag");
                     }
                 }
                 else {
-                    std::uint64_t blocks, total, min_tag, max_tag;
-                    detail::require_runtime(static_cast<bool>(in >> blocks >> total >> min_tag >> max_tag),
-                        "invalid Nodes block header");
+                    std::uint64_t blocks = 0, total = 0, min_tag = 0, max_tag = 0;
+                    if (binary) {
+                        expect_binary_newline(in);
+                        blocks = reader->size();
+                        total = reader->size();
+                        min_tag = reader->size();
+                        max_tag = reader->size();
+                    }
+                    else {
+                        detail::require_runtime(static_cast<bool>(in >> blocks >> total >> min_tag >> max_tag),
+                            "invalid Nodes block header");
+                    }
+                    detail::require_runtime(total < invalid_index && blocks <= total,
+                        "invalid Gmsh node count");
                     for (std::uint64_t block = 0; block < blocks; ++block) {
                         unsigned dim = 0, parametric = 0;
                         std::uint64_t entity = 0, count = 0;
-                        detail::require_runtime(static_cast<bool>(in >> dim >> entity >> parametric >> count),
-                            "invalid Nodes block");
-                        detail::require_runtime(dim <= 3 && parametric <= 1, "invalid Gmsh node classification");
-                        std::vector<std::uint64_t> tags(count);
-                        for (auto& tag : tags)
-                            detail::require_runtime(static_cast<bool>(in >> tag), "missing node tag");
+                        if (binary) {
+                            const auto raw_dim = reader->integer();
+                            const auto raw_entity = reader->integer();
+                            const auto raw_parametric = reader->integer();
+                            detail::require_runtime(raw_dim >= 0 && raw_entity > 0
+                                    && (raw_parametric == 0 || raw_parametric == 1),
+                                "invalid Gmsh node classification");
+                            dim = static_cast<unsigned>(raw_dim);
+                            entity = static_cast<std::uint64_t>(raw_entity);
+                            parametric = static_cast<unsigned>(raw_parametric);
+                            count = reader->size();
+                        }
+                        else {
+                            detail::require_runtime(static_cast<bool>(in >> dim >> entity >> parametric >> count),
+                                "invalid Nodes block");
+                        }
+                        detail::require_runtime(dim <= 3 && parametric <= 1 && count <= total - nodes.size(),
+                            "invalid Gmsh node classification or block count");
+                        std::vector<std::uint64_t> tags(static_cast<std::size_t>(count));
+                        for (auto& tag : tags) {
+                            if (binary)
+                                tag = positive_size_id(reader->size());
+                            else
+                                detail::require_runtime(static_cast<bool>(in >> tag), "missing node tag");
+                        }
                         for (auto tag : tags) {
-                            std::array<double, 3> position;
-                            detail::require_runtime(static_cast<bool>(in >> position[0] >> position[1] >> position[2]),
-                                "missing Gmsh node coordinate");
+                            std::array<double, 3> position {};
+                            for (auto& coordinate : position) {
+                                if (binary)
+                                    coordinate = reader->real();
+                                else
+                                    detail::require_runtime(static_cast<bool>(in >> coordinate), "missing Gmsh node coordinate");
+                            }
                             for (unsigned i = 0; i < (parametric ? dim : 0); ++i) {
-                                double parameter;
-                                detail::require_runtime(static_cast<bool>(in >> parameter), "missing parametric coordinate");
+                                if (binary)
+                                    (void)reader->real();
+                                else {
+                                    double parameter = 0;
+                                    detail::require_runtime(static_cast<bool>(in >> parameter), "missing parametric coordinate");
+                                }
                             }
                             detail::require_runtime(nodes.emplace(tag, position).second, "duplicate Gmsh node tag");
                         }
@@ -204,34 +363,93 @@ namespace idmesh {
                 if (version < 4) {
                     std::uint64_t count = 0;
                     detail::require_runtime(static_cast<bool>(in >> count), "invalid Elements header");
-                    for (std::uint64_t i = 0; i < count; ++i) {
-                        std::uint64_t id = 0;
-                        unsigned kind = 0, n_tags = 0;
-                        detail::require_runtime(static_cast<bool>(in >> id >> kind >> n_tags), "invalid Gmsh element");
-                        const auto info = element_info(kind);
-                        Element element {info, {}, {}};
-                        for (unsigned j = 0; j < n_tags; ++j) {
-                            int tag = 0;
-                            detail::require_runtime(static_cast<bool>(in >> tag), "truncated Gmsh element tags");
-                            if (j == 0 && tag != 0)
-                                element.physical.push_back(tag);
+                    detail::require_runtime(count < invalid_index,
+                        "Gmsh element count exceeds supported range");
+                    if (binary)
+                        expect_binary_newline(in);
+                    std::uint64_t read = 0;
+                    if (binary) {
+                        while (read < count) {
+                            const auto kind = reader->integer();
+                            const auto block_count = reader->integer();
+                            const auto n_tags = reader->integer();
+                            detail::require_runtime(kind > 0 && block_count > 0 && n_tags >= 0
+                                    && static_cast<std::uint64_t>(block_count) <= count - read
+                                    && n_tags <= 1024,
+                                "invalid Gmsh binary element block");
+                            const auto info = element_info(static_cast<unsigned>(kind));
+                            for (int j = 0; j < block_count; ++j) {
+                                (void)positive_id(reader->integer());
+                                Element element {info, {}, {}};
+                                for (int k = 0; k < n_tags; ++k) {
+                                    const auto tag = reader->integer();
+                                    if (k == 0 && tag != 0)
+                                        element.physical.push_back(tag);
+                                }
+                                element.nodes.resize(info.nodes);
+                                for (auto& node : element.nodes)
+                                    node = positive_id(reader->integer());
+                                elements.push_back(std::move(element));
+                            }
+                            read += static_cast<std::uint64_t>(block_count);
                         }
-                        element.nodes.resize(info.nodes);
-                        for (auto& node : element.nodes)
-                            detail::require_runtime(static_cast<bool>(in >> node), "truncated element connectivity");
-                        elements.push_back(std::move(element));
+                    }
+                    else {
+                        for (; read < count; ++read) {
+                            std::uint64_t id = 0;
+                            unsigned kind = 0, n_tags = 0;
+                            detail::require_runtime(static_cast<bool>(in >> id >> kind >> n_tags),
+                                "invalid Gmsh element");
+                            const auto info = element_info(kind);
+                            Element element {info, {}, {}};
+                            for (unsigned j = 0; j < n_tags; ++j) {
+                                int tag = 0;
+                                detail::require_runtime(static_cast<bool>(in >> tag), "truncated Gmsh element tags");
+                                if (j == 0 && tag != 0)
+                                    element.physical.push_back(tag);
+                            }
+                            element.nodes.resize(info.nodes);
+                            for (auto& node : element.nodes)
+                                detail::require_runtime(static_cast<bool>(in >> node), "truncated element connectivity");
+                            elements.push_back(std::move(element));
+                        }
                     }
                 }
                 else {
-                    std::uint64_t blocks, count, min_tag, max_tag;
-                    detail::require_runtime(static_cast<bool>(in >> blocks >> count >> min_tag >> max_tag),
-                        "invalid Elements block header");
+                    std::uint64_t blocks = 0, count = 0, min_tag = 0, max_tag = 0;
+                    if (binary) {
+                        expect_binary_newline(in);
+                        blocks = reader->size();
+                        count = reader->size();
+                        min_tag = reader->size();
+                        max_tag = reader->size();
+                    }
+                    else {
+                        detail::require_runtime(static_cast<bool>(in >> blocks >> count >> min_tag >> max_tag),
+                            "invalid Elements block header");
+                    }
+                    detail::require_runtime(count < invalid_index && blocks <= count,
+                        "invalid Gmsh element count");
                     std::uint64_t read = 0;
                     for (std::uint64_t block = 0; block < blocks; ++block) {
                         unsigned dim = 0, kind = 0;
                         std::uint64_t entity = 0, n = 0;
-                        detail::require_runtime(static_cast<bool>(in >> dim >> entity >> kind >> n),
-                            "invalid Elements block");
+                        if (binary) {
+                            const auto raw_dim = reader->integer();
+                            const auto raw_entity = reader->integer();
+                            const auto raw_kind = reader->integer();
+                            detail::require_runtime(raw_dim >= 0 && raw_entity > 0 && raw_kind > 0,
+                                "invalid Gmsh binary element block header");
+                            dim = static_cast<unsigned>(raw_dim);
+                            entity = static_cast<std::uint64_t>(raw_entity);
+                            kind = static_cast<unsigned>(raw_kind);
+                            n = reader->size();
+                        }
+                        else {
+                            detail::require_runtime(static_cast<bool>(in >> dim >> entity >> kind >> n),
+                                "invalid Elements block");
+                        }
+                        detail::require_runtime(n <= count - read, "invalid Gmsh element block count");
                         const auto info = element_info(kind);
                         detail::require_runtime(info.dimension == dim, "Gmsh element dimension mismatch");
                         const auto found = entity_physical.find({dim, entity});
@@ -240,11 +458,19 @@ namespace idmesh {
                             : found->second;
                         for (std::uint64_t j = 0; j < n; ++j) {
                             std::uint64_t id = 0;
-                            detail::require_runtime(static_cast<bool>(in >> id), "truncated element tag");
+                            if (binary)
+                                id = positive_size_id(reader->size());
+                            else
+                                detail::require_runtime(static_cast<bool>(in >> id), "truncated element tag");
                             Element element {info, {}, groups};
                             element.nodes.resize(info.nodes);
-                            for (auto& node : element.nodes)
-                                detail::require_runtime(static_cast<bool>(in >> node), "truncated element connectivity");
+                            for (auto& node : element.nodes) {
+                                if (binary)
+                                    node = positive_size_id(reader->size());
+                                else
+                                    detail::require_runtime(static_cast<bool>(in >> node),
+                                        "truncated element connectivity");
+                            }
                             elements.push_back(std::move(element));
                         }
                         read += n;
