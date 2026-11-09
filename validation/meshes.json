@@ -2,17 +2,20 @@
   "schema": 1,
   "meshes": [
     {
-      "id": "mfem-piece",
+      "id": "adventure-pantheon",
       "tier": "ci",
-      "title": "MFEM Gmsh 4.1 engineering piece",
-      "format": "gmsh41-ascii",
-      "source": "https://github.com/mfem/data",
-      "revision": "20033a55eb84936b85d79db08e6141ef80eb3080",
-      "path": "gmsh/v41/piece.asc.v41.msh",
-      "git_blob_sha1": "0f4400f307c51d9c3c213a6f045b53f300858e15",
-      "bytes": 744455,
-      "expected_cells": 13370,
-      "notes": "Real 3D piece geometry; first-order tetrahedra, linear facets and points. License/redistribution rights must be confirmed upstream; source files are downloaded locally and never committed."
+      "title": "ADVENTURE Pantheon 3D architectural engineering model (linear tetrahedra)",
+      "format": "adventure-tetmesh-zip",
+      "source": "https://adventure.sys.t.u-tokyo.ac.jp/software/samples.html",
+      "url": "https://adventure.sys.t.u-tokyo.ac.jp/download/sample_data/pantheon_b60cmc.zip",
+      "storage": "https-zip",
+      "sha256": "d6984aa5e624b1b8660b0fe896fff975c493227cd825b8eb4e7467027593843d",
+      "bytes": 8881569,
+      "member": "pantheon_b60cmc.msh",
+      "member_bytes": 41795315,
+      "expected_cells": 1329027,
+      "expected_nodes": 273157,
+      "notes": "Authentic Pantheon engineering tetrahedral mesh published by University of Tokyo ADVENTURE. The provider explicitly permits free use of sample data. Source archive is read at test time and converted to native Gmsh 2.2 binary, without committing original or converted files. Content-pinned by SHA-256; upstream does not publish a versioned URL."
     },
     {
       "id": "mfem-induction-heating",
