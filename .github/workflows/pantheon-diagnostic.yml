@@ -35,10 +35,11 @@ jobs:
                   print('first line:', repr(first), flush=True)
                   second = f.readline()
                   print('second line:', repr(second), flush=True)
-                  elements = int(second)
-                  for i in range(elements):
+                  elements = int(first)
+                  print('tet: 0', repr(second[:150]), flush=True)
+                  for i in range(1, elements):
                       line = f.readline()
-                      if i in {0, 1, elements-2, elements-1}:
+                      if i in {1, elements-2, elements-1}:
                           print('tet:', i,repr(line[:150]),flush=True)
                   nodes = read_int()
                   print('nodes:', nodes,flush=True)
