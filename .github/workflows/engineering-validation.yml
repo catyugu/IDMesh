@@ -1,0 +1,46 @@
+name: Real engineering validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installed-sdk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch immutable engineering fixture
+        run: python3 validation/fetch_meshes.py --tier ci
+      - name: Build and install SDK
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DIDMESH_BUILD_TESTS=OFF -DIDMESH_BUILD_EXAMPLES=OFF
+          cmake --build build --parallel 2
+          cmake --install build --prefix install
+      - name: Build independent consumer
+        run: |
+          cmake -S validation/consumer -B build-validation \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build-validation --parallel 2
+      - name: Run patch, conservation and output round trip
+        run: |
+          mkdir -p validation/results
+          ./build-validation/idmesh_thermal \
+            --mesh validation/data/mfem-piece.msh --problem patch \
+            --validate-topology \
+            --output-vtu validation/results/patch.vtu \
+            --report validation/results/patch.json
+          ./build-validation/idmesh_thermal \
+            --mesh validation/data/mfem-piece.msh --problem heat \
+            --report validation/results/heat.json
+      - name: Upload machine-readable reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-engineering-validation
+          path: validation/results/*.json
+          if-no-files-found: warn
