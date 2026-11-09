@@ -36,6 +36,7 @@ add_library(idmesh
     src/core/data.cpp
     src/core/geometry.cpp
     src/io/gmsh.cpp
+    src/io/gmsh_writer.cpp
     src/io/vtk/vtk_common.cpp
     src/io/vtk/vtk_data_io.cpp
     src/io/vtk/vtk.cpp
