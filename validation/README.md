@@ -1,20 +1,20 @@
 # Real-engineering production-readiness validation
 
 This directory is an **external SDK consumer**, not part of IDMesh itself.
-It uses only installed public headers and \`IDMesh::IDMesh\`. Files under
-\`data/\` and \`results/\` are local, ignored, reproducible outputs.
+It uses only installed public headers and `IDMesh::IDMesh`. Files under
+`data/` and `results/` are local, ignored, reproducible outputs.
 
 ## Source and integrity
 
-\`meshes.json\` pins upstream revisions, paths, declared byte sizes and Git
-blob SHA-1 or LFS SHA-256 digests. \`fetch_meshes.py\` checks every byte
+`meshes.json` pins upstream revisions, paths, declared byte sizes and Git
+blob SHA-1 or LFS SHA-256 digests. `fetch_meshes.py` checks every byte
 before making files visible and never silently accepts a changed upstream
 asset. An upstream Git repository's software license does not necessarily
 license embedded engineering mesh geometry; ownership/redistribution terms
 for the MFEM examples are **not verified**. Do not mirror these datasets or
 include them in source/release artifacts without explicit confirmation.
 
-\`\`\`sh
+```sh
 python3 validation/fetch_meshes.py --tier ci
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
@@ -34,10 +34,10 @@ mkdir -p validation/results
 ./build-validation/idmesh_thermal \
   --mesh validation/data/mfem-piece.msh --problem heat \
   --report validation/results/piece-heat.json
-\`\`\`
+```
 
 On Windows use PowerShell paths, and choose
-\`build-validation/Release/idmesh_thermal.exe\` with a multi-config generator.
+`build-validation/Release/idmesh_thermal.exe` with a multi-config generator.
 
 ## What is actually verified
 
@@ -58,6 +58,13 @@ engineering thermal boundary-condition model for arbitrary geometries.
 Linear P1 patch tests on non-degenerate tetrahedra should be exact to
 solver tolerance. Cell dimension 3 / tetrahedron / first-order is required;
 unsupported element families fail explicitly rather than being skipped.
+
+The verified second mesh is the 30,431-cell induction-heating tetrahedral grid; its
+linear patch test completed with a 4.09e-10 infinity error, 8.75e-11 relative
+residual and 124 PCG iterations in the initial Ubuntu CI probe.
+The large mechanical bracket is distributed as binary Gmsh 4.1 through Git LFS;
+the stress probe converts it to supported Gmsh ASCII with a **test-only** pinned
+meshio tool. This dependency is not linked to or exported by the SDK.
 
 ## Acceptance levels
 
