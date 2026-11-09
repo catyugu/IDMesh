@@ -304,6 +304,7 @@ struct Solution {
     double energy = 0;
     double minimum = 0;
     double maximum = 0;
+    double temperature_overshoot_linf = 0;
 };
 
 Solution solve(const idmesh::Mesh& mesh, const Problem& model,
@@ -380,6 +381,9 @@ Solution solve(const idmesh::Mesh& mesh, const Problem& model,
     const auto bounds = std::minmax_element(result.values.begin(), result.values.end());
     result.minimum = *bounds.first;
     result.maximum = *bounds.second;
+    if (options.problem == "heat")
+        result.temperature_overshoot_linf = std::max({0.0, -result.minimum,
+            result.maximum - 1.0});
     if (options.problem == "patch") {
         Point lower = mesh.coordinates().front(), upper = lower;
         for (const auto& v : mesh.coordinates()) {
@@ -404,11 +408,14 @@ Solution solve(const idmesh::Mesh& mesh, const Problem& model,
     require(result.residual <= 1e-7, "true (recomputed) residual is too large");
     require(result.reaction_imbalance <= 1e-6,
         "discrete total heat flux is not conservative");
+    require(std::isfinite(result.minimum) && std::isfinite(result.maximum),
+        "nonfinite nodal field");
     if (options.problem == "patch")
         require(result.patch_error <= 1e-6, "linear FE patch test failed");
     else
-        require(result.minimum >= -1e-6 && result.maximum <= 1 + 1e-6,
-            "steady heat solve violates the discrete maximum principle");
+        require(result.energy > 0, "heat case has no conductive energy");
+    // Consistent P1 tetrahedral Galerkin matrices need not be M-matrices on
+    // nonacute tetrahedra. Track overshoot without imposing a false DMP gate.
     return result;
 }
 
@@ -500,6 +507,7 @@ void report(std::ostream& out, const Options& o, const idmesh::Mesh& mesh,
         << "  \"energy\": " << result.energy << ",\n"
         << "  \"temperature_min\": " << result.minimum << ",\n"
         << "  \"temperature_max\": " << result.maximum << ",\n"
+        << "  \"temperature_overshoot_linf\": " << result.temperature_overshoot_linf << ",\n"
         << "  \"import_seconds\": " << import_s << ",\n"
         << "  \"assembly_seconds\": " << assembly_s << ",\n"
         << "  \"solve_seconds\": " << solve_s << ",\n"
