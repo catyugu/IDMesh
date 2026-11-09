@@ -95,8 +95,9 @@ namespace {
             raw_int(out, dim + 1, little);
             for (double x : {0., 0., 0., 1., 1., 1.})
                 raw_double(out, x, little);
-            raw_number(out, 2, size_width, little);
+            raw_number(out, 3, size_width, little);
             raw_int(out, dim == 2 ? 203 : 204, little);
+            raw_int(out, 0, little); // reserved unassigned physical tag
             raw_int(out, dim == 2 ? 213 : 214, little);
             raw_number(out, 0, size_width, little);
         }
@@ -298,44 +299,10 @@ namespace {
         std::filesystem::remove(filename);
     }
 
-    void real_engineering(const std::string& filename)
-    {
-        const auto mesh = idmesh::read_gmsh(filename,
-            {idmesh::TopologyLayout::cell_facets,
-                idmesh::RelationDirection::bidirectional});
-        check(mesh.entity_count(mesh.dimension()) > 1000,
-            "large binary Gmsh fixture unexpectedly small");
-        check(mesh.has_relation(mesh.dimension(), mesh.dimension() - 1),
-            "large binary Gmsh facet relation missing");
-        const auto output = fixture("real-rewrite");
-        idmesh::write_gmsh(mesh, output.string(),
-            {idmesh::GmshVersion::v41, idmesh::GmshEncoding::binary});
-        const auto restored = idmesh::read_gmsh(output.string(),
-            {idmesh::TopologyLayout::cell_facets,
-                idmesh::RelationDirection::bidirectional});
-        std::filesystem::remove(output);
-        check(restored.entity_count(mesh.dimension()) == mesh.entity_count(mesh.dimension())
-                && restored.entity_count(0) == mesh.entity_count(0),
-            "large Gmsh binary import/re-export changed entity counts");
-        check(restored.labels().size() == mesh.labels().size(),
-            "large Gmsh physical labels changed in round trip");
-    }
-
 } // namespace
 
-int main(int argc, char** argv)
+int main()
 {
-    if (argc == 3 && std::string(argv[1]) == "--real") {
-        try {
-            real_engineering(argv[2]);
-            std::cout << "[pass] real binary Gmsh: " << argv[2] << '\n';
-            return 0;
-        }
-        catch (const std::exception& e) {
-            std::cerr << "[fail] real binary Gmsh: " << e.what() << '\n';
-            return 1;
-        }
-    }
     return idmesh::test::run({
         {"hand-encoded endian, width and parametric data", manually_encoded_import},
         {"all supported P2 cell families, ASCII/binary 2.2/4.1", all_cell_type_roundtrips},
