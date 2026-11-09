@@ -30,14 +30,14 @@
       "id": "meshioplusplus-example",
       "tier": "candidate",
       "title": "LFS engineering sample (format and cell family pending inspection)",
-      "format": "unverified",
+      "format": "gmsh-binary",
       "source": "https://github.com/loumalouomega/meshioplusplus",
       "revision": "9b1b7575deaf1cdd2412de9577be7702c591d4f7",
       "path": "example/data/example.msh",
       "sha256": "0e915b8149471eee9a7a70714931facd8dc9835c99d943dde120a4cfd512393a",
       "bytes": 11864492,
       "storage": "git-lfs",
-      "notes": "Candidate only: LFS pointer was verified, actual file content/format and redistribution terms remain to be verified."
+      "notes": "Source data successfully downloaded and verified; native binary Gmsh is not supported by IDMesh. A test-only meshio 5.3.5 converter writes Gmsh 2.2 ASCII. Large-mesh numerical results remain unverified until this candidate probe produces JSON."
     }
   ]
 }
