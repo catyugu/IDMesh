@@ -73,6 +73,10 @@ boundary-label preservation. The converter is not linked to or exported by the S
 problem took 93 Jacobi-CG iterations, with 7.50e-10 maximum nodal error,
 9.67e-11 recomputed relative residual, 5.94e-11 reaction imbalance,
 1.226 s import, 0.060 s assembly, 0.515 s solve and 158 MiB peak RSS.
+The large-case heat problem has 48,075 free DOFs; Jacobi-PCG converged in
+695 iterations with 9.83e-11 recomputed relative residual, 4.47e-10
+reaction imbalance, 1.85 s solve time and temperatures in [0, 1]. The
+large patch output also passed a temperature-field VTU write/read round trip.
 Times are single GitHub-hosted runner observations, not performance baselines.
 The source asset is 11.86 MB; derived ASCII and solution files are ignored.
 
