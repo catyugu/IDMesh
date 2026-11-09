@@ -10,7 +10,7 @@ permissions:
 jobs:
   installed-sdk:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Fetch immutable engineering fixture
@@ -26,17 +26,38 @@ jobs:
           cmake -S validation/consumer -B build-validation \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/install"
           cmake --build build-validation --parallel 2
-      - name: Run patch, conservation and output round trip
+      - name: Convert authenticated Pantheon ZIP to native Gmsh binary
+        run: |
+          python3 validation/convert_adventure.py \
+            --archive validation/data/adventure-pantheon.zip \
+            --output validation/data/adventure-pantheon.msh \
+            --report validation/results/pantheon-conversion.json
+      - name: Run 1.33M-tet patch, conservation, and VTU round-trip
         run: |
           mkdir -p validation/results
           ./build-validation/idmesh_thermal \
-            --mesh validation/data/mfem-piece.msh --problem patch \
+            --mesh validation/data/adventure-pantheon.msh --problem patch \
+            --max-iterations 4000 \
             --validate-topology \
-            --output-vtu validation/results/patch.vtu \
-            --report validation/results/patch.json
+            --output-vtu validation/results/pantheon-patch.vtu \
+            --report validation/results/pantheon-patch.json
+      - name: Run 1.33M-tet physical heat conduction
+        run: |
           ./build-validation/idmesh_thermal \
-            --mesh validation/data/mfem-piece.msh --problem heat \
-            --report validation/results/heat.json
+            --mesh validation/data/adventure-pantheon.msh --problem heat \
+            --max-iterations 6000 \
+            --report validation/results/pantheon-heat.json
+      - name: Verify published cell counts on both solves
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for case in ('patch', 'heat'):
+              data = json.loads(Path(f'validation/results/pantheon-{case}.json').read_text())
+              assert data['cells'] == 1329027, data
+              assert data['vertices'] == 273157, data
+              assert data['free_dofs'] > 0, data
+          PY
       - name: Probe induction-heating engineering mesh (candidate)
         run: |
           python3 validation/fetch_meshes.py --tier manual
