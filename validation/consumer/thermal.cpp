@@ -173,6 +173,18 @@ Problem assemble(const idmesh::Mesh& mesh, const std::string& name)
     }
     require(problem.boundary_facets > 0, "missing boundary facets");
 
+    // Compute contact extents from the actual volume boundary: imported
+    // Gmsh point-only geometric features may lie far outside the volume.
+    double contact_min = std::numeric_limits<double>::infinity();
+    double contact_max = -std::numeric_limits<double>::infinity();
+    for (std::size_t v = 0; v < n; ++v) {
+        if (boundary[v] && problem.active[v]) {
+            contact_min = std::min(contact_min, positions[v][0]);
+            contact_max = std::max(contact_max, positions[v][0]);
+        }
+    }
+    require(contact_max > contact_min, "degenerate contact axis");
+
     std::size_t cold = 0, hot = 0;
     for (std::size_t v = 0; v < n; ++v) {
         if (!boundary[v] || !problem.active[v])
@@ -185,7 +197,7 @@ Problem assemble(const idmesh::Mesh& mesh, const std::string& name)
                 - 0.2 * (p[2] - lower[2]) / extent[2];
         }
         else {
-            const double x = (p[0] - lower[0]) / extent[0];
+            const double x = (p[0] - contact_min) / (contact_max - contact_min);
             if (x <= 0.075) {
                 problem.fixed[v] = 1;
                 ++cold;
